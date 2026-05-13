@@ -2,7 +2,7 @@
 
 This document explains how to build the FreeBSD Device Drivers book using the updated build system with the Eisvogel pandoc LaTeX template.
 
-The build system supports three languages out of the box: English (`en_US`), Brazilian Portuguese (`pt_BR`), and Spanish (`es_ES`). A single invocation of `./scripts/build-book.sh` with no arguments produces every supported format (PDF, EPUB, HTML5) in every supported language. Individual formats and languages can be selected with the `--pdf`, `--epub`, `--html`, `--all`, and `--lang` options described below.
+The build system supports four languages out of the box: English (`en_US`), Brazilian Portuguese (`pt_BR`), Spanish (`es_ES`), and Simplified Chinese (`zh_CN`). A single invocation of `./scripts/build-book.sh` with no arguments produces every supported format (PDF, EPUB, HTML5) in every supported language. Individual formats and languages can be selected with the `--pdf`, `--epub`, `--html`, `--all`, and `--lang` options described below.
 
 > [!WARNING]
 >
@@ -114,10 +114,12 @@ sudo apt install -y texlive-amsmath texlive-amssymb texlive-amsthm
 sudo apt install -y texlive-bibtex-extra texlive-biblatex
 
 # Install hyphenation and language packs for the translated editions.
-# Required to build the Brazilian Portuguese (pt_BR) and Spanish (es_ES)
-# PDFs. Already included by texlive-full, so skip this line if you chose
-# the full installation above.
-sudo apt install -y texlive-lang-portuguese texlive-lang-spanish
+# Required to build the Brazilian Portuguese (pt_BR), Spanish (es_ES),
+# and Simplified Chinese (zh_CN) PDFs. Already included by texlive-full,
+# so skip these lines if you chose the full installation above. The
+# Simplified Chinese edition additionally requires CJK fonts (see the
+# "CJK Fonts" section below).
+sudo apt install -y texlive-lang-portuguese texlive-lang-spanish texlive-lang-chinese
 ```
 
 #### 4. **Font Installation** (Essential for Professional Typography)
@@ -194,9 +196,10 @@ sudo apt install -y texlive-fonts-extra
 sudo apt install -y texlive-fonts-extra texlive-fonts-recommended
 ```
 
-**CJK Fonts (if you need Asian language support):**
+**CJK Fonts (required for the Simplified Chinese edition):**
 ```bash
-# Install Chinese, Japanese, Korean fonts
+# Install Chinese, Japanese, Korean fonts (Noto CJK is required to build
+# the zh_CN PDF; the build pipeline uses it as the default CJK main font)
 sudo apt install -y fonts-noto-cjk fonts-noto-cjk-extra
 
 # Install additional CJK fonts
@@ -359,7 +362,12 @@ echo "or run 'sudo fc-cache -fv' again to ensure the font cache is updated."
 │   │   │   ├── part1/
 │   │   │   └── ...
 │   │   └── appendices/
-│   └── es_ES/               # Spanish edition
+│   ├── es_ES/               # Spanish edition
+│   │   ├── chapters/
+│   │   │   ├── part1/
+│   │   │   └── ...
+│   │   └── appendices/
+│   └── zh_CN/               # Simplified Chinese edition
 │       ├── chapters/
 │       │   ├── part1/
 │       │   └── ...
@@ -379,6 +387,7 @@ Each language build reads from its own chapters and appendices tree:
 | `en_US`  | `content/chapters/`               | `content/appendices/`               |
 | `pt_BR`  | `translations/pt_BR/chapters/`    | `translations/pt_BR/appendices/`    |
 | `es_ES`  | `translations/es_ES/chapters/`    | `translations/es_ES/appendices/`    |
+| `zh_CN`  | `translations/zh_CN/chapters/`    | `translations/zh_CN/appendices/`    |
 
 ## Building the Book
 
@@ -391,15 +400,15 @@ To build the complete book, run the script from the root directory:
 ./scripts/build-book.sh
 ```
 
-**Note**: All command-line options are case-insensitive. You can use `--PDF`, `--Pdf`, `--pdf`, or any mixed case variation. Language codes (`en_US`, `pt_BR`, `es_ES`) accept either `-` or `_` as the separator and are also case-insensitive, so `pt_BR`, `pt-BR`, `PT_br`, and `ptbr` all resolve to the same canonical code.
+**Note**: All command-line options are case-insensitive. You can use `--PDF`, `--Pdf`, `--pdf`, or any mixed case variation. Language codes (`en_US`, `pt_BR`, `es_ES`, `zh_CN`) accept either `-` or `_` as the separator and are also case-insensitive, so `pt_BR`, `pt-BR`, `PT_br`, and `ptbr` all resolve to the same canonical code.
 
 With no arguments the script will:
 1. Check all prerequisites
 2. Discover all chapters and appendices automatically for every supported language
-3. Build the PDF for `en_US`, `pt_BR`, and `es_ES` using the Eisvogel template
-4. Build EPUB versions for all three languages
-5. Build HTML5 versions for all three languages
-6. Place output files in the `public/downloads/` directory, one per language × format (nine files in total)
+3. Build the PDF for `en_US`, `pt_BR`, `es_ES`, and `zh_CN` using the Eisvogel template
+4. Build EPUB versions for all four languages
+5. Build HTML5 versions for all four languages
+6. Place output files in the `public/downloads/` directory, one per language × format (twelve files in total)
 
 If a given language has no valid chapter files, that language is skipped with a clear error message, but the build continues for the remaining languages rather than aborting.
 
@@ -438,6 +447,7 @@ Use `--lang CODE` (or `--lang=CODE`) to restrict the build to one or more langua
 | `en_US` | English (original manuscript) |
 | `pt_BR` | Brazilian Portuguese          |
 | `es_ES` | Spanish                       |
+| `zh_CN` | Simplified Chinese            |
 | `all`   | Every supported language      |
 
 ```bash
@@ -452,6 +462,9 @@ Use `--lang CODE` (or `--lang=CODE`) to restrict the build to one or more langua
 
 # Build the Spanish EPUB and HTML5 only
 ./scripts/build-book.sh --epub --html --lang es_ES
+
+# Build the Simplified Chinese PDF only
+./scripts/build-book.sh --pdf --lang zh_CN
 
 # Equivalent to running with no arguments (all formats, all languages)
 ./scripts/build-book.sh --all --lang all
@@ -469,7 +482,7 @@ The build system automatically filters out markdown files with less than 20 line
 
 ### Output Files
 
-Every generated file is named with the canonical language code suffix so that the three editions can sit side by side in the same output directory. A full build produces nine files (three formats × three languages) under `public/downloads/`:
+Every generated file is named with the canonical language code suffix so that the four editions can sit side by side in the same output directory. A full build produces twelve files (three formats × four languages) under `public/downloads/`:
 
 **English (en_US):**
 - **PDF**: `public/downloads/freebsd-device-drivers-en_US.pdf`
@@ -486,7 +499,12 @@ Every generated file is named with the canonical language code suffix so that th
 - **EPUB**: `public/downloads/freebsd-device-drivers-es_ES.epub`
 - **HTML5**: `public/downloads/freebsd-device-drivers-es_ES.html`
 
-Each build also sets the appropriate Pandoc/LaTeX `lang` metadata (`en-US`, `pt-BR`, or `es-ES`) so that hyphenation, quotation marks, and other locale-sensitive typography are handled correctly for the chosen language.
+**Simplified Chinese (zh_CN):**
+- **PDF**: `public/downloads/freebsd-device-drivers-zh_CN.pdf`
+- **EPUB**: `public/downloads/freebsd-device-drivers-zh_CN.epub`
+- **HTML5**: `public/downloads/freebsd-device-drivers-zh_CN.html`
+
+Each build also sets the appropriate Pandoc/LaTeX `lang` metadata (`en-US`, `pt-BR`, `es-ES`, or `zh-CN`) so that hyphenation, quotation marks, and other locale-sensitive typography are handled correctly for the chosen language. For `zh_CN`, the build also wires Noto CJK SC fonts into the Eisvogel template through the `CJKmainfont`, `CJKsansfont`, and `CJKmonofont` variables so that Chinese glyphs render correctly in the PDF.
 
 ## Eisvogel Template Features
 
@@ -824,6 +842,24 @@ pandoc scripts/title.md $(find translations/es_ES/chapters translations/es_ES/ap
     --metadata author="Edson Brandi" \
     --metadata lang="es-ES" \
     -o public/downloads/freebsd-device-drivers-es_ES.html
+```
+
+**Simplified Chinese (zh_CN):**
+
+```bash
+pandoc scripts/title.md $(find translations/zh_CN/chapters translations/zh_CN/appendices -name "*.md" | sort) \
+    --metadata-file=scripts/metadata.yaml \
+    --to=html5 \
+    --standalone \
+    --embed-resources \
+    --syntax-highlighting=tango \
+    --toc \
+    --toc-depth=2 \
+    --number-sections \
+    --metadata title="FreeBSD Device Drivers" \
+    --metadata author="Edson Brandi" \
+    --metadata lang="zh-CN" \
+    -o public/downloads/freebsd-device-drivers-zh_CN.html
 ```
 
 **Note**: The `--syntax-highlighting=tango` option (new name for the deprecated `--highlight-style` flag in recent Pandoc releases) provides excellent C language syntax highlighting. Other available styles include: `pygments`, `kate`, `espresso`, `zenburn`, `monochrome`, `breezedark`, and `haddock`. You can list all available styles with `pandoc --list-highlight-styles`.
