@@ -121,17 +121,132 @@ show_usage() {
     echo "                   or with region (e.g., 'pt_BR', 'en_US')"
     echo ""
     echo "Options:"
-    echo "  -h, --help       Show this help message"
-    echo "  -f, --force      Force copy even if files already exist"
-    echo "  -v, --verbose    Show detailed output"
+    echo "  -h, --help          Show this help message"
+    echo "  -f, --force         Force copy even if files already exist"
+    echo "  -v, --verbose       Show detailed output"
+    echo "      --skip-deps     Do not attempt to install language-specific"
+    echo "                      system dependencies (fonts, LaTeX packs)"
     echo ""
     echo "Examples:"
     echo "  $0 fr            # Set up French translation"
     echo "  $0 de_DE         # Set up German (Germany) translation"
     echo "  $0 es_MX         # Set up Spanish (Mexico) translation"
+    echo "  $0 zh_CN         # Set up Chinese (Simplified) translation"
     echo ""
     echo "This script creates a new language directory under translations/"
     echo "and populates it with copies of content files for translation work."
+    echo "For languages that need special fonts or LaTeX hyphenation packs"
+    echo "(e.g. zh_CN, zh_TW, ja_JP, ko_KR), it will also try to install the"
+    echo "required system packages via apt-get unless --skip-deps is given."
+}
+
+# Function to install language-specific system dependencies (fonts and
+# LaTeX hyphenation packs). The default build configuration in
+# scripts/metadata.yaml only covers Latin-script fonts, so CJK editions
+# need additional Noto CJK fonts plus the matching texlive-lang-* packs
+# in order for build-book.sh to produce a usable PDF.
+#
+# The function prints the exact commands first so they can be copied
+# manually, then attempts to run them. It is a no-op for languages that
+# do not need extra packages, and it bails out cleanly on non-Debian
+# systems where apt-get is unavailable.
+install_language_dependencies() {
+    local lang_code="$1"
+    local -a apt_packages=()
+
+    case "$lang_code" in
+        zh|zh_CN|zh_TW|zh_HK)
+            # Simplified and Traditional Chinese: Noto CJK fonts plus
+            # texlive's Chinese/CJK language support.
+            apt_packages=(
+                fonts-noto-cjk
+                fonts-noto-cjk-extra
+                texlive-lang-chinese
+                texlive-lang-cjk
+            )
+            ;;
+        ja|ja_JP)
+            apt_packages=(
+                fonts-noto-cjk
+                fonts-noto-cjk-extra
+                fonts-ipafont
+                fonts-ipafont-gothic
+                fonts-ipafont-mincho
+                texlive-lang-japanese
+                texlive-lang-cjk
+            )
+            ;;
+        ko|ko_KR)
+            apt_packages=(
+                fonts-noto-cjk
+                fonts-noto-cjk-extra
+                fonts-nanum
+                texlive-lang-korean
+                texlive-lang-cjk
+            )
+            ;;
+        pt|pt_BR|pt_PT)
+            apt_packages=(texlive-lang-portuguese)
+            ;;
+        es|es_ES|es_MX)
+            apt_packages=(texlive-lang-spanish)
+            ;;
+        fr|fr_FR)
+            apt_packages=(texlive-lang-french)
+            ;;
+        de|de_DE)
+            apt_packages=(texlive-lang-german)
+            ;;
+        it|it_IT)
+            apt_packages=(texlive-lang-italian)
+            ;;
+        ru|ru_RU)
+            apt_packages=(fonts-liberation texlive-lang-cyrillic)
+            ;;
+        *)
+            # No extra dependencies known for this language.
+            return 0
+            ;;
+    esac
+
+    if [ "${#apt_packages[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    print_header "Installing system dependencies for $lang_code"
+    echo "The following apt packages are required to build $lang_code:"
+    echo ""
+    echo "  sudo apt-get install -y ${apt_packages[*]}"
+    echo ""
+    echo "After installation, refresh the font cache so XeLaTeX can see"
+    echo "any new fonts:"
+    echo ""
+    echo "  sudo fc-cache -fv"
+    echo ""
+
+    if ! command -v apt-get >/dev/null 2>&1; then
+        print_warning "apt-get not found. Skipping automatic install."
+        print_warning "Run the commands above manually on this system."
+        return 0
+    fi
+
+    if ! sudo -n true 2>/dev/null; then
+        print_warning "Automatic install needs sudo and the cached"
+        print_warning "credentials are missing. You will be prompted"
+        print_warning "for your password by sudo below; press Ctrl-C"
+        print_warning "to cancel and run the commands manually."
+    fi
+
+    if sudo apt-get install -y "${apt_packages[@]}"; then
+        print_status "Packages installed successfully."
+        if command -v fc-cache >/dev/null 2>&1; then
+            sudo fc-cache -fv >/dev/null 2>&1 || true
+            print_status "Font cache refreshed."
+        fi
+    else
+        print_error "apt-get install failed. Run the commands above manually."
+        return 1
+    fi
 }
 
 # Function to get language name from code
@@ -168,7 +283,8 @@ main() {
     local language_code=""
     local force_copy=false
     local verbose=false
-    
+    local skip_deps=false
+
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -182,6 +298,10 @@ main() {
                 ;;
             -v|--verbose)
                 verbose=true
+                shift
+                ;;
+            --skip-deps)
+                skip_deps=true
                 shift
                 ;;
             -*)
@@ -227,12 +347,21 @@ main() {
     print_status "Language directory: $lang_dir"
     print_status "Files copied: $COPY_COUNT"
     print_status "Files skipped (already exist): $SKIP_COUNT"
-    
+
     if [ "$SKIP_COUNT" -gt 0 ]; then
         print_warning "Some files already existed and were skipped."
         print_warning "Use --force option to overwrite existing files."
     fi
-    
+
+    # Install language-specific system dependencies (fonts, LaTeX packs).
+    # Off by default for CI / unprivileged environments via --skip-deps.
+    if [ "$skip_deps" = true ]; then
+        print_status "Skipping language-specific dependency install (--skip-deps)."
+    else
+        install_language_dependencies "$language_code" || \
+            print_warning "Continuing despite dependency installation issues."
+    fi
+
     print_status "Translators can now start working on files in: $lang_dir"
 }
 

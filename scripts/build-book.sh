@@ -42,6 +42,7 @@
 #   en_US  English  (original)          content/chapters,             content/appendices
 #   pt_BR  Brazilian Portuguese         translations/pt_BR/chapters,  translations/pt_BR/appendices
 #   es_ES  Spanish                      translations/es_ES/chapters,  translations/es_ES/appendices
+#   zh_CN  Chinese (Simplified)         translations/zh_CN/chapters,  translations/zh_CN/appendices
 #
 # Running the script with no arguments builds every supported format
 # (PDF + EPUB + HTML) in every supported language. Individual formats or
@@ -78,7 +79,7 @@ PDF_ENGINE="xelatex"
 
 # Supported languages in canonical form. The list order controls the order
 # used by "build everything" runs and by the final summary.
-LANGUAGES_ALL=(en_US pt_BR es_ES)
+LANGUAGES_ALL=(en_US pt_BR es_ES zh_CN)
 
 # =============================================================================
 # LANGUAGE HELPERS
@@ -90,6 +91,7 @@ get_chapters_dir() {
         en_US) echo "content/chapters" ;;
         pt_BR) echo "translations/pt_BR/chapters" ;;
         es_ES) echo "translations/es_ES/chapters" ;;
+        zh_CN) echo "translations/zh_CN/chapters" ;;
         *)     echo ""; return 1 ;;
     esac
 }
@@ -100,18 +102,21 @@ get_appendices_dir() {
         en_US) echo "content/appendices" ;;
         pt_BR) echo "translations/pt_BR/appendices" ;;
         es_ES) echo "translations/es_ES/appendices" ;;
+        zh_CN) echo "translations/zh_CN/appendices" ;;
         *)     echo ""; return 1 ;;
     esac
 }
 
 # Map a canonical language code to its Pandoc/LaTeX `lang` metadata value.
 # Pandoc uses this to pick the right hyphenation/typography rules, which is
-# why pt_BR and es_ES need it set explicitly instead of defaulting to en-US.
+# why pt_BR, es_ES, and zh_CN need it set explicitly instead of defaulting
+# to en-US.
 get_pandoc_lang() {
     case "$1" in
         en_US) echo "en-US" ;;
         pt_BR) echo "pt-BR" ;;
         es_ES) echo "es-ES" ;;
+        zh_CN) echo "zh-CN" ;;
         *)     echo ""; return 1 ;;
     esac
 }
@@ -122,6 +127,7 @@ get_lang_display() {
         en_US) echo "English (en_US)" ;;
         pt_BR) echo "Brazilian Portuguese (pt_BR)" ;;
         es_ES) echo "Spanish (es_ES)" ;;
+        zh_CN) echo "Chinese Simplified (zh_CN)" ;;
         *)     echo "$1" ;;
     esac
 }
@@ -141,6 +147,7 @@ normalize_lang() {
         enus) echo "en_US" ;;
         ptbr) echo "pt_BR" ;;
         eses) echo "es_ES" ;;
+        zhcn) echo "zh_CN" ;;
         *)    echo "" ;;
     esac
 }
@@ -272,13 +279,14 @@ FORMATS (case-insensitive; may be combined; default: all three):
     --html      Build HTML5
     --all       Shorthand for --pdf --epub --html
 
-LANGUAGES (case- and separator-insensitive; repeatable; default: all three):
+LANGUAGES (case- and separator-insensitive; repeatable; default: all four):
     --lang CODE
     --lang=CODE
         CODE may be:
             en_US   English (original)
             pt_BR   Brazilian Portuguese
             es_ES   Spanish
+            zh_CN   Chinese (Simplified)
             all     Every supported language (the default)
         Case and the separator are ignored, so the following are equivalent:
             pt_BR   pt-BR   PT_br   Pt-Br   ptbr   PTBR
@@ -289,7 +297,7 @@ OTHER OPTIONS:
 
 DEFAULTS:
     Running "$0" with no arguments builds every supported format (PDF, EPUB,
-    HTML) in every supported language (en_US, pt_BR, es_ES).
+    HTML) in every supported language (en_US, pt_BR, es_ES, zh_CN).
 
 OUTPUT DIRECTORY:
     Generated files are placed under: $OUTPUT_DIR/
@@ -307,11 +315,16 @@ OUTPUT FILES (per language):
         $OUTPUT_DIR/${OUTPUT_BASENAME}-es_ES.pdf
         $OUTPUT_DIR/${OUTPUT_BASENAME}-es_ES.epub
         $OUTPUT_DIR/${OUTPUT_BASENAME}-es_ES.html
+    Chinese Simplified (zh_CN):
+        $OUTPUT_DIR/${OUTPUT_BASENAME}-zh_CN.pdf
+        $OUTPUT_DIR/${OUTPUT_BASENAME}-zh_CN.epub
+        $OUTPUT_DIR/${OUTPUT_BASENAME}-zh_CN.html
 
 CONTENT SOURCES:
     en_US   content/chapters/              content/appendices/
     pt_BR   translations/pt_BR/chapters/   translations/pt_BR/appendices/
     es_ES   translations/es_ES/chapters/   translations/es_ES/appendices/
+    zh_CN   translations/zh_CN/chapters/   translations/zh_CN/appendices/
 
 EXAMPLES:
     $0                              # Build every format in every language
@@ -319,6 +332,7 @@ EXAMPLES:
     $0 --lang pt_BR                 # Build every format in Brazilian Portuguese
     $0 --lang pt-br --lang es-ES    # Build every format in pt_BR and es_ES
     $0 --pdf --lang en_US           # Build the English PDF only
+    $0 --pdf --lang zh_CN           # Build the Chinese (Simplified) PDF only
     $0 --EPUB --HTML --Lang=Pt-Br   # Mixed case (all equivalent)
     $0 --test                       # Check dependencies without building
 
@@ -326,9 +340,12 @@ REQUIREMENTS:
     - Pandoc 3.0+
     - XeLaTeX (texlive-xetex)
     - Eisvogel template at: $EISVOGEL_TEMPLATE
-    - LaTeX hyphenation packs for Portuguese and Spanish
-      (e.g. texlive-lang-portuguese, texlive-lang-spanish)
-    - Required fonts (Times New Roman, Arial, Liberation Mono)
+    - LaTeX hyphenation/language packs for the translated editions
+      (e.g. texlive-lang-portuguese, texlive-lang-spanish,
+       texlive-lang-chinese, texlive-lang-cjk)
+    - Required Latin fonts (Times New Roman, Arial, Liberation Mono)
+    - Required CJK fonts for zh_CN
+      (fonts-noto-cjk, fonts-noto-cjk-extra — Noto Serif/Sans/Mono CJK SC)
 
 For detailed installation instructions, see: $SCRIPT_DIR/BUILD-README.md
 EOF
@@ -490,6 +507,25 @@ build_pdf() {
         return 1
     fi
 
+    # Language-specific font configuration. The default fonts declared in
+    # scripts/metadata.yaml (Times New Roman / Arial / Liberation Mono) have
+    # no CJK glyphs, so zh_CN needs Noto CJK fonts wired in through the
+    # Eisvogel template's CJKmainfont/CJKsansfont/CJKmonofont variables
+    # (which auto-load xeCJK) plus a mainfont override so Latin text in the
+    # body shares the same visual weight as the surrounding Chinese.
+    local -a font_args=()
+    case "$lang" in
+        zh_CN)
+            font_args=(
+                --variable mainfont="Noto Serif CJK SC"
+                --variable sansfont="Noto Sans CJK SC"
+                --variable CJKmainfont="Noto Serif CJK SC"
+                --variable CJKsansfont="Noto Sans CJK SC"
+                --variable CJKmonofont="Noto Sans Mono CJK SC"
+            )
+            ;;
+    esac
+
     echo "   Including files: ${#BUILD_FILES[@]} total (1 title + ${BUILD_FILES_CHAPTERS} chapters + ${BUILD_FILES_APPENDICES} appendices)"
     echo "   Running pandoc with Eisvogel template (lang=$pandoc_lang)..."
 
@@ -517,6 +553,7 @@ build_pdf() {
         --syntax-highlighting=tango \
         --variable linestretch=1.15 \
         --variable geometry:"inner=2cm,outer=2cm,top=2.5cm,bottom=2.5cm" \
+        "${font_args[@]}" \
         -o "$output_file" 2>&1
 
     local exit_code=$?
@@ -747,7 +784,7 @@ while [[ $# -gt 0 ]]; do
             canonical="$(normalize_lang "$raw_value")"
             if [ -z "$canonical" ]; then
                 echo "❌ Unknown language: '$raw_value'"
-                echo "   Accepted: en_US, pt_BR, es_ES, or all (case- and separator-insensitive)"
+                echo "   Accepted: en_US, pt_BR, es_ES, zh_CN, or all (case- and separator-insensitive)"
                 exit 1
             fi
             if [ "$canonical" = "all" ]; then
@@ -760,13 +797,13 @@ while [[ $# -gt 0 ]]; do
         --lang)
             shift
             if [ $# -eq 0 ]; then
-                echo "❌ --lang requires a value (en_US, pt_BR, es_ES, or all)"
+                echo "❌ --lang requires a value (en_US, pt_BR, es_ES, zh_CN, or all)"
                 exit 1
             fi
             canonical="$(normalize_lang "$1")"
             if [ -z "$canonical" ]; then
                 echo "❌ Unknown language: '$1'"
-                echo "   Accepted: en_US, pt_BR, es_ES, or all (case- and separator-insensitive)"
+                echo "   Accepted: en_US, pt_BR, es_ES, zh_CN, or all (case- and separator-insensitive)"
                 exit 1
             fi
             if [ "$canonical" = "all" ]; then
