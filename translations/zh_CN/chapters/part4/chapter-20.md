@@ -1922,7 +1922,7 @@ fail_vectors:
 
 - `vmstat -i` 条目仍然存在意味着该向量没有调用 `bus_teardown_intr`。
 - `vmstat -m` 泄漏意味着每向量任务没有被排空或任务队列没有被释放。
-- A `devinfo -v` entry remaining (rare) means the device's detach did not complete.
+- `devinfo -v` 条目仍然存在（罕见）意味着设备的detach未完成。
 
 ### 跨加载-卸载周期的MSI资源泄漏
 
@@ -1992,7 +1992,7 @@ Makefile            - kmod build
 HARDWARE.md, LOCKING.md, SIMULATION.md, PCI.md, INTERRUPTS.md, MSIX.md (NEW)
 ```
 
-`myfirst_msix.c` and `myfirst_msix.h` are new. `MSIX.md` is new. The Chapter 19 `myfirst_intr.c` stays; it now handles the legacy-INTx fallback while `myfirst_msix.c` handles the MSI and MSI-X path.
+`myfirst_msix.c` 和 `myfirst_msix.h` 是新文件。`MSIX.md` 是新文档。第19章的 `myfirst_intr.c` 保留；它现在处理 legacy-INTx 回退，而 `myfirst_msix.c` 处理 MSI 和 MSI-X 路径。
 
 ### myfirst_msix.h头文件
 
@@ -2063,7 +2063,7 @@ SRCS 列表中增加一个源文件；版本字符串升级。
 
 ### 版本字符串
 
-`1.2-intr` to `1.3-msi`. The bump reflects a significant capability addition: multi-vector interrupt handling. A minor-version bump is appropriate; the user-visible interface (the cdev) did not change.
+`1.2-intr` 到 `1.3-msi`。版本升级反映了一项重要的能力添加：多向量中断处理。次版本号升级是合适的；用户可见的接口（cdev）未改变。
 
 ### MSIX.md文档
 
@@ -2263,16 +2263,16 @@ vtpci_register_msix_vectors(struct vtpci_common *cn)
 }
 ```
 
-Two things match Chapter 20:
+有两件事与第20章匹配：
 
-- `rid = 1` for the first vector, incrementing per vector.
-- The filter (here `NULL`) and handler (`vtpci_vq_handler`) pattern. Note that virtio uses an ithread-only handler (filter=NULL), not a filter-plus-task pipeline. This is a simpler option that works for virtio's per-vector work.
+- 第一个向量的 `rid = 1`，每个向量递增。
+- 过滤器（此处为 `NULL`）和处理程序（`vtpci_vq_handler`）模式。注意 virtio 使用仅 ithread 的处理程序（filter=NULL），而不是过滤器加任务的管道。这是更简单的选项，适用于 virtio 的每向量工作。
 
-The `vtpci_vq_handler` function is the per-vector worker. Each vector gets its own argument (`&cn->vtpci_vectors[i]`), and the handler uses that argument to identify which virtqueue to service.
+`vtpci_vq_handler` 函数是每向量的工作线程。每个向量获得自己的参数（`&cn->vtpci_vectors[i]`），处理程序使用该参数来识别要服务的虚拟队列。
 
 ### 拆除
 
-Virtio's teardown follows the Chapter 20 pattern:
+Virtio 的拆除遵循第20章的模式：
 
 ```c
 static void
@@ -2298,51 +2298,51 @@ vtpci_release_intr_resources(struct vtpci_common *cn)
 }
 ```
 
-Per-vector teardown (bus_teardown_intr + bus_release_resource), then a single `pci_release_msi` at the end. The order matches Chapter 20's `myfirst_msix_teardown`.
+每向量拆除（bus_teardown_intr + bus_release_resource），最后单个 `pci_release_msi`。该顺序与第20章的 `myfirst_msix_teardown` 匹配。
 
-A detail worth noting: virtio uses `rman_get_rid` to recover the rid from the resource, rather than storing it separately. Chapter 20's driver stores the rid in the per-vector struct; both approaches are fine, but the storage approach is clearer and easier to debug.
+一个值得注意的细节：virtio 使用 `rman_get_rid` 从资源中恢复 rid，而不是单独存储它。第20章的驱动程序将 rid 存储在每向量结构中；两种方法都可以，但存储方法更清晰且更易于调试。
 
 ### Virtio演示教学的内容
 
-Three lessons transfer directly to Chapter 20's design:
+三个教训直接迁移到第20章的设计：
 
-1. **The three-tier fallback ladder is the standard pattern**. Every driver that wants to work on a range of hardware implements it the same way.
-2. **Per-vector resource management uses incrementing rids starting at 1**. This is universal in FreeBSD's PCI infrastructure.
-3. **`pci_release_msi` is called once, regardless of the number of vectors**. The per-vector teardown releases IRQ resources; the device-level release handles the MSI state.
+1. **三层回退阶梯是标准模式**。每个想在多种硬件上工作的驱动程序都以相同方式实现它。
+2. **每向量资源管理使用从1开始递增的rid**。这在FreeBSD的PCI基础设施中是通用的。
+3. **`pci_release_msi` 只调用一次，无论向量数量多少**。每向量拆除释放IRQ资源；设备级释放处理MSI状态。
 
-A reader who can follow `vtpci_alloc_intr_resources` end to end has internalised the Chapter 20 vocabulary. For a richer example, `/usr/src/sys/dev/nvme/nvme_ctrlr.c` shows the same pattern at scale, with one admin vector plus up to `NCPU` I/O vectors.
+能够端到端理解 `vtpci_alloc_intr_resources` 的读者已经内化了第20章的词汇。对于更丰富的示例，`/usr/src/sys/dev/nvme/nvme_ctrlr.c` 展示了大规模下的相同模式，带有一个管理向量加上最多 `NCPU` 个I/O向量。
 
 
 
 ## 深入了解向量到 CPU 放置
 
-Section 5 introduced `bus_bind_intr(9)` briefly. This section goes a level deeper into why CPU placement matters, how real drivers choose CPUs, and what the trade-offs are.
+第5节简要介绍了 `bus_bind_intr(9)`。本节深入探讨为什么CPU放置很重要，真实驱动如何选择CPU，以及权衡是什么。
 
 ### NUMA图景
 
-On a single-socket system, all CPUs share a single memory controller and a single cache hierarchy. Placement between CPUs matters only for cache affinity (the handler's code and data will be warm on whichever CPU last ran it). The performance difference between "CPU 0" and "CPU 3" is small.
+在单插槽系统上，所有CPU共享单个内存控制器和单个缓存层次结构。CPU之间的放置仅对缓存亲和性重要（处理程序的代码和数据在上次运行它的CPU上会是热的）。"CPU 0"和"CPU 3"之间的性能差异很小。
 
-On a multi-socket NUMA system, the picture changes. Each socket has its own memory controller, its own L3 cache, and its own PCIe root complex. A PCIe device attached to socket 0 sits on that socket's root complex; its registers are memory-mapped to an address range handled by socket 0's controller. An interrupt from that device fires; the handler reads `INTR_STATUS`; the read goes to the device's BAR, which is on socket 0; the CPU that runs the handler must be on socket 0, or the read crosses the inter-socket interconnect.
+在多插槽NUMA系统上，情况发生了变化。每个插槽有自己的内存控制器、自己的L3缓存和自己的PCIe根复合体。连接到插槽0的PCIe设备位于该插槽的根复合体上；其寄存器通过内存映射到由插槽0控制器处理的地址范围。来自该设备的中断触发；处理程序读取`INTR_STATUS`；读取访问设备的BAR，该BAR位于插槽0上；运行处理程序的CPU必须在插槽0上，否则读取会跨插槽间互连。
 
-The inter-socket interconnect (on Intel systems: UPI or earlier QPI; on AMD: Infinity Fabric) is much slower than intra-socket cache access. A handler running on the wrong socket sees register reads that take tens of nanoseconds instead of ones; a receive queue whose data lives on the wrong socket sees every packet crossing the interconnect on the way to user space.
+插槽间互连（在Intel系统上：UPI或更早的QPI；在AMD上：Infinity Fabric）比插槽内缓存访问慢得多。在错误插槽上运行的处理程序看到寄存器读取耗时数十纳秒而不是个位数；数据位于错误插槽上的接收队列在数据包到达用户空间的路上每个包都要跨越互连。
 
-Well-placed vectors keep the handler's work on the socket the device lives on.
+放置良好的向量将处理程序的工作保持在设备所在的插槽上。
 
 ### 查询NUMA局部性
 
-FreeBSD exposes the NUMA topology to drivers through `bus_get_cpus(9)`. The API:
+FreeBSD 通过 `bus_get_cpus(9)` 向驱动程序暴露 NUMA 拓扑。API：
 
 ```c
 int bus_get_cpus(device_t dev, enum cpu_sets op, size_t setsize,
     struct _cpuset *cpuset);
 ```
 
-The `op` argument selects which set to query:
+`op` 参数选择要查询的集合：
 
-- `LOCAL_CPUS`: CPUs in the same NUMA domain as the device.
-- `INTR_CPUS`: CPUs suitable for handling device interrupts (usually `LOCAL_CPUS` unless the operator has excluded some).
+- `LOCAL_CPUS`：与设备在同一 NUMA 域中的 CPU。
+- `INTR_CPUS`：适合处理设备中断的 CPU（通常是 `LOCAL_CPUS`，除非操作员排除了某些 CPU）。
 
-The `cpuset` is an output parameter; on success, it contains the bitmap of CPUs in the queried set.
+`cpuset` 是输出参数；成功时，它包含所查询集合中 CPU 的位图。
 
 Example use:
 
@@ -2358,7 +2358,7 @@ if (bus_get_cpus(sc->dev, INTR_CPUS, sizeof(local_cpus),
 }
 ```
 
-The driver uses `CPU_FFS(&local_cpus)` to find the first CPU in the set, `CPU_CLR(cpu, &local_cpus)` to mark it used, and iterates.
+驱动程序使用 `CPU_FFS(&local_cpus)` 查找集合中的第一个 CPU，使用 `CPU_CLR(cpu, &local_cpus)` 标记为已使用，并进行迭代。
 
 A round-robin bind that respects NUMA locality:
 
@@ -2391,13 +2391,13 @@ myfirst_msix_bind_vectors_numa(struct myfirst_softc *sc)
 }
 ```
 
-The code grabs the local CPU set, picks the lowest-numbered CPU, binds vector 0 to it, clears that CPU from the set, picks the next lowest, binds vector 1 to it, and so on. If the set is exhausted (more vectors than local CPUs), it refreshes and continues.
+代码获取本地 CPU 集合，选择编号最小的 CPU，将向量 0 绑定到它，从集合中清除该 CPU，选择下一个最小的，将向量 1 绑定到它，以此类推。如果集合用尽（向量数多于本地 CPU 数），则刷新并继续。
 
-Chapter 20's driver does not include this NUMA-aware binding; a challenge exercise asks the reader to add it.
+第20章的驱动程序未包含此 NUMA 感知绑定；挑战练习要求读者添加它。
 
 ### 操作者视角
 
-An operator can override the kernel's placement with `cpuset`:
+操作员可以使用 `cpuset` 覆盖内核的放置：
 
 ```sh
 # Get current placement for IRQ 257.
@@ -2410,15 +2410,15 @@ sudo cpuset -l 3 -x 257
 sudo cpuset -l 2,3 -x 257
 ```
 
-These commands override whatever the driver set with `bus_bind_intr`. An operator might do this to pin critical interrupts away from user-workload CPUs (for real-time applications) or to concentrate traffic on specific CPUs (for diagnostic purposes).
+这些命令覆盖驱动程序通过 `bus_bind_intr` 设置的任何放置。操作员可能会这样做，将关键中断从用户工作负载 CPU 上移开（用于实时应用），或将流量集中在特定 CPU 上（用于诊断目的）。
 
-The driver's `bus_bind_intr` call sets the initial placement; the operator can override. A well-behaved driver sets a sensible default and respects operator changes (which it does automatically, because `bus_bind_intr` just writes to an OS-managed CPU-affinity state that the operator then modifies).
+驱动程序的 `bus_bind_intr` 调用设置初始放置；操作员可以覆盖。一个行为良好的驱动程序设置合理的默认值并尊重操作员的更改（它会自动这样做，因为 `bus_bind_intr` 只是写入操作系统管理的 CPU 亲和性状态，操作员随后可以修改）。
 
 ### 测量效果
 
-A concrete way to see NUMA locality's value: run a high-interrupt-rate workload with the handler pinned to a local CPU, then to a remote CPU, and compare latencies. On a two-socket system, the remote CPU's handler typically takes 1.5x to 3x longer per interrupt, measured in CPU cycles.
+查看 NUMA 局部性价值的具体方法：在处理程序绑定到本地 CPU 时运行高中断率工作负载，然后绑定到远程 CPU，比较延迟。在双插槽系统上，远程 CPU 的处理程序每次中断通常需要 1.5 到 3 倍的时间（以 CPU 周期计）。
 
-FreeBSD's DTrace provider can measure this:
+FreeBSD 的 DTrace 提供者可以测量这一点：
 
 ```sh
 sudo dtrace -n '
@@ -2429,133 +2429,133 @@ fbt::myfirst_intr_filter:return /self->ts/ {
 }'
 ```
 
-The output is a per-CPU histogram of filter latencies. A reader can run this while observing vector placements and confirm the latency difference.
+输出是过滤器延迟的每 CPU 直方图。读者可以在观察向量放置的同时运行此命令，确认延迟差异。
 
 ### 向量放置何时重要
 
-- High interrupt rates (more than a few thousand per second per vector).
-- Large cache-line footprint in the handler (the handler's code and data occupy multiple cache lines).
-- Shared receive paths with downstream processing on the same socket.
-- NUMA systems with more than one socket and PCIe devices attached to specific sockets.
+- 高中断率（每向量每秒超过几千次）。
+- 处理程序中较大的缓存行占用（处理程序的代码和数据占据多个缓存行）。
+- 在同一插槽上具有下游处理流程的共享接收路径。
+- 具有多个插槽且 PCIe 设备连接到特定插槽的 NUMA 系统。
 
 ### 向量放置何时不重要
 
-- Low-rate interrupts (dozens per second or fewer).
-- Single-socket systems.
-- Handlers that do minimal work (Chapter 20's admin vector).
-- Drivers that run on a single CPU regardless (single-CPU embedded systems).
+- 低速率中断（每秒几十次或更少）。
+- 单插槽系统。
+- 执行最少工作的处理程序（第20章的管理向量）。
+- 无论如何都在单个 CPU 上运行的驱动程序（单 CPU 嵌入式系统）。
 
-Chapter 20's driver is in the "does not really matter" category for normal testing, but the patterns the chapter teaches transfer directly to drivers where it does.
+第20章的驱动程序在正常测试中属于"关系不大"的类别，但本章教授的模式直接迁移到确实需要它的驱动程序。
 
 
 
 ## 深入了解向量分配策略
 
-Section 6 showed the fixed-assignment pattern (vector 0 = admin, 1 = rx, 2 = tx). This section explores other assignment strategies real drivers use.
+第6节展示了固定分配模式（向量0 = admin，1 = rx，2 = tx）。本节探讨真实驱动程序使用的其他分配策略。
 
 ### 每队列一向量
 
-The simplest strategy and the most common. Each queue (rx queue, tx queue, admin queue, etc.) has its own dedicated vector. The driver allocates `N+M+1` vectors for `N` receive queues, `M` transmit queues, and 1 admin.
+最简单且最常见的策略。每个队列（接收队列、发送队列、管理队列等）有自己专用的向量。驱动程序为 `N` 个接收队列、`M` 个发送队列和 1 个管理队列分配 `N+M+1` 个向量。
 
-Pros:
-- Simple per-vector handler logic.
-- Each queue's interrupt rate is independent.
-- CPU affinity is per-queue (easy to pin to the NUMA-local CPU).
+优点：
+- 每向量处理程序逻辑简单。
+- 每个队列的中断率独立。
+- CPU 亲和性是每队列的（易于固定到 NUMA 本地 CPU）。
 
-Cons:
-- Consumes many vectors for drivers with many queues.
-- Each queue's ithread adds overhead on low-rate queues.
+缺点：
+- 对于具有许多队列的驱动程序，消耗很多向量。
+- 每个队列的 ithread 在低速率队列上增加了开销。
 
-This is the pattern `nvme(4)` uses.
+这是 `nvme(4)` 使用的模式。
 
 ### 合并RX+TX向量
 
-Some drivers coalesce the RX and TX of a single queue-pair into a single vector. A NIC with 8 queue pairs would use 8 coalesced vectors plus a few for admin. When the vector fires, the filter checks both RX and TX status bits and dispatches accordingly.
+一些驱动程序将单个队列对的 RX 和 TX 合并到一个向量中。具有 8 个队列对的 NIC 将使用 8 个合并向量加上几个用于管理。当向量触发时，过滤器检查 RX 和 TX 状态位并相应地分发。
 
-Pros:
-- Half the vectors per queue-pair.
-- RX and TX for the same queue pair tend to be NUMA-local to each other (they share the same descriptor-ring memory).
+优点：
+- 每队列对向量数量减半。
+- 同一队列对的 RX 和 TX 往往彼此 NUMA 本地（它们共享相同的描述符环内存）。
 
-Cons:
-- The filter is slightly more complex.
-- RX and TX can interfere under load (a burst of RX fills the handler's time, delaying TX completions).
+缺点：
+- 过滤器稍微复杂。
+- RX 和 TX 在负载下可能相互干扰（RX 突发填满处理程序时间，延迟 TX 完成）。
 
-This is a middle-ground design, used by some consumer NICs.
+这是一种中间设计，被一些消费级 NIC 使用。
 
 ### 所有队列共用一个向量
 
-Some very-constrained devices (low-cost NICs, small embedded devices) have only one or two MSI-X vectors total. The driver uses a single vector for all queues and dispatches to each queue based on a status register.
+一些资源受限的设备（低成本 NIC、小型嵌入式设备）总共只有一两个 MSI-X 向量。驱动程序对所有队列使用单个向量，并根据状态寄存器分发到每个队列。
 
-Pros:
-- Works on hardware with few vectors.
-- Simple allocation.
+优点：
+- 在向量少的硬件上工作。
+- 分配简单。
 
-Cons:
-- No per-queue affinity.
-- The filter does more work to decide what to dispatch.
+缺点：
+- 没有每队列亲和性。
+- 过滤器要做更多工作来决定分发什么。
 
-This is the pattern a driver on very low-end hardware uses.
+这是非常低端硬件上驱动程序使用的模式。
 
 ### 动态每 CPU 分配
 
-A clever design: allocate one vector per CPU, and assign queues to vectors dynamically. An RX queue is "owned" by one CPU at a time; it processes on that CPU's vector. If the workload shifts, the driver can remap queues to different CPUs.
+一个巧妙的设计：为每个 CPU 分配一个向量，并动态地将队列分配给向量。一个 RX 队列一次由一个 CPU "拥有"；它在该 CPU 的向量上处理。如果工作负载变化，驱动程序可以将队列重新映射到不同的 CPU。
 
-Pros:
-- Optimal per-CPU cache affinity.
-- Adapts to workload changes.
+优点：
+- 最佳的每 CPU 缓存亲和性。
+- 适应工作负载变化。
 
-Cons:
-- Complex allocation and remapping logic.
-- Not easy to reason about.
+缺点：
+- 复杂的分配和重新映射逻辑。
+- 不容易推理。
 
-Some high-end NIC drivers (Mellanox ConnectX series, Intel 800 Series) use variants of this.
+一些高端 NIC 驱动程序（Mellanox ConnectX 系列、Intel 800 系列）使用此变体。
 
 ### 第 20 章的策略
 
-Chapter 20's driver uses the fixed-assignment strategy with three vectors. It is the simplest strategy that illustrates multi-vector design without getting into NUMA details or dynamic remapping. Real drivers often start with this design and evolve to more sophisticated patterns as requirements demand.
+第20章的驱动程序使用三个向量的固定分配策略。这是说明多向量设计的最简单策略，不涉及 NUMA 细节或动态重新映射。真实驱动程序通常从这种设计开始，并根据需求演进到更复杂的模式。
 
-A challenge exercise asks the reader to implement the dynamic per-CPU-allocation strategy as an extension.
+一个挑战练习要求读者实现动态每 CPU 分配策略作为扩展。
 
 
 
 ## 深入了解中断调节和合并
 
-A concept adjacent to MSI-X that deserves a brief mention. Modern high-throughput devices often support **interrupt moderation** or **coalescing**: the device buffers events (incoming packets, completions) and fires a single interrupt for multiple events, either at a time threshold or a count threshold.
+一个与 MSI-X 相邻的概念值得简单提及。现代高吞吐量设备通常支持**中断调节**或**合并**：设备缓冲事件（传入的数据包、完成通知），并在时间阈值或计数阈值处为多个事件触发单个中断。
 
 ### 为什么调节重要
 
-A NIC receiving ten million packets per second would fire ten million interrupts if each packet triggered one. That is far too many; the CPU would spend all its time entering and exiting interrupt handlers. The solution is to batch: the NIC fires one interrupt every 50 microseconds, and during those 50 microseconds the NIC accumulates whatever packets arrived. The handler processes all the accumulated packets in one go.
+每秒接收一千万数据包的 NIC 如果每个数据包触发一个中断，将触发一千万个中断。这太多了；CPU 将把所有时间花在进入和退出中断处理程序上。解决方案是批处理：NIC 每 50 微秒触发一次中断，在这 50 微秒内 NIC 累积到达的任何数据包。处理程序一次性处理所有累积的数据包。
 
-Coalescing trades latency for throughput: each packet takes up to 50 microseconds longer to be delivered to user space, but the CPU handles millions of packets per second with a manageable interrupt rate.
+合并以延迟换取吞吐量：每个数据包交付到用户空间最多延迟 50 微秒，但 CPU 以可管理的中断率每秒处理数百万数据包。
 
 ### 驱动程序如何控制调节
 
-The mechanism is device-specific. Common forms:
+机制是设备特定的。常见形式：
 
-- **Time-based:** the device fires after a configured interval (e.g., 50 microseconds).
-- **Count-based:** the device fires after N events (e.g., 16 packets).
-- **Combined:** whichever threshold is reached first.
-- **Adaptive:** the device (or the driver) tunes the thresholds based on observed rates.
+- **基于时间：**设备在配置的时间间隔后触发（例如 50 微秒）。
+- **基于计数：**设备在 N 个事件后触发（例如 16 个数据包）。
+- **组合：**先达到哪个阈值就触发哪个。
+- **自适应：**设备（或驱动程序）根据观察到的速率调整阈值。
 
-The driver typically programs the thresholds through device registers. The MSI-X mechanism itself does not provide moderation; it is a device feature that works with MSI-X because MSI-X allows per-vector assignment.
+驱动程序通常通过设备寄存器编程阈值。MSI-X 机制本身不提供调节；它是一个与 MSI-X 配合使用的设备特性，因为 MSI-X 允许每向量分配。
 
 ### 第 20 章的驱动程序不做调节
 
-The Chapter 20 driver has no moderation. Each simulated interrupt produces one filter call. On real hardware this would be a problem at high rates; on the lab it is fine.
+第 20 章的驱动程序没有调节。每个模拟中断产生一次过滤器调用。在真实硬件上，这在高速率下会是个问题；在实验室中没问题。
 
-Real drivers like `em(4)`, `ix(4)`, `ixl(4)`, and `mgb(4)` all have moderation parameters. The `sysctl` interface exposes them as tunable values:
+像 `em(4)`、`ix(4)`、`ixl(4)` 和 `mgb(4)` 这样的真实驱动程序都有调节参数。`sysctl` 接口将它们暴露为可调参数：
 
 ```sh
 sysctl dev.em.0 | grep itr
 ```
 
-A reader who adapts the chapter's driver to a real device should study the moderation controls for that device. The mechanism is orthogonal to MSI-X; the two combine to give high-performance interrupt handling.
+将本章驱动程序适配到真实设备的读者应研究该设备的调节控制。该机制与 MSI-X 正交；两者结合提供高性能中断处理。
 
 
 
 ## 来自真实 FreeBSD 驱动程序的模式
 
-A tour of the multi-vector patterns that appear in `/usr/src/sys/dev/`. Each pattern is a short snippet from a real driver, with a note on what it teaches for Chapter 20.
+对 `/usr/src/sys/dev/` 中出现的多向量模式的一次巡览。每个模式都是来自真实驱动程序的简短代码片段，附有说明其对第20章的指导意义的注释。
 
 ### 模式：nvme(4) 管理 + I/O 向量分离
 
@@ -2583,7 +2583,7 @@ for (i = 0; i < ctrlr->num_io_queues; i++) {
 }
 ```
 
-Why it matters: the admin-plus-N pattern is the right choice when one vector handles infrequent, high-priority work (errors, async events) and N vectors handle rate-limited, per-queue work. Chapter 20's admin/rx/tx split is a miniature version of this.
+为什么重要：管理加 N 模式是一个向量处理不频繁的高优先级工作（错误、异步事件），N 个向量处理速率受限的每队列工作时的正确选择。第20章的管理/rx/tx 拆分是此模式的微型版本。
 
 ### 模式：ixgbe 的队列对向量
 
@@ -2601,7 +2601,7 @@ link.rid = num_qpairs + 1;
 bus_setup_intr(..., ixgbe_msix_link, sc, ...);
 ```
 
-Why it matters: the coalesced RX+TX-per-queue-pair design halves the vector count without sacrificing per-queue affinity. Suitable when the device has many queues but few vectors.
+为什么重要：合并的每队列对 RX+TX 设计在不牺牲每队列亲和性的情况下将向量计数减半。适用于设备具有许多队列但向量很少的情况。
 
 ### 模式：virtio_pci 的每虚拟队列向量
 
@@ -2617,7 +2617,7 @@ for (i = 0; i < nvectors; i++) {
 }
 ```
 
-Why it matters: virtio's per-virtqueue assignment is the model for any paravirtualised device. The vector count equals the virtqueue count plus admin/config.
+为什么重要：virtio 的每虚拟队列分配是任何半虚拟化设备的模型。向量数等于虚拟队列数加管理/配置。
 
 ### 模式：ahci 的每端口向量
 
@@ -2630,11 +2630,11 @@ for (i = 0; i < ahci->nports; i++) {
 }
 ```
 
-Why it matters: storage controllers often use per-port vector assignments so that I/O completions on different ports can be processed concurrently on different CPUs.
+为什么重要：存储控制器通常使用每端口向量分配，以便不同端口上的 I/O 完成可以在不同 CPU 上并发处理。
 
 ### 模式：iflib 的隐藏向量管理
 
-Drivers using `iflib(9)` (such as `em(4)`, `igc(4)`, `ix(4)`, `ixl(4)`, `mgb(4)`) do not manage vectors directly. Instead, they register per-queue handler functions with iflib's registration table, and iflib does the allocation and binding:
+使用 `iflib(9)` 的驱动程序（例如 `em(4)`、`igc(4)`、`ix(4)`、`ixl(4)`、`mgb(4)`）不直接管理向量。相反，它们向 iflib 的注册表注册每队列处理函数，由 iflib 进行分配和绑定：
 
 ```c
 static struct if_shared_ctx em_sctx_init = {
@@ -2660,36 +2660,36 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 }
 ```
 
-Why it matters: iflib abstracts MSI-X allocation and per-queue binding behind a clean API. Drivers using iflib are simpler than bare MSI-X drivers but give up some flexibility. The iflib pattern is the right choice for new FreeBSD network drivers; the bare MSI-X pattern is the right choice for non-network devices or when iflib does not fit.
+为什么重要：iflib 在干净的 API 后面抽象了 MSI-X 分配和每队列绑定。使用 iflib 的驱动程序比裸 MSI-X 驱动程序更简单，但放弃了一些灵活性。iflib 模式是新的 FreeBSD 网络驱动程序的正确选择；裸 MSI-X 模式是非网络设备或 iflib 不合适时的正确选择。
 
 ### 这些模式教会了什么
 
-All of these drivers follow the same structural pattern Chapter 20 teaches:
+所有这些驱动程序都遵循第20章教授的相同结构模式：
 
-1. Query vector count.
-2. Allocate vectors.
-3. For each vector: allocate IRQ resource at rid=i+1, register handler, describe.
-4. Bind vectors to CPUs.
-5. On teardown: per-vector teardown in reverse, then `pci_release_msi`.
+1. 查询向量计数。
+2. 分配向量。
+3. 对每个向量：在 rid=i+1 分配 IRQ 资源，注册处理程序，描述。
+4. 将向量绑定到 CPU。
+5. 拆除时：逆序每向量拆除，然后 `pci_release_msi`。
 
-The differences among drivers are:
+驱动程序之间的差异在于：
 
-- How many vectors (1, a handful, dozens, or hundreds).
-- How vectors are assigned (admin+N, queue-pair, per-port, per-virtqueue).
-- Whether iflib handles the allocation.
-- What each filter function does (admin vs data-path).
+- 向量数量（1 个、少量、几十个或数百个）。
+- 向量如何分配（管理+N、队列对、每端口、每虚拟队列）。
+- iflib 是否处理分配。
+- 每个过滤器函数做什么（管理 vs 数据路径）。
 
-A reader who has Chapter 20's vocabulary can recognise these differences immediately.
+拥有第20章词汇的读者可以立即识别这些差异。
 
 
 
 ## 性能观察：测量 MSI-X 的收益
 
-A section that grounds the chapter's performance claims in a concrete measurement.
+本节将本章的性能声明建立在具体的测量基础上。
 
 ### 测试设置
 
-Suppose you have the Chapter 20 driver running on QEMU with `virtio-rng-pci` (so MSI-X is active) and a multi-CPU guest. The `intr_simulate_rx` sysctl lets you trigger interrupts from a user-space loop:
+假设您在 QEMU 上使用 `virtio-rng-pci`（因此 MSI-X 处于活动状态）和多 CPU guest 运行第20章的驱动程序。`intr_simulate_rx` sysctl 让您从用户空间循环触发中断：
 
 ```sh
 # In one shell, drive simulated RX interrupts as fast as possible.
@@ -2700,7 +2700,7 @@ done
 
 ### 使用 DTrace 测量
 
-In another shell, measure the filter's CPU-time per invocation and which CPU it runs on:
+在另一个 shell 中，测量过滤器的每次调用 CPU 时间及其运行的 CPU：
 
 ```sh
 sudo dtrace -n '
@@ -2712,37 +2712,37 @@ fbt::myfirst_rx_filter:return /self->ts/ {
 }'
 ```
 
-The output is a per-CPU histogram of filter latencies. If `bus_bind_intr` placed the RX vector on CPU 1, the histogram should show all invocations on CPU 1, with latencies in the hundreds of nanoseconds to single-digit microseconds.
+输出是过滤器延迟的每 CPU 直方图。如果 `bus_bind_intr` 将 RX 向量放置在 CPU 1 上，直方图应显示所有调用都在 CPU 1 上，延迟在数百纳秒到个位数微秒之间。
 
 ### 结果显示什么
 
-On a well-placed MSI-X vector:
+在放置良好的 MSI-X 向量上：
 
-- Every invocation is on the same CPU (the bound CPU).
-- Latencies are consistently short (the hot cache lines stay on one CPU).
-- No cross-CPU cache bouncing.
+- 每次调用都在同一个 CPU（绑定的 CPU）上。
+- 延迟一致地短（热缓存行保持在一个 CPU 上）。
+- 没有跨 CPU 缓存抖动。
 
-On a legacy INTx shared line:
+在遗留 INTx 共享线上：
 
-- Invocations spread across CPUs (the kernel routes randomly).
-- Latencies are more variable (cold cache lines on each new CPU).
-- Cross-CPU cache traffic appears in performance counters.
+- 调用分散到各个 CPU（内核随机路由）。
+- 延迟更加多变（每个新 CPU 上的冷缓存行）。
+- 跨 CPU 缓存流量出现在性能计数器中。
 
-The difference can be measured in nanoseconds per invocation. For a driver handling a few hundred interrupts per second, the difference is invisible. For a driver handling a million interrupts per second, the difference is the difference between "works" and "does not work".
+差异可以以每次调用纳秒为单位测量。对于每秒处理几百次中断的驱动程序，差异不可见。对于每秒处理一百万次中断的驱动程序，差异就是"工作"和"不工作"之间的差异。
 
 ### 一般性教训
 
-Chapter 20's machinery is overkill for low-rate drivers. It is essential for high-rate drivers. The patterns the chapter teaches scale from "demo driver doing a hundred interrupts per second" to "production NIC doing ten million". Knowing where on that scale a specific driver lives determines how much of Chapter 20's advice matters in practice.
+第20章的机制对于低速率驱动程序来说是过度的。对于高速率驱动程序来说它是必需的。本章教授的模式从"每秒执行一百次中断的演示驱动程序"扩展到"执行一千万次的生成 NIC"。知道特定驱动程序在哪个尺度上，决定了第20章的建议在实践中有多少重要性。
 
 
 
 ## 深入了解多向量驱动程序的 sysctl 树设计
 
-Chapter 20's driver exposes its per-vector counters as flat sysctls (`vec0_fire_count`, `vec1_fire_count`, `vec2_fire_count`). For a driver with many vectors, a flat namespace becomes unwieldy. This section shows how to use `SYSCTL_ADD_NODE` to build a per-vector sysctl tree.
+第20章的驱动程序将其每向量计数器暴露为扁平 sysctl（`vec0_fire_count`、`vec1_fire_count`、`vec2_fire_count`）。对于具有许多向量的驱动程序，扁平命名空间变得笨拙。本节展示如何使用 `SYSCTL_ADD_NODE` 构建每向量 sysctl 树。
 
 ### 扁平与树形的权衡
 
-Flat namespace (what Chapter 20 uses):
+扁平命名空间（第20章使用的）：
 
 ```text
 dev.myfirst.0.vec0_fire_count: 42
@@ -2753,10 +2753,10 @@ dev.myfirst.0.vec1_stray_count: 0
 dev.myfirst.0.vec2_stray_count: 0
 ```
 
-Pros: simple, no `SYSCTL_ADD_NODE` calls.
-Cons: many siblings at the top level; no grouping.
+优点：简单，无需 `SYSCTL_ADD_NODE` 调用。
+缺点：顶层有许多同级节点；没有分组。
 
-Tree namespace:
+树形命名空间：
 
 ```text
 dev.myfirst.0.vec.admin.fire_count: 42
@@ -2767,8 +2767,8 @@ dev.myfirst.0.vec.tx.fire_count: 4523
 dev.myfirst.0.vec.tx.stray_count: 0
 ```
 
-Pros: groups per-vector state; scales to many vectors; named rather than numbered.
-Cons: more code to set up.
+优点：对每向量状态进行分组；可扩展到许多向量；使用名称而非编号。
+缺点：需要更多代码来设置。
 
 ### 构建树的代码
 
@@ -2812,7 +2812,7 @@ myfirst_msix_add_sysctls(struct myfirst_softc *sc)
 }
 ```
 
-The `SYSCTL_ADD_NODE` calls create the intermediate nodes; subsequent `SYSCTL_ADD_U64` calls attach leaf counters under them. The tree structure becomes visible in `sysctl` output automatically.
+`SYSCTL_ADD_NODE` 调用创建中间节点；随后的 `SYSCTL_ADD_U64` 调用在其下附加叶计数器。树形结构在 `sysctl` 输出中自动可见。
 
 ### 查询树
 
@@ -2827,258 +2827,258 @@ sysctl dev.myfirst.0.vec.rx
 sysctl -n dev.myfirst.0.vec.admin.fire_count dev.myfirst.0.vec.rx.fire_count dev.myfirst.0.vec.tx.fire_count
 ```
 
-The tree structure makes the sysctl namespace much more readable, especially for drivers with many vectors (NVMe with 32 I/O queues, or a NIC with 16 queue pairs).
+树形结构使 sysctl 命名空间更易读，特别是对于具有许多向量的驱动程序（具有 32 个 I/O 队列的 NVMe，或具有 16 个队列对的 NIC）。
 
 ### 何时使用树
 
-For Chapter 20's three-vector driver, the flat namespace is fine. For a driver with eight or more vectors, the tree becomes valuable. A reader writing a production driver should use the tree.
+对于第20章的三向量驱动程序，扁平命名空间即可。对于具有八个或更多向量的驱动程序，树形结构变得有价值。编写生产驱动程序的读者应使用树形结构。
 
 ### 常见错误
 
-- **Leaking the parent node.** `SYSCTL_ADD_NODE` registers the node in `sc->sysctl_ctx`; it is freed with the rest of the context. No explicit free needed.
-- **Forgetting `NULL` for the handler argument.** `SYSCTL_ADD_NODE` is not a CTLPROC; it is a pure grouping node. The handler argument is `NULL`.
-- **Wrong parent passed to child `SYSCTL_ADD_*` calls.** `SYSCTL_CHILDREN(vec_node)` for children of `vec_node`, not `SYSCTL_CHILDREN(parent)`.
+- **泄露父节点。** `SYSCTL_ADD_NODE` 在 `sc->sysctl_ctx` 中注册节点；它与上下文的其他部分一起被释放。不需要显式释放。
+- **忘记为处理程序参数传入 `NULL`。** `SYSCTL_ADD_NODE` 不是 CTLPROC；它是一个纯分组节点。处理程序参数为 `NULL`。
+- **将错误父节点传递给子 `SYSCTL_ADD_*` 调用。** `vec_node` 的子节点应使用 `SYSCTL_CHILDREN(vec_node)`，而不是 `SYSCTL_CHILDREN(parent)`。
 
-This tree-design pattern is the cleanest way to expose multi-vector state. Chapter 20's challenge exercise suggests implementing it as an extension.
+这种树形设计模式是暴露多向量状态的最干净方式。第20章的挑战练习建议将其作为扩展实现。
 
 
 
 ## 深入了解 MSI-X 设置中的错误路径
 
-Section 3 and Section 5 showed the happy-path setup code. This section walks through what can go wrong and how to diagnose it.
+第3节和第5节展示了快乐路径的设置代码。本节介绍可能出错的情况以及如何诊断。
 
 ### 故障模式 1：pci_msix_count 返回 0
 
-Symptom: the MSI-X attempt is skipped because the count is 0.
+症状：由于计数为 0，跳过了 MSI-X 尝试。
 
-Cause: the device has no MSI-X capability, or the PCI bus driver has not discovered it.
+原因：设备没有 MSI-X 能力，或 PCI 总线驱动程序未发现它。
 
-Fix: Confirm with `pciconf -lvc`. If the device advertises MSI-X but `pci_msix_count` returns 0, the device's PCI configuration is broken or the kernel's probe did not find it; rare and hard to fix from the driver.
+修复：用 `pciconf -lvc` 确认。如果设备公布有 MSI-X 但 `pci_msix_count` 返回 0，设备的 PCI 配置已损坏或内核的探测未找到它；这很少见且难以从驱动程序修复。
 
 ### 故障模式 2：pci_alloc_msix 返回 EINVAL
 
-Symptom: allocation fails with `EINVAL`.
+症状：分配失败，返回 `EINVAL`。
 
-Cause: the driver is asking for a count greater than the device's advertised max, or it is asking for 0.
+原因：驱动程序请求的计数大于设备公布的最大值，或者请求为 0。
 
-Fix: Clamp the requested count to `pci_msix_count`'s returned value. Always request at least 1.
+修复：将请求计数限制在 `pci_msix_count` 返回的值以内。始终至少请求 1。
 
 ### 故障模式 3：pci_alloc_msix 返回少于请求的向量数
 
-Symptom: `count` after the call is less than requested.
+症状：调用后的 `count` 小于请求值。
 
-Cause: the kernel's vector pool was partially depleted; the device's allocation was given whatever remained.
+原因：内核的向量池部分耗尽；设备分配得到了剩余的任何向量。
 
-Fix: Decide upfront whether to accept, adapt, or release. Chapter 20's driver releases and falls back to MSI.
+修复：预先决定是接受、适应还是释放。第20章的驱动程序释放并回退到 MSI。
 
 ### 故障模式 4：bus_alloc_resource_any 为 MSI-X 向量返回 NULL
 
-Symptom: after `pci_alloc_msix` succeeded, the per-vector IRQ allocation fails.
+症状：`pci_alloc_msix` 成功后，每向量 IRQ 分配失败。
 
-Causes:
-- Wrong rid (using 0 instead of i+1).
-- Already released previously (double-release).
-- Out of IRQ resources at the bus layer.
+原因：
+- rid 错误（使用 0 而不是 i+1）。
+- 先前已释放（双重释放）。
+- 总线层的 IRQ 资源耗尽。
 
-Fix: Check the rid is i+1. Audit the release code. Log the error.
+修复：检查 rid 是否为 i+1。审计释放代码。记录错误。
 
 ### 故障模式 5：bus_setup_intr 为每向量处理程序返回 EINVAL
 
-Symptom: `bus_setup_intr` fails.
+症状：`bus_setup_intr` 失败。
 
-Causes:
-- Filter and ithread both NULL.
-- Missing `INTR_TYPE_*` flag.
-- Already set up previously (double-setup).
+原因：
+- 过滤器和 ithread 均为 NULL。
+- 缺少 `INTR_TYPE_*` 标志。
+- 先前已设置（双重设置）。
 
-Fix: Ensure the filter argument is non-NULL. Include an `INTR_TYPE_*` flag. Audit the setup code for double-registration.
+修复：确保过滤器参数非 NULL。包含 `INTR_TYPE_*` 标志。审计设置代码以防止双重注册。
 
 ### 故障模式 6：bus_bind_intr 返回错误
 
-Symptom: `bus_bind_intr` returns non-zero.
+症状：`bus_bind_intr` 返回非零值。
 
-Causes:
-- Platform does not support rebinding.
-- CPU out of range.
-- Kernel configuration (NO_SMP, NUMA disabled).
+原因：
+- 平台不支持重新绑定。
+- CPU 超出范围。
+- 内核配置（NO_SMP、NUMA 禁用）。
 
-Fix: Treat as non-fatal (`device_printf` a warning and continue). The driver still works without binding.
+修复：视为非致命（`device_printf` 警告并继续）。驱动程序在不绑定的情况下也能工作。
 
 ### 故障模式 7：vmstat -i 显示向量但计数器不增加
 
-Symptom: the kernel sees the vectors but the filters never fire.
+症状：内核看到向量但过滤器从未触发。
 
-Causes:
-- The device's `INTR_MASK` is zero (chapter 19 problem).
-- The device reset its interrupt state.
-- Hardware bug or bhyve/QEMU configuration problem.
+原因：
+- 设备的 `INTR_MASK` 为零（第19章的问题）。
+- 设备重置了其中断状态。
+- 硬件 bug 或 bhyve/QEMU 配置问题。
 
-Fix: Verify the device's INTR_MASK. Use the simulated-interrupt sysctl to confirm the filter works at all.
+修复：验证设备的 INTR_MASK。使用模拟中断 sysctl 确认过滤器是否至少能工作。
 
 ### 故障模式 8：第二次 kldload 回退到较低层级
 
-Symptom: first load uses MSI-X; unload; second load uses legacy or MSI.
+症状：第一次加载使用 MSI-X；卸载；第二次加载使用 legacy 或 MSI。
 
-Cause: `pci_release_msi` not called on teardown.
+原因：拆除时未调用 `pci_release_msi`。
 
-Fix: Audit the teardown path. Make sure `pci_release_msi` runs on every successful allocation path.
+修复：审计拆除路径。确保 `pci_release_msi` 在每条成功的分配路径上运行。
 
 ### 故障模式 9：WITNESS 在多向量设置时崩溃
 
-Symptom: `WITNESS` reports a lock-order violation or a "lock held during sleep" in the per-vector setup.
+症状：`WITNESS` 在每向量设置中报告锁顺序违规或"持锁睡眠"。
 
-Cause: holding `sc->mtx` across a `bus_setup_intr` call. The bus hooks may sleep, and holding a mutex across a sleep is illegal.
+原因：在 `bus_setup_intr` 调用期间持有 `sc->mtx`。总线钩子可能睡眠，而在睡眠期间持有互斥锁是非法的。
 
-Fix: Release `sc->mtx` before calling `bus_setup_intr`. Reacquire afterwards if needed.
+修复：在调用 `bus_setup_intr` 之前释放 `sc->mtx`。如有需要之后重新获取。
 
 ### 故障模式 10：部分设置没有正确清理
 
-Symptom: attach fails; second attach fails with "resource in use".
+症状：attach 失败；第二次 attach 失败，显示"资源正在使用"。
 
-Cause: the partial-failure goto cascade doesn't undo all the way. Some per-vector state lingers.
+原因：部分失败的 goto 级联没有完全撤销。某些每向量状态残留。
 
-Fix: Ensure the cascade unwinds to the vector that failed, not past it. Use the per-vector helper consistently.
+修复：确保级联回退到失败的向量处停止，而不是越过它。一致地使用每向量辅助函数。
 
 
 
 ## 额外故障排除
 
-A handful of extra failure modes Chapter 20 readers might hit.
+第20章的读者可能遇到的一些额外故障模式。
 
 ### "QEMU guest 不暴露 MSI-X"
 
-Causes: QEMU version too old, or the guest is booting with legacy virtio.
+原因：QEMU 版本太旧，或 guest 使用 legacy virtio 启动。
 
-Fix: Update QEMU to a recent version. In the guest, check:
+修复：更新 QEMU 到较新版本。在 guest 中检查：
 
 ```sh
 pciconf -lvc | grep -B 1 -A 2 'cap 11'
 ```
 
-If no `cap 11` lines appear, MSI-X is not available. Switch to QEMU's modern virtio-rng-pci with `-device virtio-rng-pci,disable-legacy=on`.
+如果没有出现 `cap 11` 行，则 MSI-X 不可用。切换到 QEMU 的现代 virtio-rng-pci，使用 `-device virtio-rng-pci,disable-legacy=on`。
 
 ### "intr_simulate_rx 增加 fire_count 但任务从不运行"
 
-Cause: the task's `TASK_INIT` was not called, or the taskqueue was not started.
+原因：任务的 `TASK_INIT` 未被调用，或任务队列未启动。
 
-Fix: Verify `TASK_INIT(&vec->task, 0, myfirst_rx_task_fn, vec)` in setup. Verify `taskqueue_start_threads(&sc->intr_tq, ...)`.
+修复：验证设置中调用了 `TASK_INIT(&vec->task, 0, myfirst_rx_task_fn, vec)`。验证调用了 `taskqueue_start_threads(&sc->intr_tq, ...)`。
 
 ### "每向量计数器增加但杂散计数成比例上升"
 
-Cause: the filter's status check is wrong, or multiple vectors are triggering on the same bit.
+原因：过滤器的状态检查错误，或多个向量在同一个位上触发。
 
-Fix: Each filter should check for its specific bit(s). If two filters both try to handle `DATA_AV`, one will win and the other will see stray.
+修复：每个过滤器应检查其特定的位。如果两个过滤器都试图处理 `DATA_AV`，一个会赢，另一个会看到杂散。
 
 ### "cpuset -g -x $irq 报告所有向量的掩码为 0"
 
-Cause: `bus_bind_intr` has not been called, or it was called with CPU 0 (mask 1).
+原因：`bus_bind_intr` 未被调用，或它被调用时指定了 CPU 0（掩码 1）。
 
-Fix: If intentionally unbound, "mask 0" might be platform-specific. If binding was attempted, check return value of `bus_bind_intr`.
+修复：如果故意不绑定，"mask 0"可能是平台特定的。如果尝试了绑定，检查 `bus_bind_intr` 的返回值。
 
 ### "驱动加载成功但 dmesg 没有显示 attach 横幅"
 
-Cause: the `device_printf` came before the banner flush, or the banner is in a very early boot buffer.
+原因：`device_printf` 在横幅刷新之前调用，或横幅位于非常早期的启动缓冲区中。
 
-Fix: `dmesg -a` shows the full message buffer. Verify `dmesg -a | grep myfirst`.
+修复：`dmesg -a` 显示完整消息缓冲区。验证 `dmesg -a | grep myfirst`。
 
 ### "Detach 在多向量设置后挂起"
 
-Cause: a vector's handler is still running when teardown tries to proceed. `bus_teardown_intr` blocks waiting for it.
+原因：拆除尝试继续时，向量的处理程序仍在运行。`bus_teardown_intr` 阻塞等待它完成。
 
-Fix: Make sure the device's `INTR_MASK` is cleared *before* `bus_teardown_intr`, so no new handlers can be dispatched. Make sure the filter does not loop forever; short-runtime discipline.
+修复：确保在 `bus_teardown_intr` *之前*清除设备的 `INTR_MASK`，这样不会有新的处理程序被分发。确保过滤器不会永远循环；保持短运行时间纪律。
 
 ### "pci_alloc_msix 成功但只有部分向量触发"
 
-Cause: the device is not actually signalling on the vectors it should. Could be a driver bug (forgot to enable) or a device quirk.
+原因：设备实际上没有在其应有的向量上发出信号。可能是驱动程序 bug（忘记启用）或设备问题。
 
-Fix: Use the simulated-interrupt sysctl to confirm the filter works for each vector. If the simulated path works but real events don't fire the vector, the issue is on the device side.
+修复：使用模拟中断 sysctl 确认每个向量的过滤器是否工作。如果模拟路径工作但真实事件不触发向量，问题出在设备端。
 
 
 
 ## 实例演练：追踪事件通过三个层级
 
-To make the fallback ladder concrete, here is a complete trace of the same event (a simulated DATA_AV interrupt) on each of the three tiers.
+为了使回退阶梯具体化，以下是在三个层级上追踪同一事件（模拟的 DATA_AV 中断）的完整过程。
 
 ### 第 3 层：遗留 INTx
 
-On bhyve with virtio-rnd (no MSI-X exposed), the driver falls back to legacy INTx with one handler at rid 0.
+在带有 virtio-rnd（不暴露 MSI-X）的 bhyve 上，驱动程序回退到在 rid 0 处有一个处理程序的 legacy INTx。
 
-1. User runs `sudo sysctl dev.myfirst.0.intr_simulate_admin=1` (or `intr_simulate_rx=1`, etc.).
-2. The sysctl handler acquires `sc->mtx`, writes the bit to INTR_STATUS, releases, calls the filter.
-3. The single `myfirst_intr_filter` (from Chapter 19) runs. It reads INTR_STATUS, sees the bit, acknowledges, and either enqueues the task (for DATA_AV) or handles inline (for ERROR/COMPLETE).
-4. `intr_count` increments.
-5. On legacy, there is only one vector, so all three simulated-interrupt sysctls go through the same filter.
+1. 用户运行 `sudo sysctl dev.myfirst.0.intr_simulate_admin=1`（或 `intr_simulate_rx=1` 等）。
+2. sysctl 处理程序获取 `sc->mtx`，将位写入 INTR_STATUS，释放，调用过滤器。
+3. 单个 `myfirst_intr_filter`（来自第19章）运行。它读取 INTR_STATUS，看到该位，确认，并将任务入队（对于 DATA_AV）或内联处理（对于 ERROR/COMPLETE）。
+4. `intr_count` 递增。
+5. 在 legacy 上，只有一个向量，因此所有三个模拟中断 sysctl 通过同一个过滤器。
 
-Observations:
-- `sysctl dev.myfirst.0.intr_mode` returns 0.
-- `vmstat -i | grep myfirst` shows one line.
-- The per-vector counters do not exist (legacy mode uses the Chapter 19 counters).
+观察结果：
+- `sysctl dev.myfirst.0.intr_mode` 返回 0。
+- `vmstat -i | grep myfirst` 显示一行。
+- 每向量计数器不存在（legacy 模式使用第19章的计数器）。
 
 ### 第 2 层：MSI
 
-On a system that supports MSI but not MSI-X, the driver allocates a single MSI vector. MSI requires a power-of-two vector count, so the driver cannot ask for 3 here; it requests 1 and uses the Chapter 19 single-handler pattern.
+在支持 MSI 但不支持 MSI-X 的系统上，驱动程序分配单个 MSI 向量。MSI 要求向量计数为 2 的幂，因此驱动程序不能在此请求 3；它请求 1 并使用第19章的单处理程序模式。
 
-1. User runs `sudo sysctl dev.myfirst.0.intr_simulate_admin=1` (or `intr_simulate_rx=1`, or `intr_simulate_tx=4`).
-2. Because only one vector is set up on the MSI tier, all three per-vector simulation sysctls route through the same Chapter 19 `myfirst_intr_filter`.
-3. The filter reads INTR_STATUS, sees the bit, acknowledges, and either handles inline or enqueues the task.
+1. 用户运行 `sudo sysctl dev.myfirst.0.intr_simulate_admin=1`（或 `intr_simulate_rx=1`，或 `intr_simulate_tx=4`）。
+2. 因为在 MSI 层级上只设置了一个向量，所有三个每向量模拟 sysctl 都通过第19章的同一个 `myfirst_intr_filter` 路由。
+3. 过滤器读取 INTR_STATUS，看到该位，确认，然后内联处理或将任务入队。
 
-Observations:
-- `sysctl dev.myfirst.0.intr_mode` returns 1.
-- `vmstat -i | grep myfirst` shows one line (the single MSI handler at rid=1, labelled "msi").
-- The per-vector counters on slots 1 and 2 stay at 0 because only slot 0 is in use; the Chapter 19 global counters (`intr_count`, `intr_data_av_count`, etc.) are the ones that move.
+观察结果：
+- `sysctl dev.myfirst.0.intr_mode` 返回 1。
+- `vmstat -i | grep myfirst` 显示一行（rid=1 处的单个 MSI 处理程序，标记为"msi"）。
+- 槽位 1 和 2 的每向量计数器保持为 0，因为只有槽位 0 在使用；第19章的全局计数器（`intr_count`、`intr_data_av_count` 等）发生变化。
 
 ### 第 1 层：MSI-X
 
-On QEMU with virtio-rng-pci, the driver allocates MSI-X with 3 vectors, each bound to a CPU.
+在带有 virtio-rng-pci 的 QEMU 上，驱动程序分配具有 3 个向量的 MSI-X，每个向量绑定到一个 CPU。
 
-1. User runs `sudo sysctl dev.myfirst.0.intr_simulate_rx=1`.
-2. The sysctl calls the rx filter directly (simulated path does not go through the hardware).
-3. `myfirst_rx_filter` runs (on whichever CPU the sysctl was invoked on, because simulation is not going through the kernel's interrupt dispatch).
-4. Counters increment; task runs.
+1. 用户运行 `sudo sysctl dev.myfirst.0.intr_simulate_rx=1`。
+2. sysctl 直接调用 rx 过滤器（模拟路径不经过硬件）。
+3. `myfirst_rx_filter` 运行（在调用 sysctl 的任何 CPU 上，因为模拟不经过内核的中断分发）。
+4. 计数器递增；任务运行。
 
-Observations:
-- `sysctl dev.myfirst.0.intr_mode` returns 2.
-- `vmstat -i | grep myfirst` shows three lines; each has a different IRQ number.
-- `cpuset -g -x <irq>` for each IRQ shows different CPU masks.
+观察结果：
+- `sysctl dev.myfirst.0.intr_mode` 返回 2。
+- `vmstat -i | grep myfirst` 显示三行；每行有不同的 IRQ 号。
+- 每个 IRQ 的 `cpuset -g -x <irq>` 显示不同的 CPU 掩码。
 
-A real (non-simulated) MSI-X interrupt would dispatch on the bound CPU; the simulation bypass makes it run on the calling thread's CPU. This is a limitation of the simulation technique but does not affect correctness.
+真实的（非模拟）MSI-X 中断会在绑定的 CPU 上分发；模拟旁路使其在调用线程的 CPU 上运行。这是模拟技术的局限性，但不影响正确性。
 
 ### 教训
 
-All three tiers drive the same filter logic and the same task. The only differences are:
+所有三个层级都驱动相同的过滤器逻辑和相同的任务。唯一的区别是：
 
-- Which rid the IRQ resource uses (0 for legacy, 1+ for MSI/MSI-X).
-- Whether `pci_alloc_msi` or `pci_alloc_msix` succeeded.
-- How many filter functions are registered (1 for legacy, 3 for MSI/MSI-X).
-- Which CPU real interrupts dispatch on.
+- IRQ 资源使用哪个 rid（legacy 为 0，MSI/MSI-X 为 1+）。
+- `pci_alloc_msi` 还是 `pci_alloc_msix` 成功。
+- 注册了多少个过滤器函数（legacy 为 1，MSI/MSI-X 为 3）。
+- 真实中断在哪个 CPU 上分发。
 
-A well-written driver works identically on all three tiers. Chapter 20's fallback ladder ensures this.
+编写良好的驱动程序在所有三个层级上工作方式相同。第20章的回退阶梯确保了这一点。
 
 
 
 ## 实践实验：跨三个层级的回归测试
 
-A lab that exercises the fallback ladder to confirm all three tiers work.
+一个练习回退阶梯以确认所有三个层级都能工作的实验。
 
 ### 设置
 
-You need two test environments:
+您需要两个测试环境：
 
-- **Environment A**: bhyve with virtio-rnd. The driver falls back to legacy INTx.
-- **Environment B**: QEMU with virtio-rng-pci. The driver uses MSI-X.
+- **环境 A**：带有 virtio-rnd 的 bhyve。驱动程序回退到 legacy INTx。
+- **环境 B**：带有 virtio-rng-pci 的 QEMU。驱动程序使用 MSI-X。
 
-(A third environment with only MSI and no MSI-X is hard to construct reliably on modern platforms. The MSI path is exercised only if the reader has a system where MSI-X fails but MSI works.)
+（第三个只有 MSI 而没有 MSI-X 的环境在现代平台上很难可靠构建。只有当读者拥有 MSI-X 失败但 MSI 工作的系统时，MSI 路径才会被练习。）
 
 ### 过程
 
-1. On Environment A, load `myfirst.ko`. Verify:
+1. 在环境 A 上，加载 `myfirst.ko`。验证：
 
 ```sh
 sysctl dev.myfirst.0.intr_mode   # returns 0
 vmstat -i | grep myfirst          # one line
 ```
 
-2. Exercise the pipeline via the simulated-interrupt sysctls. All three should work, though on legacy they all go through the same filter.
+2. 通过模拟中断 sysctl 练习管道。所有三个都应该工作，虽然在 legacy 上它们都经过同一个过滤器。
 
 ```sh
 sudo sysctl dev.myfirst.0.intr_simulate_admin=2
@@ -3087,9 +3087,9 @@ sudo sysctl dev.myfirst.0.intr_simulate_tx=4
 sysctl dev.myfirst.0.intr_count   # should be 3
 ```
 
-3. Unload. Verify no leaks.
+3. 卸载。验证无泄漏。
 
-4. On Environment B, repeat:
+4. 在环境 B 上，重复：
 
 ```sh
 sysctl dev.myfirst.0.intr_mode   # returns 2
@@ -3097,7 +3097,7 @@ vmstat -i | grep myfirst          # three lines
 for irq in <IRQs>; do cpuset -g -x $irq; done
 ```
 
-5. Exercise the per-vector pipeline. Each sysctl should increment its own vector's counter.
+5. 练习每向量管道。每个 sysctl 应递增其自己向量的计数器。
 
 ```sh
 sudo sysctl dev.myfirst.0.intr_simulate_admin=2
@@ -3106,75 +3106,75 @@ sysctl dev.myfirst.0.vec.rx.fire_count     # 0
 sysctl dev.myfirst.0.vec.tx.fire_count     # 0
 ```
 
-6. Unload. Verify no leaks.
+6. 卸载。验证无泄漏。
 
 ### 预期观察
 
-- Both environments attach cleanly.
-- The dmesg summary line shows the correct mode for each.
-- Per-vector counters tick independently on MSI-X.
-- On legacy, a single counter covers all events.
-- No leaks after unload in either environment.
+- 两个环境都干净地附加。
+- dmesg 摘要行为每个环境显示正确的模式。
+- 在 MSI-X 上，每向量计数器独立跳动。
+- 在 legacy 上，单个计数器覆盖所有事件。
+- 两个环境中卸载后均无泄漏。
 
 ### 如果某层失败该怎么办
 
-If the MSI-X tier fails on Environment B:
+如果 MSI-X 层级在环境 B 上失败：
 
-1. Verify QEMU is new enough. Older versions (pre-5.0) have quirks.
-2. Check `pciconf -lvc` in the guest; MSI-X capability should be visible.
-3. Check `dmesg` for errors from `pci_alloc_msix`.
+1. 验证 QEMU 版本足够新。旧版本（5.0 之前）有 quirks。
+2. 在 guest 中检查 `pciconf -lvc`；MSI-X 能力应该可见。
+3. 检查 `dmesg` 中来自 `pci_alloc_msix` 的错误。
 
-If the legacy tier fails on Environment A:
+如果 legacy 层级在环境 A 上失败：
 
-1. Check `pciconf -lvc` for the device's interrupt line configuration.
-2. Ensure `virtio_rnd` is not already attached (Chapter 18 caveat).
-3. Look for `pci_alloc_resource` failures in `dmesg`.
+1. 检查 `pciconf -lvc` 以确认设备的中断线配置。
+2. 确保 `virtio_rnd` 尚未附加（第18章注意事项）。
+3. 在 `dmesg` 中查找 `pci_alloc_resource` 失败。
 
 
 
 ## 扩展挑战：构建生产级驱动程序
 
-An optional exercise for readers who want to practise multi-vector design on a realistic scale.
+一个可选的练习，适合于希望在现实规模上练习多向量设计的读者。
 
 ### 目标
 
-Take the Chapter 20 driver and extend it to handle N queues dynamically, where N is discovered at attach time based on the allocated MSI-X vector count. Each queue has:
+采用第20章的驱动程序，扩展它以动态处理 N 个队列，其中 N 在附加时根据分配的 MSI-X 向量计数确定。每个队列具有：
 
-- Its own vector (MSI-X vector 1+queue_id).
-- Its own filter function (or a shared one that identifies the queue from the vector arg).
-- Its own counters.
-- Its own task on its own taskqueue.
-- Its own NUMA-local CPU binding.
+- 自己的向量（MSI-X 向量 1+queue_id）。
+- 自己的过滤器函数（或从向量参数识别队列的共享函数）。
+- 自己的计数器。
+- 自己任务队列上的自己的任务。
+- 自己的 NUMA 本地 CPU 绑定。
 
 ### 实现大纲
 
-1. Replace `MYFIRST_MAX_VECTORS` with a runtime-chosen count.
-2. Allocate the `vectors[]` array dynamically (using `malloc`).
+1. 用运行时选择的计数替换 `MYFIRST_MAX_VECTORS`。
+2. 动态分配 `vectors[]` 数组（使用 `malloc`）。
 3. Allocate a separate taskqueue per vector.
 4. Use `bus_get_cpus(INTR_CPUS, ...)` to distribute vectors across NUMA-local CPUs.
-5. Add sysctls that scale with the vector count.
+5. 添加随向量计数扩展的 sysctl。
 
 ### 测试
 
-Run the driver on a guest with varying MSI-X vector counts. For each count, verify:
-- The fire counters tick for the simulated interrupts.
-- The CPU affinity respects NUMA locality.
-- Teardown is clean.
+在具有不同 MSI-X 向量计数的 guest 上运行驱动程序。对每个计数，验证：
+- 模拟中断的触发计数器跳动。
+- CPU 亲和性遵守 NUMA 局部性。
+- 拆除干净。
 
 ### 本练习的内容
 
 - Dynamic memory management in a driver.
-- The `bus_get_cpus` API.
-- Per-queue taskqueues (challenge 3 from earlier).
-- Runtime sysctl tree construction (challenge 7 from earlier).
+- `bus_get_cpus` API。
+- 每队列任务队列（之前的挑战3）。
+- 运行时 sysctl 树构建（之前的挑战7）。
 
-This is a significant exercise and will likely take several hours. The result is a driver recognisably similar to production NIC and NVMe drivers.
+这是一个重要的练习，可能需要数小时。结果是一个在结构上类似于生产级 NIC 和 NVMe 驱动程序的驱动程序。
 
 
 
 ## 参考：中断和任务工作的优先级值
 
-For quick reference, the priority constants a Chapter 20 driver might use (from `/usr/src/sys/sys/priority.h`):
+快速参考，第20章驱动程序可能使用的优先级常量（来自 `/usr/src/sys/sys/priority.h`）：
 
 ```text
 PI_REALTIME  = PRI_MIN_ITHD + 0   (highest; rarely used)
@@ -3187,13 +3187,13 @@ PI_DULL      = PI_INTR            (low-priority hardware)
 PI_SOFT      = PRI_MIN_ITHD + 8   (soft interrupts)
 ```
 
-The common hardware priorities all map to `PI_INTR`; the names are distinctions of intent rather than of scheduling priority. Chapter 20's driver uses `PI_NET` for its taskqueue; any hardware-level priority would work equivalently.
+常见的硬件优先级都映射到 `PI_INTR`；这些名称是意图的区别，而不是调度优先级的区别。第20章的驱动程序对其任务队列使用 `PI_NET`；任何硬件级优先级都可以等效工作。
 
 
 
 ## 参考：MSI-X 驱动程序有用的 DTrace 单行命令
 
-For readers who want to observe the Chapter 20 driver's behaviour dynamically.
+对于希望动态观察第20章驱动程序行为的读者。
 
 ### 统计每个 CPU 的过滤器调用次数
 
@@ -3203,7 +3203,7 @@ fbt::myfirst_admin_filter:entry, fbt::myfirst_rx_filter:entry,
 fbt::myfirst_tx_filter:entry { @[probefunc, cpu] = count(); }'
 ```
 
-Shows which filter runs on which CPU.
+显示哪个过滤器在哪个 CPU 上运行。
 
 ### 每个过滤器花费的时间
 
@@ -3216,7 +3216,7 @@ fbt::myfirst_rx_filter:return /self->ts/ {
 }'
 ```
 
-Histogram of RX filter CPU time.
+RX 过滤器 CPU 时间的直方图。
 
 ### 模拟中断与真实中断的比率
 
@@ -3226,7 +3226,7 @@ fbt::myfirst_intr_simulate_vector_sysctl:entry { @sims = count(); }
 fbt::myfirst_rx_filter:entry { @filters = count(); }'
 ```
 
-If `filters > sims`, some real interrupts are firing.
+如果 `filters > sims`，一些真实中断正在触发。
 
 ### 任务延迟
 
@@ -3239,74 +3239,74 @@ fbt::myfirst_rx_task_fn:entry /self->ts/ {
 }'
 ```
 
-Histogram of time from filter to task invocation. Shows the taskqueue's scheduling latency.
+从过滤器到任务调用的时间直方图。显示任务队列的调度延迟。
 
 
 
 ## 参考：第四部分结束前的结束语
 
-Chapters 16 through 20 built the full interrupt and hardware story for the `myfirst` driver. Each chapter added one layer:
+第16章到第20章为 `myfirst` 驱动程序构建了完整的中断和硬件故事。每章添加一层：
 
-- Chapter 16: register access.
-- Chapter 17: device behaviour simulation.
-- Chapter 18: PCI attach.
-- Chapter 19: single-vector interrupt handling.
-- Chapter 20: multi-vector MSI/MSI-X.
+- 第16章：寄存器访问。
+- 第17章：设备行为模拟。
+- 第18章：PCI 附加。
+- 第19章：单向量中断处理。
+- 第20章：多向量 MSI/MSI-X。
 
-Chapter 21 will add DMA, completing Part 4's hardware layer. At that point, the `myfirst` driver will be structurally a real driver: a PCI device with MSI-X interrupts and DMA-based data transfer. What distinguishes it from a production driver is the specific protocol it speaks (none, really; it is a demo) and the device it targets (a virtio-rnd abstraction).
+第21章将添加 DMA，完成第4部分的硬件层。那时，`myfirst` 驱动程序在结构上将是一个真正的驱动程序：具有 MSI-X 中断和基于 DMA 的数据传输的 PCI 设备。它与生产驱动程序的区别在于它所说的特定协议（实际上没有；它是一个演示）和它针对的设备（一个 virtio-rnd 抽象）。
 
-A reader who has internalised these five chapters can open any FreeBSD driver in `/usr/src/sys/dev/` and recognise the patterns. That recognition is Part 4's deepest payoff.
+已经内化这五章的读者可以打开 `/usr/src/sys/dev/` 中的任何 FreeBSD 驱动程序并识别这些模式。这种识别是第4部分最深的回报。
 
 
 
 ## 动手实验
 
-The labs are graduated checkpoints. Each lab builds on the previous one and corresponds to one of the chapter's stages. A reader who works through all five has a complete multi-vector driver, a working QEMU test environment for MSI-X, and a regression script that validates all three tiers of the fallback ladder.
+这些实验是分级的检查点。每个实验建立在前一个实验的基础上，对应于本章的一个阶段。完成所有五个实验的读者将拥有一个完整的多年驱动程序、一个用于 MSI-X 的工作 QEMU 测试环境，以及一个验证回退阶梯所有三个层级的回归脚本。
 
-Time budgets assume the reader has already read the relevant sections.
+时间预算假设读者已经阅读了相关章节。
 
 ### 实验 1：发现 MSI 和 MSI-X 能力
 
 Time: thirty minutes.
 
-Objective: Build an intuition for which devices on your system support MSI and MSI-X.
+目标：建立对系统上哪些设备支持 MSI 和 MSI-X 的直觉。
 
 Steps:
 
-1. Run `sudo pciconf -lvc > /tmp/pci_caps.txt`. The `-c` flag includes capability lists.
-2. Search for MSI capabilities: `grep -B 1 "cap 05" /tmp/pci_caps.txt`.
-3. Search for MSI-X capabilities: `grep -B 1 "cap 11" /tmp/pci_caps.txt`.
-4. For three devices that support MSI-X, note:
-   - The device's name (`pci0:B:D:F`).
-   - The number of MSI-X messages supported.
-   - Whether the driver is currently using MSI-X (check `vmstat -i` for multiple lines of the same device name).
-5. Compare the total number of MSI-capable devices to the total number of MSI-X-capable devices. Modern systems typically have more MSI-X devices than MSI-only devices.
+1. 运行 `sudo pciconf -lvc > /tmp/pci_caps.txt`。`-c` 标志包含能力列表。
+2. 搜索 MSI 能力：`grep -B 1 "cap 05" /tmp/pci_caps.txt`。
+3. 搜索 MSI-X 能力：`grep -B 1 "cap 11" /tmp/pci_caps.txt`。
+4. 对于三个支持 MSI-X 的设备，记录：
+   - 设备名称（`pci0:B:D:F`）。
+   - 支持的 MSI-X 消息数。
+   - 驱动程序当前是否正在使用 MSI-X（检查 `vmstat -i` 中同一设备名称的多行）。
+5. 比较支持 MSI 的设备总数与支持 MSI-X 的设备总数。现代系统通常有比仅 MSI 设备更多的 MSI-X 设备。
 
 Expected observations:
 
-- NICs usually advertise MSI-X with many vectors (4 to 64).
-- SATA and NVMe controllers advertise MSI-X (NVMe often with dozens of vectors).
-- Some legacy devices (an audio chip, a USB controller) advertise only MSI.
-- A few very old devices advertise neither and rely on legacy INTx.
+- NIC 通常公布具有许多向量的 MSI-X（4 到 64）。
+- SATA 和 NVMe 控制器公布 MSI-X（NVMe 通常有几十个向量）。
+- 一些遗留设备（音频芯片、USB 控制器）仅公布 MSI。
+- 少数非常老的设备既不公布，依赖 legacy INTx。
 
-This lab is about vocabulary. No code. The payoff is that Section 2 and 5's allocation calls become concrete.
+本实验关乎词汇。没有代码。回报是第2节和第5节的分配调用变得具体。
 
 ### 实验 2：阶段 1，MSI 回退阶梯
 
-Time: two to three hours.
+时间：两到三小时。
 
-Objective: Extend Chapter 19's driver with the MSI-first fallback ladder. Version target: `1.3-msi-stage1`.
+目标：用 MSI 优先的回退阶梯扩展第19章的驱动程序。版本目标：`1.3-msi-stage1`。
 
 Steps:
 
-1. Starting from Chapter 19 Stage 4, copy the driver source to a new working directory.
-2. Add the `intr_mode` field and enum to `myfirst.h`.
-3. Modify `myfirst_intr_setup` (in `myfirst_intr.c`) to attempt MSI allocation first, falling back to legacy INTx.
-4. Modify `myfirst_intr_teardown` to call `pci_release_msi` when MSI was used.
-5. Add the `dev.myfirst.N.intr_mode` sysctl.
-6. Update the `Makefile` version string to `1.3-msi-stage1`.
-7. Compile (`make clean && make`).
-8. Load on a guest. Note which mode the driver reports:
+1. 从第19章阶段4开始，将驱动程序源代码复制到新的工作目录。
+2. 向 `myfirst.h` 添加 `intr_mode` 字段和枚举。
+3. 修改 `myfirst_intr_setup`（在 `myfirst_intr.c` 中）以先尝试 MSI 分配，回退到 legacy INTx。
+4. 修改 `myfirst_intr_teardown` 以在使用 MSI 时调用 `pci_release_msi`。
+5. 添加 `dev.myfirst.N.intr_mode` sysctl。
+6. 将 `Makefile` 版本字符串更新为 `1.3-msi-stage1`。
+7. 编译（`make clean && make`）。
+8. 在 guest 上加载。注意驱动程序报告哪种模式：
 
 ```sh
 sudo kldload ./myfirst.ko
@@ -3314,40 +3314,40 @@ sudo dmesg | tail -5
 sysctl dev.myfirst.0.intr_mode
 ```
 
-On QEMU with virtio-rng-pci, the driver should report `MSI, 1 vector` (or similar). On bhyve with virtio-rnd, it should report `legacy INTx`.
+在带有 virtio-rng-pci 的 QEMU 上，驱动程序应报告 `MSI, 1 vector`（或类似信息）。在带有 virtio-rnd 的 bhyve 上，应报告 `legacy INTx`。
 
-9. Unload and verify no leaks.
+9. 卸载并验证无泄漏。
 
 Common failures:
 
-- Missing `pci_release_msi`: next load fails or falls back to legacy.
-- Wrong rid (using 0 for MSI): `bus_alloc_resource_any` returns NULL.
-- Not checking the returned count: driver proceeds with fewer vectors than expected.
+- 缺少 `pci_release_msi`：下次加载失败或回退到 legacy。
+- rid 错误（对 MSI 使用 0）：`bus_alloc_resource_any` 返回 NULL。
+- 未检查返回计数：驱动程序使用少于预期的向量继续运行。
 
 ### 实验 3：阶段 2，多向量分配 (MSI)
 
-Time: three to four hours.
+时间：三到四小时。
 
-Objective: Extend to three MSI vectors with per-vector handlers. Version target: `1.3-msi-stage2`.
+目标：扩展到具有每向量处理程序的三个 MSI 向量。版本目标：`1.3-msi-stage2`。
 
 Steps:
 
-1. Starting from Lab 2, add the `myfirst_vector` struct and per-vector array to `myfirst.h`.
-2. Write three filter functions: `myfirst_admin_filter`, `myfirst_rx_filter`, `myfirst_tx_filter`.
-3. Write the `myfirst_intr_setup_vector` and `myfirst_intr_teardown_vector` helpers.
-4. Modify `myfirst_intr_setup` to try `pci_alloc_msi` for `MYFIRST_MAX_VECTORS` vectors, setting up each vector independently.
-5. Modify `myfirst_intr_teardown` to loop per-vector.
-6. Add per-vector counter sysctls (`vec0_fire_count`, `vec1_fire_count`, `vec2_fire_count`).
-7. Add per-vector simulated-interrupt sysctls (`intr_simulate_admin`, `intr_simulate_rx`, `intr_simulate_tx`).
-8. Bump the version to `1.3-msi-stage2`.
-9. Compile, load, verify:
+1. 从实验2开始，向 `myfirst.h` 添加 `myfirst_vector` 结构和每向量数组。
+2. 编写三个过滤器函数：`myfirst_admin_filter`、`myfirst_rx_filter`、`myfirst_tx_filter`。
+3. 编写 `myfirst_intr_setup_vector` 和 `myfirst_intr_teardown_vector` 辅助函数。
+4. 修改 `myfirst_intr_setup` 以尝试为 `MYFIRST_MAX_VECTORS` 向量调用 `pci_alloc_msi`，独立设置每个向量。
+5. 修改 `myfirst_intr_teardown` 以循环每向量。
+6. 添加每向量计数器 sysctl（`vec0_fire_count`、`vec1_fire_count`、`vec2_fire_count`）。
+7. 添加每向量模拟中断 sysctl（`intr_simulate_admin`、`intr_simulate_rx`、`intr_simulate_tx`）。
+8. 将版本提升到 `1.3-msi-stage2`。
+9. 编译，加载，验证：
 
 ```sh
 sysctl dev.myfirst.0.intr_mode   # should be 1 on QEMU
 vmstat -i | grep myfirst          # should show 3 lines
 ```
 
-10. Exercise each vector:
+10. 练习每个向量：
 
 ```sh
 sudo sysctl dev.myfirst.0.intr_simulate_admin=2  # ERROR
@@ -3356,33 +3356,33 @@ sudo sysctl dev.myfirst.0.intr_simulate_tx=4     # COMPLETE
 sysctl dev.myfirst.0 | grep vec
 ```
 
-Each vector's counter should increment independently.
+每个向量的计数器应独立递增。
 
-11. Unload, verify no leaks.
+11. 卸载，验证无泄漏。
 
 ### 实验 4：阶段 3，带 CPU 绑定的 MSI-X
 
-Time: three to four hours.
+时间：三到四小时。
 
-Objective: Prefer MSI-X over MSI, bind each vector to a CPU. Version target: `1.3-msi-stage3`.
+目标：优先使用 MSI-X 而非 MSI，将每个向量绑定到 CPU。版本目标：`1.3-msi-stage3`。
 
 Steps:
 
-1. Starting from Lab 3, change the fallback ladder to attempt MSI-X first (via `pci_msix_count` and `pci_alloc_msix`), MSI as second tier, legacy as last.
-2. Add the `myfirst_msix_bind_vectors` helper that calls `bus_bind_intr` for each vector.
-3. Call the bind helper after all vectors are registered.
-4. Update the dmesg summary line to distinguish MSI-X from MSI.
-5. Bump the version to `1.3-msi-stage3`.
-6. Compile, load on QEMU with `virtio-rng-pci`. Verify:
+1. 从实验3开始，更改回退阶梯以先尝试 MSI-X（通过 `pci_msix_count` 和 `pci_alloc_msix`），MSI 作为第二层，legacy 作为最后。
+2. 添加 `myfirst_msix_bind_vectors` 辅助函数，为每个向量调用 `bus_bind_intr`。
+3. 在所有向量注册后调用绑定辅助函数。
+4. 更新 dmesg 摘要行以区分 MSI-X 和 MSI。
+5. 将版本提升到 `1.3-msi-stage3`。
+6. 编译，在带有 `virtio-rng-pci` 的 QEMU 上加载。验证：
 
 ```sh
-sysctl dev.myfirst.0.intr_mode   # should be 2 on QEMU
+sysctl dev.myfirst.0.intr_mode   # 在 QEMU 上应为 2
 sudo dmesg | grep myfirst | grep MSI-X
 ```
 
-The attach line should read `interrupt mode: MSI-X, 3 vectors`.
+附加行应为 `interrupt mode: MSI-X, 3 vectors`。
 
-7. Check per-vector CPU bindings:
+7. 检查每向量 CPU 绑定：
 
 ```sh
 # For each myfirst IRQ, show its CPU binding.
@@ -3394,89 +3394,89 @@ for irq in <IRQ1> <IRQ2> <IRQ3>; do
 done
 ```
 
-On a multi-CPU guest, each vector should be bound to a different CPU.
+在多 CPU guest 上，每个向量应绑定到不同的 CPU。
 
-8. Exercise each vector (same as Lab 3).
+8. 练习每个向量（与实验3相同）。
 
-9. Detach and reattach:
+9. 分离并重新附加：
 
 ```sh
 sudo devctl detach myfirst0
 sudo devctl attach pci0:0:4:0
-sysctl dev.myfirst.0.intr_mode  # should still be 2
+sysctl dev.myfirst.0.intr_mode  # 应仍为 2
 ```
 
-10. Unload, verify no leaks.
+10. 卸载，验证无泄漏。
 
 ### 实验 5：阶段 4，重构、回归、版本
 
-Time: three to four hours.
+时间：三到四小时。
 
-Objective: Move the multi-vector code into `myfirst_msix.c`, write `MSIX.md`, run the regression. Version target: `1.3-msi`.
+目标：将多向量代码移入 `myfirst_msix.c`，编写 `MSIX.md`，运行回归测试。版本目标：`1.3-msi`。
 
 Steps:
 
-1. Starting from Lab 4, create `myfirst_msix.c` and `myfirst_msix.h`.
-2. Move the per-vector filter functions, helpers, setup, teardown, and sysctl registration into `myfirst_msix.c`.
-3. Keep the legacy-INTx fallback in `myfirst_intr.c` (Chapter 19's file).
-4. In `myfirst_pci.c`, replace the old interrupt setup/teardown calls with calls into `myfirst_msix.c`.
-5. Update the `Makefile` to add `myfirst_msix.c` to SRCS. Bump the version to `1.3-msi`.
-6. Write `MSIX.md` documenting the multi-vector design.
-7. Compile, load, run the full regression script (from the companion examples).
-8. Confirm all three tiers work (by testing on bhyve with virtio-rnd for legacy and QEMU with virtio-rng-pci for MSI-X).
+1. 从实验4开始，创建 `myfirst_msix.c` 和 `myfirst_msix.h`。
+2. 将每向量过滤器函数、辅助函数、设置、拆除和 sysctl 注册移入 `myfirst_msix.c`。
+3. 将 legacy-INTx 回退保留在 `myfirst_intr.c`（第19章的文件）中。
+4. 在 `myfirst_pci.c` 中，用对 `myfirst_msix.c` 的调用替换旧的中断设置/拆除调用。
+5. 更新 `Makefile` 将 `myfirst_msix.c` 添加到 SRCS。将版本提升到 `1.3-msi`。
+6. 编写 `MSIX.md` 记录多向量设计。
+7. 编译、加载、运行完整的回归脚本（来自配套示例）。
+8. 确认所有三个层级都工作（通过在 bhyve 上使用 virtio-rnd 测试 legacy，在 QEMU 上使用 virtio-rng-pci 测试 MSI-X）。
 
 Expected outcomes:
 
-- The driver at `1.3-msi` works on both bhyve (legacy fallback) and QEMU (MSI-X).
-- `myfirst_intr.c` now only contains the Chapter 19 single-handler fallback path.
-- `myfirst_msix.c` contains the Chapter 20 multi-vector logic.
-- `MSIX.md` documents the design clearly.
+- `1.3-msi` 版本的驱动程序在 bhyve（legacy 回退）和 QEMU（MSI-X）上都能工作。
+- `myfirst_intr.c` 现在只包含第19章的单处理程序回退路径。
+- `myfirst_msix.c` 包含第20章的多向量逻辑。
+- `MSIX.md` 清晰地记录了该设计。
 
 
 
 ## 挑战练习
 
-The challenges build on the labs and extend the driver in directions the chapter did not take.
+这些挑战练习建立在实验的基础上，将驱动程序扩展至本章未涉及的方向。
 
 ### 挑战 1：动态向量计数适配
 
-Modify the setup to adapt to whatever vector count the kernel actually allocates. If 3 are requested but 2 are allocated, the driver should still work with 2 (fold admin and tx into one combined vector). If 1 is allocated, fold everything into one.
+修改设置以适应内核实际分配的任何向量计数。如果请求 3 个但只分配了 2 个，驱动程序仍应能使用 2 个工作（将 admin 和 tx 合并到一个向量中）。如果只分配了 1 个，将所有内容合并到一个中。
 
-This exercise teaches the "adapt" strategy from the fallback ladder.
+此练习教授回退阶梯中的"适应"策略。
 
 ### 挑战 2：NUMA 感知的 CPU 绑定
 
-Replace the round-robin CPU binding with a NUMA-aware binding using `bus_get_cpus(dev, INTR_CPUS, ...)`. Verify with `cpuset -g -x <irq>` that vectors land on CPUs in the same NUMA domain as the device.
+使用 `bus_get_cpus(dev, INTR_CPUS, ...)` 将轮询 CPU 绑定替换为 NUMA 感知绑定。用 `cpuset -g -x <irq>` 验证向量落在与设备同一 NUMA 域的 CPU 上。
 
-On a single-socket system the exercise is academic; on a multi-socket test host it is measurable.
+在单插槽系统上，此练习是理论性的；在多插槽测试主机上，效果是可测量的。
 
 ### 挑战 3：每向量任务队列
 
-Each vector currently shares one taskqueue. Modify the driver so each vector has its own taskqueue (with its own worker thread). Measure the latency impact with DTrace.
+目前每个向量共享一个任务队列。修改驱动程序，使每个向量有自己的任务队列（有自己的工作线程）。用 DTrace 测量延迟影响。
 
-This exercise introduces per-vector workers and shows when they help vs hurt.
+此练习引入每向量工作者，并展示它们何时有帮助、何时有害。
 
 ### 挑战 4：每向量 MSI-X 掩码控制
 
-The MSI-X table's vector-control register has a mask bit per vector. Add a sysctl that lets the operator mask an individual vector at runtime. Verify that a masked vector stops receiving interrupts.
+MSI-X 表的向量控制寄存器每个向量有一个掩码位。添加一个 sysctl，让操作员在运行时掩码单个向量。验证被掩码的向量停止接收中断。
 
-Hint: the mask bit is programmed through direct MSI-X table access, which is a deeper topic than Chapter 20 covers. The FreeBSD MSI-X implementation may or may not expose this directly; a reader might need to use `bus_teardown_intr` and later `bus_setup_intr` as a higher-level "soft mask".
+提示：掩码位通过直接 MSI-X 表访问编程，这是比第20章涵盖更深的话题。FreeBSD 的 MSI-X 实现可能直接暴露也可能不直接暴露这一点；读者可能需要使用 `bus_teardown_intr` 然后 `bus_setup_intr` 作为更高级别的"软掩码"。
 
 ### 挑战5：实现中断调节
 
-For a simulated driver, moderation is easy to prototype: a sysctl that coalesces N simulated interrupts into one task run. Implement the coalescing, measure the latency-vs-throughput trade-off.
+对于模拟驱动程序，调节很容易原型化：一个将 N 个模拟中断合并为一次任务运行的 sysctl。实现合并，测量延迟与吞吐量的权衡。
 
 ### 挑战6：运行时向量重分配
 
-Add a sysctl that lets the operator reassign which vector handles which event class (e.g., swap RX and TX). Demonstrate that after the reassignment, simulated-interrupt-RX triggers the TX filter and vice versa.
+添加一个 sysctl，让操作员重新分配哪个向量处理哪个事件类（例如，交换 RX 和 TX）。演示重新分配后，模拟中断 RX 触发 TX 过滤器，反之亦然。
 
 ### 挑战7：每队列 Sysctl 树
 
-Restructure the per-vector sysctls into a proper tree: `dev.myfirst.N.vec.admin.fire_count`, `dev.myfirst.N.vec.rx.fire_count`, etc. Use `SYSCTL_ADD_NODE` to create the tree nodes.
+将每向量 sysctl 重构为适当的树形结构：`dev.myfirst.N.vec.admin.fire_count`、`dev.myfirst.N.vec.rx.fire_count` 等。使用 `SYSCTL_ADD_NODE` 创建树节点。
 
 ### 挑战8：DTrace 监测
 
-Write a DTrace script that shows the per-CPU distribution of each vector's filter invocations. Plot the per-CPU breakdown as a histogram. This is the diagnostic that confirms CPU binding is working.
+编写一个 DTrace 脚本，显示每个向量过滤器调用的每 CPU 分布。将每 CPU 分解绘制为直方图。这是确认 CPU 绑定正在工作的诊断方法。
 
 
 
@@ -3484,47 +3484,47 @@ Write a DTrace script that shows the per-CPU distribution of each vector's filte
 
 ### "pci_alloc_msix 返回 EBUSY 或 ENXIO"
 
-Possible causes:
+可能的原因：
 
-1. The device is not connected in a way that supports MSI-X (legacy virtio-rnd on bhyve, for example). Check `pciconf -lvc`.
-2. A previous load of the driver did not call `pci_release_msi` at teardown. Reboot or try `kldunload` + `kldload` again.
-3. The kernel ran out of interrupt vectors. Rare on modern x86, possible on low-vector platforms.
+1. 设备未以支持 MSI-X 的方式连接（例如，bhyve 上的 legacy virtio-rnd）。检查 `pciconf -lvc`。
+2. 先前加载的驱动程序在拆除时未调用 `pci_release_msi`。重新启动或尝试再次 `kldunload` + `kldload`。
+3. 内核用尽了中断向量。在现代 x86 上很少见，在低向量平台上可能发生。
 
 ### "vmstat -i 在 MSI-X guest 上只显示一行"
 
-Likely cause: `pci_alloc_msix` succeeded but allocated only 1 vector. Check the returned count vs requested. Either accept (fold work into one) or release and fall back.
+可能的原因：`pci_alloc_msix` 成功但只分配了 1 个向量。检查返回计数与请求计数。接受（将工作合并到一个）或释放并回退。
 
 ### "过滤器触发但 vec->fire_count 保持为零"
 
-Likely cause: the `sc` argument is confused with `vec`. The handler receives `vec`, not `sc`. Check `bus_setup_intr`'s argument.
+可能的原因：`sc` 参数与 `vec` 混淆。处理程序接收 `vec`，而不是 `sc`。检查 `bus_setup_intr` 的参数。
 
 ### "多次加载/卸载循环后 kldunload 时驱动崩溃"
 
-Likely cause: `pci_release_msi` not called on teardown. The device-level MSI state leaks across loads; eventually the kernel's internal bookkeeping is confused.
+可能的原因：拆除时未调用 `pci_release_msi`。设备级 MSI 状态在加载之间泄漏；最终内核的内部记账混乱。
 
 ### "不同的向量都在同一个 CPU 上触发"
 
-Likely cause: `bus_bind_intr` failed silently. Check the return value and log non-zero results.
+可能的原因：`bus_bind_intr` 静默失败。检查返回值并记录非零结果。
 
 ### "MSI-X 分配成功但 vmstat -i 不显示事件"
 
-Likely cause: the device's `INTR_MASK` write targeted the wrong register or was skipped. Verify the mask is set (Chapter 17/Chapter 19 diagnostic).
+可能的原因：设备的 `INTR_MASK` 写入针对了错误的寄存器或被跳过。验证掩码已设置（第17章/第19章诊断）。
 
 ### "杂散中断在 MSI-X 管理向量上累积"
 
-Likely cause: the admin filter's status check is wrong; the filter returns `FILTER_STRAY` when it should handle. Check the `status & MYFIRST_INTR_ERROR` check.
+可能的原因：管理过滤器的状态检查错误；过滤器应该处理时返回了 `FILTER_STRAY`。检查 `status & MYFIRST_INTR_ERROR` 检查。
 
 ### "legacy 回退上的共享 IRQ 行为与 MSI-X 不同"
 
-Expected. On legacy INTx the single handler sees every event bit; on MSI-X each vector sees only its own event. Tests that exercise per-vector stray counts differ between the two modes.
+这是预期的。在 legacy INTx 上，单个处理程序看到每个事件位；在 MSI-X 上，每个向量只看到自己的事件。练习每向量杂散计数的测试在这两种模式下不同。
 
 ### "阶段 2 编译通过但阶段 3 在 `bus_get_cpus` 链接错误处失败"
 
-Cause: `bus_get_cpus` may not be available in older FreeBSD versions or may require specific `#include <sys/bus.h>` placement. Check the include order.
+原因：`bus_get_cpus` 可能在较旧的 FreeBSD 版本中不可用，或可能需要特定的 `#include <sys/bus.h>` 放置。检查 include 顺序。
 
 ### "QEMU guest 不暴露 MSI-X 即使使用 virtio-rng-pci"
 
-Likely cause: older QEMU versions use legacy virtio by default. Check `pciconf -lvc` in the guest; if MSI-X is not listed, the guest is using legacy. Update QEMU or use `-device virtio-rng-pci,disable-modern=off,disable-legacy=on`.
+可能的原因：较旧的 QEMU 版本默认使用 legacy virtio。在 guest 中检查 `pciconf -lvc`；如果未列出 MSI-X，则 guest 正在使用 legacy。更新 QEMU 或使用 `-device virtio-rng-pci,disable-modern=off,disable-legacy=on`。
 
 
 
@@ -3562,7 +3562,7 @@ Likely cause: older QEMU versions use legacy virtio by default. Check `pciconf -
 
 ## 通往第21章的桥梁
 
-第 21 章标题为 *DMA 和高速数据传输*。其范围是第 20 章刻意未涉及的主题：设备直接读写 RAM 的能力，无需驱动程序参与每个字。 A NIC with a 64-entry receive descriptor ring populates those entries by DMA from the wire; a single interrupt signals "N entries are ready". The driver's handler walks the ring and processes the entries. Without DMA the driver would have to read each byte from a device register, which does not scale.
+第 21 章标题为 *DMA 和高速数据传输*。其范围是第 20 章刻意未涉及的主题：设备直接读写 RAM 的能力，无需驱动程序参与每个字。 具有 64 条目接收描述符环的 NIC 通过 DMA 从线路上填充这些条目；单个中断信号表示"N 条目已就绪"。驱动程序的处理程序遍历环并处理条目。没有 DMA，驱动程序必须从设备寄存器读取每个字节，这无法扩展。
 
 第 20 章以三种具体方式做好了准备。
 
@@ -3574,15 +3574,15 @@ Likely cause: older QEMU versions use legacy virtio by default. Check `pciconf -
 
 第 21 章将涵盖的具体主题：
 
-- What DMA is, the difference between memory-mapped I/O and DMA.
-- `bus_dma(9)`: tags, maps, and the DMA state machine.
-- `bus_dma_tag_create` to describe DMA requirements (alignment, boundaries, address range).
-- `bus_dmamap_create` and `bus_dmamap_load` to set up DMA transfers.
-- Synchronisation: `bus_dmamap_sync` around DMA.
-- Bounce buffers: what they are and when they are used.
-- Cache coherence: why CPUs and devices see different memory at different times.
-- Scatter-gather lists: physical addresses that are not contiguous.
-- Ring buffers: the producer-consumer descriptor ring pattern.
+- DMA 是什么，内存映射 I/O 与 DMA 的区别。
+- `bus_dma(9)`：标签、映射和 DMA 状态机。
+- `bus_dma_tag_create` 描述 DMA 需求（对齐、边界、地址范围）。
+- `bus_dmamap_create` 和 `bus_dmamap_load` 设置 DMA 传输。
+- 同步：DMA 前后的 `bus_dmamap_sync`。
+- 反弹缓冲区：它们是什么以及何时使用。
+- 缓存一致性：为什么 CPU 和设备在不同时间看到不同的内容。
+- 分散-聚集列表：不连续的物理地址。
+- 环形缓冲区：生产者-消费者描述符环模式。
 
 你不需要提前阅读。第 20 章已足够准备。带上你的 `myfirst` 驱动程序（`1.3-msi` 版本）、`LOCKING.md`、`INTERRUPTS.md`、`MSIX.md`、启用 `WITNESS` 的内核和回归脚本。第 21 章从第 20 章结束的地方开始。
 

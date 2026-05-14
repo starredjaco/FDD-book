@@ -1,6 +1,6 @@
 ---
 title: "访问硬件"
-description: "Part 4 opens with the first chapter that teaches the driver how to speak to hardware directly: what hardware I/O means, how memory-mapped I/O differs from port-mapped I/O, how bus_space(9) gives FreeBSD drivers a portable vocabulary for register access, how to simulate a register block in kernel memory so the reader can learn without real hardware, how to integrate register-style access into the evolving myfirst driver, and how to keep MMIO safe under concurrency."
+description: "第四部分以第一章开始，教授驱动程序如何直接与硬件对话：硬件 I/O 的含义、内存映射 I/O 与端口映射 I/O 的区别、bus_space(9) 如何为 FreeBSD 驱动程序提供可移植的寄存器访问词汇、如何在内核内存中模拟寄存器块以便读者无需真实硬件即可学习、如何将寄存器式访问集成到不断演进的 myfirst 驱动程序中，以及如何在并发下保持 MMIO 的安全性。"
 partNumber: 4
 partName: "硬件与平台级集成"
 chapter: 16
@@ -13,319 +13,319 @@ estimatedReadTime: 195
 language: "zh-CN"
 ---
 
-# Accessing Hardware
+# 访问硬件
 
-## Reader Guidance & Outcomes
+## 读者指南与学习目标
 
-Part 3 ended with a driver that knew how to coordinate itself. The `myfirst` module at version `0.9-coordination` has a mutex protecting its data path, a pair of condition variables that let readers and writers wait patiently for the buffer state they need, a shared and exclusive lock protecting its configuration, three callouts that give it internal time, a private taskqueue with three tasks that defer work out of constrained contexts, a counting semaphore that caps concurrent writers, an atomic flag that carries the shutdown story across every context, and a small header that names every synchronisation primitive the driver uses. The chapters that built it introduced seven primitives, tied them together with one detach ordering, and documented the whole story in a living `LOCKING.md`.
+第三部分以一个懂得如何协调自身的驱动程序结束。版本为 `0.9-coordination` 的 `myfirst` 模块拥有一个保护其数据路径的互斥锁、一对让读写者耐心等待所需缓冲区状态的条件变量、一个保护其配置的共享/排他锁、三个提供内部计时的 callout、一个包含三个任务用于将工作从受限上下文中推迟执行的私有任务队列、一个限制并发写入者数量的计数信号量、一个在所有上下文中传递关闭状态的原子标志，以及一个小型头文件来命名驱动程序使用的每个同步原语。构建它的章节引入了七个原语，用一个分离顺序将它们联系在一起，并在一份活的 `LOCKING.md` 中记录了整个故事。
 
-What the driver does not yet have is a hardware story. Every invariant it coordinates is internal. Every byte that flows through it originates in user space through `write(2)` or is produced by a callout from its own imagination. Nothing in the driver reaches outside the kernel's own memory. A real FreeBSD driver usually exists because there is a device to talk to: a network card, a storage controller, a serial port, a sensor, a custom FPGA, a GPU. That conversation is what Part 4 is about, and Chapter 16 is where it begins.
+驱动程序目前还没有硬件方面的故事。它协调的每个不变量都是内部的。流经它的每个字节要么源自用户空间通过 `write(2)` 产生，要么是由它自己的 callout 想象出来的。驱动程序中没有任何东西会触及内核自身内存之外。一个真正的 FreeBSD 驱动程序通常存在是因为有一个设备需要与之对话：网卡、存储控制器、串口、传感器、定制 FPGA、GPU。这个对话就是第四部分的内容，第 16 章就是它的起点。
 
-Chapter 16's scope is deliberately narrow. It teaches the mental model of hardware I/O and the vocabulary of `bus_space(9)`, the FreeBSD abstraction that lets a single driver talk to a device the same way on every supported architecture. It walks through a simulated register block so the reader can practise register-style access without owning real hardware, and it integrates that simulation into the `myfirst` driver in a way that evolves naturally from Chapter 15 rather than throwing the driver away. It covers the safety rules that MMIO demands (memory barriers, access ordering, locking around shared registers) and shows how to debug and trace register-level access. It ends with a small refactor that separates hardware-access code from the driver's business logic, preparing the file layout every later Part 4 chapter will rely on.
+第 16 章的范围是刻意收窄的。它教授硬件 I/O 的心智模型和 `bus_space(9)` 的词汇，这是 FreeBSD 的抽象层，让单个驱动程序在所有支持的架构上以相同的方式与设备通信。它引导读者走完一个模拟寄存器块，使读者可以在没有真实硬件的情况下练习寄存器式访问，并将该模拟集成到 `myfirst` 驱动程序中，以自然地延续第 15 章的方式演进，而不是推翻重来。它涵盖了 MMIO 所要求的安全规则（内存屏障、访问排序、共享寄存器周围的加锁），并展示了如何调试和跟踪寄存器级访问。它以一次小型重构结束，将硬件访问代码与驱动程序的业务逻辑分离，为后续每个第四部分章节将依赖的文件布局做好准备。
 
-Several questions are deliberately postponed so that Chapter 16 can dwell on the vocabulary itself. Dynamic register behaviour, callout-driven status changes, and fault injection belong to Chapter 17. Real PCI devices, BAR mapping, vendor and device ID matching, `pciconf` and `pci(4)`, and the newbus glue that ties PCI drivers to the bus subsystem belong to Chapter 18. Interrupts and their split between filter handlers and interrupt threads are Chapter 19. DMA and bus master programming are Chapter 20 and Chapter 21. Chapter 16 stays inside the ground it can cover well, and it hands off explicitly when a topic deserves its own chapter.
+几个问题被刻意推迟，以便第 16 章能专注于词汇本身。动态寄存器行为、callout 驱动的状态变化和故障注入属于第 17 章。真实 PCI 设备、BAR 映射、供应商和设备 ID 匹配、`pciconf` 和 `pci(4)`，以及将 PCI 驱动程序连接到总线子系统的 newbus 粘合代码属于第 18 章。中断及其在过滤处理程序和中断线程之间的划分是第 19 章。DMA 和总线主控编程是第 20 章和第 21 章。第 16 章停留在它能很好覆盖的范围内，并在一个主题值得独立成章时明确交接。
 
-Part 4 opens here, and an opening deserves a small pause. Part 3 taught you how to behave inside the driver when many actors touch shared state. Part 4 teaches how the driver reaches outside itself. An interrupt handler runs in a context Part 3 taught you how to reason about and accesses memory Part 4 will teach you how to map. A register write in Part 4 must respect a lock Part 3 taught you how to manage. The disciplines stack. Chapter 16 is your first practice with `bus_space(9)`; Part 3's discipline is what keeps the practice honest.
+第四部分从此开始，一个开始值得稍作停顿。第三部分教你当多个参与者接触共享状态时如何在驱动程序内部正确行事。第四部分教驱动程序如何触及自身之外。中断处理程序运行在第三部分教过你如何推理的上下文中，访问第四部分将教你如何映射的内存。第四部分中的寄存器写入必须遵守第三部分教过你如何管理的锁。这些规范是叠加的。第 16 章是你对 `bus_space(9)` 的第一次实践；第三部分的规范是让这次实践保持诚实的基础。
 
-### Why bus_space(9) Earns a Chapter of Its Own
+### 为什么 bus_space(9) 值得单独成章
 
-You may already be wondering whether MMIO really needs a whole chapter. Why not jump into Chapter 17's simulation or Chapter 18's real PCI work and pick up the accessor vocabulary in passing? If you have used `bus_space(9)` before, the primitive calls in this chapter will not be new to you.
+你可能在想，MMIO 是否真的需要一整章。为什么不直接跳到第 17 章的模拟或第 18 章的真实 PCI 工作，顺便捡起访问器词汇？如果你以前用过 `bus_space(9)`，本章中的基本调用对你来说不会是新的。
 
-What Chapter 16 adds is the mental model. Hardware I/O is a topic where a small set of ideas done well pays off across every subsequent chapter, and a small set of ideas done sloppily produces quiet, persistent bugs that are hard to find later. The distinction between memory-mapped I/O and port-mapped I/O is simple once you have it and confusing until you do. The meaning of a `bus_space_tag_t` and a `bus_space_handle_t` is simple once you see what they stand for and opaque until then. The reason memory barriers matter around register access is obvious once you have thought about cache coherence and compiler reordering and irrelevant until the day a driver misbehaves for reasons you cannot explain.
+第 16 章增加的是心智模型。硬件 I/O 是一个话题，一小组建构良好的想法会在后续每个章节中产生回报，而一小组建构粗糙的想法会产生难以发现的、安静且持久的 bug。内存映射 I/O 和端口映射 I/O 之间的区别，一旦你理解了就很简单，在此之前则令人困惑。`bus_space_tag_t` 和 `bus_space_handle_t` 的含义，一旦你看到它们代表什么就很简单，在此之前则是不透明的。内存屏障在寄存器访问周围重要的原因，一旦你思考过缓存一致性和编译器重排序就显而易见，而在驱动程序因你无法解释的原因而行为异常的那一天之前则无关紧要。
 
-The chapter also earns its place by being the chapter where the `myfirst` driver gains its first hardware-facing layer. Until now, the softc held only internal state: a circular buffer, some locks, some counters, some flags. After Chapter 16, the softc will hold a simulated register block and the accessors that read and write it. That change in the driver's shape is small but formative. It sets up the file organisation and the locking discipline that every later Part 4 chapter will extend. Skipping Chapter 16 would leave the reader trying to learn register-access idioms in the middle of learning PCI, interrupts, or DMA. Doing them one at a time is kinder.
+本章也因是 `myfirst` 驱动程序获得其第一个面向硬件层的章节而赢得其位置。到目前为止，softc 只保存内部状态：一个环形缓冲区、一些锁、一些计数器、一些标志。第 16 章之后，softc 将保存一个模拟寄存器块和读写它的访问器。驱动程序形状的这个变化虽小但具有塑造性。它建立了后续每个第四部分章节将扩展的文件组织和加锁规范。跳过第 16 章会让读者在学 PCI、中断或 DMA 的同时试图学习寄存器访问惯用法。一次学一个更友善。
 
-### Where Chapter 15 Left the Driver
+### 第 15 章留给我们的驱动程序
 
-A short checkpoint before we go further. Chapter 16 extends the driver produced at the end of Chapter 15 Stage 4, tagged as version `0.9-coordination`. If any of the items below feels uncertain, return to Chapter 15 before starting this chapter.
+在继续之前做一个小检查点。第 16 章扩展的是第 15 章第 4 阶段结束时产生的驱动程序，标记为版本 `0.9-coordination`。如果以下任何项目让你感到不确定，在开始本章之前请回到第 15 章。
 
-- Your `myfirst` driver compiles cleanly and identifies itself as version `0.9-coordination`.
-- The softc holds a data-path mutex (`sc->mtx`), a configuration sx (`sc->cfg_sx`), a stats-cache sx (`sc->stats_cache_sx`), two condition variables (`sc->data_cv`, `sc->room_cv`), three callouts (`heartbeat_co`, `watchdog_co`, `tick_source_co`), a private taskqueue (`sc->tq`) with four tasks (`selwake_task`, `bulk_writer_task`, `reset_delayed_task`, `recovery_task`), and a counting semaphore (`writers_sema`) that caps concurrent writers.
-- A header `myfirst_sync.h` encapsulates every synchronisation operation under named inline functions.
-- The lock order `sc->mtx -> sc->cfg_sx -> sc->stats_cache_sx` is documented in `LOCKING.md` and enforced by `WITNESS`.
-- `INVARIANTS`, `WITNESS`, `WITNESS_SKIPSPIN`, `DDB`, `KDB`, and `KDB_UNATTENDED` are enabled in your test kernel, and you have built and booted it.
-- The Chapter 15 stress kit runs cleanly under the debug kernel.
+- 你的 `myfirst` 驱动程序能干净地编译，并标识自身为版本 `0.9-coordination`。
+- softc 包含一个数据路径互斥锁（`sc->mtx`）、一个配置 sx（`sc->cfg_sx`）、一个统计缓存 sx（`sc->stats_cache_sx`）、两个条件变量（`sc->data_cv`、`sc->room_cv`）、三个 callout（`heartbeat_co`、`watchdog_co`、`tick_source_co`）、一个包含四个任务（`selwake_task`、`bulk_writer_task`、`reset_delayed_task`、`recovery_task`）的私有任务队列（`sc->tq`），以及一个限制并发写入者的计数信号量（`writers_sema`）。
+- 一个头文件 `myfirst_sync.h` 将每个同步操作封装在命名的内联函数下。
+- 锁序 `sc->mtx -> sc->cfg_sx -> sc->stats_cache_sx` 记录在 `LOCKING.md` 中并由 `WITNESS` 强制执行。
+- `INVARIANTS`、`WITNESS`、`WITNESS_SKIPSPIN`、`DDB`、`KDB` 和 `KDB_UNATTENDED` 已在你的测试内核中启用，并且你已经构建并启动了它。
+- 第 15 章的压力测试套件在调试内核下运行干净。
 
-That driver is what Chapter 16 extends. The additions are again modest in volume: one new header (`myfirst_hw.h`), one new structure inside the softc (a simulated register block), a handful of accessor helpers, a small hardware-driven task, and a set of barriers and locks around register access. The mental model change is larger than the line count suggests.
+那个驱动程序就是第 16 章所扩展的。新增的内容在代码量上同样不多：一个新的头文件（`myfirst_hw.h`）、softc 内部的一个新结构（模拟寄存器块）、少量访问器辅助函数、一个小型硬件驱动任务，以及一组围绕寄存器访问的屏障和锁。心智模型的变化比代码行数所暗示的要大。
 
-### What You Will Learn
+### 你将学到什么
 
-Walking away from this chapter, you should be able to:
+学完本章后，你应该能够：
 
-- Describe what hardware I/O means in a driver context and why a driver cannot usually touch device memory by simply dereferencing a pointer.
-- Distinguish memory-mapped I/O (MMIO) from port-mapped I/O (PIO), and explain why MMIO dominates modern FreeBSD drivers on modern platforms.
-- Explain what a register is, what an offset is, and what a control or status field means, using the vocabulary real device datasheets use.
-- Read a simple register map table and translate it into a C header of offsets and bitmasks.
-- Describe the roles of `bus_space_tag_t` and `bus_space_handle_t` and why they are an abstraction rather than just a pointer.
-- Recognise the shape of `bus_space_read_*`, `bus_space_write_*`, `bus_space_barrier`, `bus_space_read_multi_*`, `bus_space_read_region_*`, and their `bus_*` shorthand counterparts defined over a `struct resource *`.
-- Simulate a register block in kernel memory, wrap access to it behind accessor helpers, and use those helpers to build a small driver-visible device that behaves like a real MMIO device without touching real hardware.
-- Integrate simulated register access into the evolving `myfirst` driver, with the data path reading and writing through register accessors instead of touching a raw buffer.
-- Identify when a register read has side effects and when a register write does, and why that matters for caching, compiler reordering, and debugging.
-- Use `bus_space_barrier` correctly to enforce access ordering where it is needed, and recognise when it is not needed.
-- Protect shared register state with the right kind of lock, and avoid busy-wait loops that starve other threads.
-- Log register access in a way that helps you debug a driver without drowning the reader in noise.
-- Refactor a driver so that its hardware-access layer is a named, documented, testable unit of code.
-- Tag the driver as version `0.9-mmio`, update `LOCKING.md` and `HARDWARE.md`, and run the full regression suite with hardware-access enabled.
+- 描述硬件 I/O 在驱动程序上下文中意味着什么，以及为什么驱动程序通常不能通过简单解引用指针来访问设备内存。
+- 区分内存映射 I/O（MMIO）和端口映射 I/O（PIO），并解释为什么 MMIO 在现代平台上的现代 FreeBSD 驱动程序中占主导地位。
+- 使用真实设备数据手册使用的词汇，解释什么是寄存器、什么是偏移量，以及控制字段或状态字段意味着什么。
+- 阅读简单的寄存器映射表并将其转换为包含偏移量和位掩码的 C 头文件。
+- 描述 `bus_space_tag_t` 和 `bus_space_handle_t` 的角色，以及为什么它们是一种抽象而不仅仅是指针。
+- 认识 `bus_space_read_*`、`bus_space_write_*`、`bus_space_barrier`、`bus_space_read_multi_*`、`bus_space_read_region_*` 及其定义在 `struct resource *` 上的 `bus_*` 简写形式的形式。
+- 在内核内存中模拟寄存器块，将对它的访问封装在访问器辅助函数后面，并使用这些辅助函数构建一个小的驱动程序可见设备，该设备表现得像真实的 MMIO 设备而无需触及真实硬件。
+- 将模拟寄存器访问集成到不断演进的 `myfirst` 驱动程序中，数据路径通过寄存器访问器进行读写，而不是直接操作原始缓冲区。
+- 识别寄存器读取何时有副作用、寄存器写入何时有副作用，以及为什么这对缓存、编译器重排序和调试很重要。
+- 正确使用 `bus_space_barrier` 在需要的地方强制执行访问排序，并认识什么时候不需要它。
+- 用正确类型的锁保护共享寄存器状态，避免忙等循环使其他线程饥饿。
+- 以有助于调试驱动程序而不会让读者淹没在噪音中的方式记录寄存器访问日志。
+- 重构驱动程序，使其硬件访问层成为一个命名的、有文档的、可测试的代码单元。
+- 将驱动程序标记为版本 `0.9-mmio`，更新 `LOCKING.md` 和 `HARDWARE.md`，并运行启用硬件访问的完整回归测试套件。
 
-The list is long; each item is narrow. The point of the chapter is the composition.
+这个列表很长；每一项都很窄。本章的重点在于组合。
 
-### What This Chapter Does Not Cover
+### 本章不涵盖的内容
 
-Several adjacent topics are explicitly deferred so Chapter 16 stays focused.
+几个相邻主题被明确推迟，以保持第 16 章的专注。
 
-- **Full hardware simulation with dynamic behaviour.** The simulation in this chapter is static enough to teach the register-access vocabulary. Chapter 17 makes the simulation dynamic, with timers that change status registers, events that flip ready bits, and fault injection paths.
-- **The PCI subsystem.** `pci(4)`, vendor and device ID matching, `pciconf`, `pci_enable_busmaster`, BAR mapping, MSI and MSI-X, and power management quirks belong to Chapter 18. Chapter 16 mentions PCI only when it is useful to say "this is where your BAR would come from if this were real".
-- **Interrupt handlers.** `bus_setup_intr(9)`, filter handlers, interrupt threads, `INTR_MPSAFE`, and the filter-plus-task split are Chapter 19. Chapter 16 hints at them only to explain why a read with side effects matters.
-- **DMA.** `bus_dma(9)`, `bus_dma_tag_create`, `bus_dmamap_load`, bounce buffers, cache flushing around DMA, and scatter-gather lists are Chapter 20 and Chapter 21.
-- **Architecture-specific register access oddities.** Weakly-ordered memory models, arm64 device memory attributes, big-endian byte swapping on MIPS and PowerPC, and non-coherent caches on some embedded platforms are mentioned in passing; a deep treatment belongs to the portability chapters.
-- **Real-world driver case studies.** Chapter 16 points at `if_ale.c`, `if_em.c`, and `uart_bus_pci.c` as examples of the patterns taught here, but it does not dissect them at length. Later chapters do that work where it fits their own themes.
+- **具有动态行为的完整硬件模拟。** 本章的模拟足够静态，可以教授寄存器访问词汇。第 17 章使模拟变得动态，带有改变状态寄存器的计时器、翻转就绪位的事件和故障注入路径。
+- **PCI 子系统。** `pci(4)`、供应商和设备 ID 匹配、`pciconf`、`pci_enable_busmaster`、BAR 映射、MSI 和 MSI-X，以及电源管理特性属于第 18 章。第 16 章只在适合说"如果这是真的，你的 BAR 就会从这里来"的时候提及 PCI。
+- **中断处理程序。** `bus_setup_intr(9)`、过滤处理程序、中断线程、`INTR_MPSAFE` 以及过滤器加任务的拆分是第 19 章。第 16 章只是暗示它们，以解释为什么带副作用的读取很重要。
+- **DMA。** `bus_dma(9)`、`bus_dma_tag_create`、`bus_dmamap_load`、弹跳缓冲区、DMA 周围的缓存刷新以及散聚列表是第 20 章和第 21 章。
+- **架构特定的寄存器访问特性。** 弱序内存模型、arm64 设备内存属性、MIPS 和 PowerPC 上的大端字节交换，以及某些嵌入式平台上的非一致性缓存只是简单提及；深入处理属于可移植性章节。
+- **真实世界驱动程序案例研究。** 第 16 章将 `if_ale.c`、`if_em.c` 和 `uart_bus_pci.c` 指向为所授模式的示例，但不会长篇分析。后续章节在适合各自主题的地方做这项工作。
 
-Staying inside those lines keeps Chapter 16 a chapter about the vocabulary of hardware access. The vocabulary is what transfers; the specific subsystems are what Chapters 17 through 22 apply the vocabulary to.
+保持在这些边界内让第 16 章成为一章关于硬件访问词汇的章节。词汇是可以迁移的；特定子系统是第 17 章到第 22 章将词汇应用到的对象。
 
-### Estimated Time Investment
+### 预估时间投入
 
-- **Reading only**: three to four hours. The vocabulary is small but it requires thinking carefully about each term.
-- **Reading plus typing the worked examples**: seven to nine hours over two sessions. The driver evolves in four stages and each stage is a small but real refactor.
-- **Reading plus all labs and challenges**: twelve to fifteen hours over three or four sessions, including stress testing and reading some real FreeBSD drivers.
+- **仅阅读**：三到四小时。词汇虽小，但需要仔细思考每个术语。
+- **阅读加输入示例代码**：分两次完成，共七到九小时。驱动程序分四个阶段演进，每个阶段都是一次小而真实的重构。
+- **阅读加所有实验和挑战**：分三到四次完成，共十二到十五小时，包括压力测试和阅读一些真实的 FreeBSD 驱动程序。
 
-Section 2 and Section 3 are the densest. If the abstraction of a tag and a handle feels opaque on first pass, that is normal. Stop, re-read the worked mapping in Section 3, and continue when the shape has settled.
+第 2 节和第 3 节是最密集的。如果标签和句柄的抽象在第一次阅读时感觉不透明，那是正常的。停下来，重新阅读第 3 节中的映射示例，当形状稳定下来后继续。
 
-### Prerequisites
+### 先决条件
 
-Before starting this chapter, confirm:
+在开始本章之前，确认：
 
-- Your driver source matches Chapter 15 Stage 4 (`stage4-final`). The starting point assumes every Chapter 15 primitive, every Chapter 14 taskqueue, every Chapter 13 callout, every Chapter 12 cv and sx, and the Chapter 11 concurrent IO model.
-- Your lab machine runs FreeBSD 14.3 with `/usr/src` on disk and matching the running kernel.
-- A debug kernel with `INVARIANTS`, `WITNESS`, `WITNESS_SKIPSPIN`, `DDB`, `KDB`, and `KDB_UNATTENDED` is built, installed, and booting cleanly.
-- You understand the Chapter 15 detach ordering well enough to extend it without getting lost.
-- You are comfortable reading hexadecimal offsets and bitmasks.
+- 你的驱动程序源代码与第 15 章第 4 阶段（`stage4-final`）匹配。起点假设拥有第 15 章的每个原语、第 14 章的每个任务队列、第 13 章的每个 callout、第 12 章的每个 cv 和 sx，以及第 11 章的并发 IO 模型。
+- 你的实验机器运行 FreeBSD 14.3，`/usr/src` 在磁盘上并与运行中的内核匹配。
+- 一个启用了 `INVARIANTS`、`WITNESS`、`WITNESS_SKIPSPIN`、`DDB`、`KDB` 和 `KDB_UNATTENDED` 的调试内核已构建、安装并正常启动。
+- 你足够理解第 15 章的分离顺序，能够在扩展时不会迷失。
+- 你能熟练阅读十六进制偏移量和位掩码。
 
-If any item above is shaky, fix it now rather than pushing through Chapter 16 and trying to reason from a moving foundation. Hardware-access code is sensitive to small mistakes, and a debug kernel catches most of them on first contact.
+如果以上任何项目不够稳固，现在就修复它，而不是硬推到第 16 章试图在不稳固的基础上推理。硬件访问代码对细微错误很敏感，调试内核在首次接触时就能捕获大部分错误。
 
-### How to Get the Most Out of This Chapter
+### 如何从本章获得最大收益
 
-Three habits will pay off quickly.
+三个习惯会很快产生回报。
 
-First, keep `/usr/src/sys/sys/bus.h` and `/usr/src/sys/x86/include/bus.h` bookmarked. The `bus.h` file in `/usr/src/sys/sys/` defines the shorthand `bus_read_*` and `bus_write_*` macros over a `struct resource *`. The per-architecture `bus.h` in `/usr/src/sys/x86/include/` (or its equivalent for your platform) defines the lower-level `bus_space_read_*` and `bus_space_write_*` functions and shows you exactly what they compile to. Reading those two files once takes about thirty minutes and removes almost all the mystery from the chapter.
+第一，把 `/usr/src/sys/sys/bus.h` 和 `/usr/src/sys/x86/include/bus.h` 加上书签。`/usr/src/sys/sys/` 中的 `bus.h` 文件定义了 `struct resource *` 上的简写 `bus_read_*` 和 `bus_write_*` 宏。`/usr/src/sys/x86/include/`（或你平台的等效文件）中的每架构 `bus.h` 定义了较低层的 `bus_space_read_*` 和 `bus_space_write_*` 函数，并确切展示它们编译成什么。阅读这两个文件一次大约需要三十分钟，并且能消除本章中几乎所有的神秘感。
 
-Second, compare every new accessor to what you would have written with plain C. The exercise "if I did not have `bus_space_read_4`, how would I express this register read?" is instructive. The answer on x86 is usually "a `volatile` pointer dereference plus a compiler barrier". Seeing the contrast is how the value of the abstraction becomes concrete: the abstraction is the same code, wrapped in a name that carries portability, tracing, and documentation.
+第二，将每个新的访问器与你用普通 C 会写出的代码进行比较。"如果我没有 `bus_space_read_4`，我会如何表达这个寄存器读取？"这个练习很有启发性。在 x86 上的答案通常是"一个 `volatile` 指针解引用加一个编译器屏障"。看到这种对比是让抽象的价值变得具体的方式：抽象是相同的代码，包装在一个携带可移植性、跟踪和文档的名称中。
 
-Third, type the changes by hand and run each stage. Hardware-access code is code where muscle memory matters. Typing `sc->regs[MYFIRST_REG_CONTROL]` and `bus_write_4(sc->res, MYFIRST_REG_CONTROL, value)` a dozen times is how the difference between raw access and abstracted access becomes visible at a glance. The companion source under `examples/part-04/ch16-accessing-hardware/` is the reference version, but the muscle memory comes from typing.
+第三，亲手输入更改并运行每个阶段。硬件访问代码是需要肌肉记忆的代码。输入 `sc->regs[MYFIRST_REG_CONTROL]` 和 `bus_write_4(sc->res, MYFIRST_REG_CONTROL, value)` 十几次是让原始访问和抽象访问之间的区别一目了然的方式。`examples/part-04/ch16-accessing-hardware/` 下的配套源代码是参考版本，但肌肉记忆来自于亲手输入。
 
-### Roadmap Through the Chapter
+### 本章路线图
 
-The sections in order are:
+各节按顺序排列：
 
-1. **What Is Hardware I/O?** The mental model of register access, how the driver talks to the device without touching its internals, and what kinds of resources drivers care about.
-2. **Understanding Memory-Mapped I/O (MMIO).** How devices appear as memory regions, why a raw pointer cast is not how a driver reaches them, and what alignment and endianness mean here.
-3. **Introduction to `bus_space(9)`.** The tag and handle abstraction, the shape of the read and write functions, and the difference between the `bus_space_*` family and the `bus_*` shorthand over a `struct resource *`.
-4. **Simulating Hardware for Testing.** A register block allocated with `malloc(9)`, shaped to resemble a real device, with accessors that mirror `bus_space` semantics. Stage 1 of the Chapter 16 driver.
-5. **Using `bus_space` in a Real Driver Context.** Integrating the simulated block into `myfirst`, exposing a tiny read-write register interface through the driver, and demonstrating how a task can change register state over time. Stage 2 begins here.
-6. **Safety and Synchronisation with MMIO.** Memory barriers, access ordering, locking around registers, and why busy-wait loops are a mistake. Stage 3 of the driver adds the safety discipline.
-7. **Debugging and Tracing Hardware Access.** Logging, DTrace, sysctl probes, and the small observability layer that makes register access visible without cluttering the driver.
-8. **Refactoring and Versioning Your MMIO-Ready Driver.** The final split into `myfirst_hw.h` and `myfirst.c`, the documentation update, and the version bump to `0.9-mmio`. Stage 4 of the driver.
+1. **什么是硬件 I/O？** 寄存器访问的心智模型，驱动程序如何在不触及设备内部的情况下与设备通信，以及驱动程序关心哪些类型的资源。
+2. **理解内存映射 I/O（MMIO）。** 设备如何作为内存区域出现，为什么原始指针类型转换不是驱动程序访问设备的方式，以及在此上下文中对齐和字节序意味着什么。
+3. **`bus_space(9)` 简介。** 标签和句柄抽象，读写函数的形式，以及 `bus_space_*` 系列与 `struct resource *` 上的 `bus_*` 简写之间的区别。
+4. **为测试模拟硬件。** 一个用 `malloc(9)` 分配的寄存器块，形状类似于真实设备，带有镜像 `bus_space` 语义的访问器。第 16 章驱动程序的第 1 阶段。
+5. **在真实驱动程序上下文中使用 `bus_space`。** 将模拟块集成到 `myfirst` 中，通过驱动程序暴露一个微小的读写寄存器接口，并演示任务如何随时间改变寄存器状态。第 2 阶段从这里开始。
+6. **MMIO 的安全与同步。** 内存屏障、访问排序、寄存器周围的加锁，以及为什么忙等循环是错误的。驱动程序的第 3 阶段添加了安全规范。
+7. **调试和跟踪硬件访问。** 日志记录、DTrace、sysctl 探针，以及使寄存器访问可见而不会使驱动程序变得杂乱的小型可观测性层。
+8. **重构和版本化你的 MMIO 就绪驱动程序。** 最终拆分为 `myfirst_hw.h` 和 `myfirst.c`，文档更新，以及版本号提升到 `0.9-mmio`。驱动程序的第 4 阶段。
 
-After the eight sections come hands-on labs, challenge exercises, a troubleshooting reference, a Wrapping Up that closes Part 3's habits and opens Part 4's, and a bridge to Chapter 17. The reference-and-cheat-sheet material at the end of the chapter is meant to be re-read as you work through later Part 4 chapters; the vocabulary of Chapter 16 is reused in every one of them.
+八个节之后是动手实验、挑战练习、故障排除参考、一个关闭第三部分习惯并开启第四部分习惯的总结，以及通往第 17 章的桥梁。本章末尾的参考和速查材料旨在在你学习后续第四部分章节时重新阅读；第 16 章的词汇在它们每一个中都会被重用。
 
-If this is your first pass, read linearly and do the labs in order. If you are revisiting, Sections 3 and 6 stand alone and make good single-sitting reads.
+如果这是你第一次阅读，请线性阅读并按顺序完成实验。如果你是复习，第 3 节和第 6 节可以独立阅读，适合单次坐下来阅读。
 
 
 
-## Section 1: What Is Hardware I/O?
+## 第 1 节：什么是硬件 I/O？
 
-The Chapter 15 driver's world is small. Everything it cares about, it allocates for itself. The circular buffer is a `cbuf_t` inside the softc. The heartbeat is a `struct callout` inside the softc. The writers semaphore is a `struct sema` inside the softc. Every piece of state the driver touches is memory the kernel allocator has given it. Reading from or writing to that state is a plain C memory access: a field assignment, a pointer dereference, or a call to a helper that does one of those things under a lock.
+第 15 章驱动程序的世界很小。它关心的一切都是自己分配的。环形缓冲区是 softc 内部的一个 `cbuf_t`。心跳计时器是 softc 内部的一个 `struct callout`。写入者信号量是 softc 内部的一个 `struct sema`。驱动程序接触的每一块状态都是内核分配器给它的内存。从该状态读取或向其写入是一个普通的 C 内存访问：字段赋值、指针解引用，或者调用一个在锁保护下执行其中之一的辅助函数。
 
-Hardware changes that world. A hardware device is not kernel memory. It is a separate piece of silicon, usually on a different chip from the CPU, with its own registers, its own buffers, its own internal state, and its own rules for how the CPU may communicate with it. A driver's job is to translate the kernel's view of the world, which is software, into the device's view of the world, which is hardware. The first step in that translation is learning how the CPU and the device talk to each other at all.
+硬件改变了这个世界。硬件设备不是内核内存。它是一块独立的硅片，通常在与 CPU 不同的芯片上，拥有自己的寄存器、自己的缓冲区、自己的内部状态，以及自己关于 CPU 如何与之通信的规则。驱动程序的工作是将内核的世界观（软件）转换为设备的世界观（硬件）。这种转换的第一步是学习 CPU 和设备究竟如何相互通信。
 
-This section introduces the mental model. Later sections build on it. The goal of Section 1 is not to make you write any code yet. The goal is to establish the vocabulary and the model clearly enough that everything that follows lands softly.
+本节介绍心智模型。后续章节在此基础上构建。第 1 节的目标不是让你编写任何代码。目标是足够清晰地建立词汇和模型，使后续所有内容都能平稳落地。
 
-### The Device as a Cooperating Partner
+### 设备作为协作伙伴
 
-A useful first picture is to think of a hardware device not as an object the driver controls, but as a cooperating partner the driver talks to. The device does some fixed amount of work autonomously. A disk rotates whether the driver is attentive or not. A network card receives packets off the wire without asking permission. A temperature sensor measures temperature continuously. A keyboard controller scans the keyboard matrix on a timer of its own. In every case, the device has internal behaviour the driver cannot directly influence.
+一个有用的第一幅画面是：不要把硬件设备想象成驱动程序控制的对象，而要把它想象成驱动程序与之对话的协作伙伴。设备自主完成一定量的工作。磁盘不管驱动程序是否在关注都在旋转。网卡不经许可就从线路接收数据包。温度传感器持续测量温度。键盘控制器按自己的计时器扫描键盘矩阵。在每种情况下，设备都有驱动程序无法直接影响的内部行为。
 
-What the driver can do is send the device commands and receive the device's status and data. The device exposes a small interface: a set of registers, each with a specific meaning, each with a specific protocol for how the driver may read or write it. The driver writes a value to a control register to tell the device what to do. The driver reads a value from a status register to find out what the device is doing. The driver reads a value from a data register to get data the device has received. The driver writes a value to a data register to send data the device should transmit.
+驱动程序能做的是向设备发送命令并接收设备的状态和数据。设备暴露一个小型接口：一组寄存器，每个都有特定含义，每个都有关于驱动程序如何读写的特定协议。驱动程序向控制寄存器写入值来告诉设备该做什么。驱动程序从状态寄存器读取值来了解设备正在做什么。驱动程序从数据寄存器读取值来获取设备已接收的数据。驱动程序向数据寄存器写入值来发送设备应该传输的数据。
 
-Registers, in this picture, are the conversation. The driver does not call a method on the device and does not pass arguments in the C sense. The driver writes a specific value at a specific offset, and the device reads that write and responds. The device writes a specific value at a specific offset, and the driver reads that write to see what the device is telling it. The protocol is entirely defined by the device's documentation, which is usually a datasheet. The driver's job is to follow the protocol.
+在这个画面中，寄存器就是对话。驱动程序不是在设备上调用方法，也不是以 C 的意义传递参数。驱动程序在特定偏移量处写入特定值，设备读取该写入并做出响应。设备在特定偏移量处写入特定值，驱动程序读取该写入以了解设备在告诉它什么。协议完全由设备的文档定义，通常是数据手册。驱动程序的工作是遵循协议。
 
-That word "partner" is doing a lot of work. Hardware is famously unforgiving. A device does not document every wrong thing the driver could do; it simply does something wrong, or undefined, if the driver breaks the protocol. A driver that writes the wrong value to a control register may brick a device until the next power cycle. A driver that reads a status register before the device has finished a previous command may see stale data and make a bad decision. A driver that does not clear an interrupt flag before returning from an interrupt handler may leave the device thinking the interrupt is still pending. The partner metaphor is cooperative in intent; the actual relationship is one where the driver must be very polite and very attentive, because the device has no way to object except by misbehaving.
+"伙伴"这个词承载了很多含义。硬件以不宽容著称。设备不会记录驱动程序可能做的每一件错事；如果驱动程序违反了协议，它只是做一些错误的或未定义的事情。向控制寄存器写入错误值的驱动程序可能会使设备变砖直到下一次加电循环。在设备完成上一个命令之前读取状态寄存器的驱动程序可能会看到陈旧数据并做出错误决定。从中断处理程序返回前不清除中断标志的驱动程序可能会让设备认为中断仍在挂起。伙伴的比喻在意图上是协作的；实际的关系是驱动程序必须非常有礼貌、非常专注，因为设备除了行为异常之外没有其他方式来表达反对。
 
-### What "Accessing Hardware" Really Means
+### "访问硬件"真正意味着什么
 
-The phrase "accessing hardware" shows up in every kernel programming text, and it rewards a closer look. What does the CPU actually do when a driver reads a register from a device?
+"访问硬件"这个短语出现在每一本内核编程教科书中，值得仔细审视。当驱动程序从设备读取寄存器时，CPU 实际上做了什么？
 
-On modern platforms the most common answer is: the CPU issues a memory access to a specific physical address, and the memory controller routes that access to the device rather than to RAM. From the CPU's point of view, it looks like an ordinary load or store. From the device's point of view, it is a message from the CPU addressed to a specific internal register. The wiring in between, the memory controller and the bus fabric, is what makes the routing work.
+在现代平台上，最常见的答案是：CPU 向特定物理地址发出内存访问，内存控制器将该访问路由到设备而不是 RAM。从 CPU 的角度来看，它看起来像一个普通的加载或存储。从设备的角度来看，它是来自 CPU 的、寻址到特定内部寄存器的消息。中间的布线，即内存控制器和总线结构，是使路由生效的关键。
 
-That is memory-mapped I/O. The CPU uses normal load and store instructions. The address happens to be routed to a device instead of to RAM. The device exposes its registers as a range of physical addresses, and the driver reads and writes within that range the way it would read and write any other memory.
+这就是内存映射 I/O。CPU 使用普通的加载和存储指令。地址恰好被路由到设备而不是 RAM。设备将其寄存器暴露为一段物理地址范围，驱动程序在该范围内读写，就像读写任何其他内存一样。
 
-An older, less common answer on x86 CPUs is: the CPU issues a special I/O instruction (`in` or `out`) to a specific I/O port number, and the chipset routes that instruction to the device. The CPU is not using a load or store; it is using a dedicated instruction that operates on a separate address space, called I/O port space or port-mapped I/O. This was the original mechanism on x86 and is still in use for some legacy devices, but modern drivers rarely see it except in compatibility paths.
+在 x86 CPU 上，一个更老、不太常见的答案是：CPU 向特定 I/O 端口号发出特殊 I/O 指令（`in` 或 `out`），芯片组将该指令路由到设备。CPU 不是在使用加载或存储；它在使用一条在独立地址空间（称为 I/O 端口空间或端口映射 I/O）上操作的专用指令。这是 x86 上最初的机制，一些传统设备仍在使用，但现代驱动程序除了兼容路径外很少见到它。
 
-FreeBSD abstracts both mechanisms behind a single API. The driver does not care, most of the time, whether a register is reached through a memory access or through an I/O instruction. The abstraction is `bus_space(9)`, which Section 3 introduces. For now, notice that "accessing hardware" is a physical operation on the CPU that the OS hides behind a software interface. The driver writes `bus_space_write_4(tag, handle, offset, value)`, and the kernel does the right thing depending on the platform and the resource type.
+FreeBSD 将两种机制抽象到单个 API 后面。驱动程序大多数时候不关心寄存器是通过内存访问还是通过 I/O 指令到达的。这个抽象是 `bus_space(9)`，第 3 节将介绍它。目前只需注意，"访问硬件"是 CPU 上的物理操作，操作系统将其隐藏在软件接口后面。驱动程序写入 `bus_space_write_4(tag, handle, offset, value)`，内核根据平台和资源类型做正确的事情。
 
-### Why a Raw Pointer Cast Is Not How Drivers Reach Hardware
+### 为什么原始指针类型转换不是驱动程序访问硬件的方式
 
-A new reader might reasonably ask: if a device appears as a range of physical addresses, why not just take the address of the device's registers, cast it to a `volatile uint32_t *`, and dereference it? Technically, on some platforms, that works. Practically, no FreeBSD driver does this, and several real reasons make the raw cast a poor choice.
+新读者可能会合理地问：如果设备表现为一段物理地址范围，为什么不直接取设备寄存器的地址，将其转换为 `volatile uint32_t *`，然后解引用它？从技术上讲，在某些平台上这是可行的。实际上，没有 FreeBSD 驱动程序这样做，有几个真实的原因使原始类型转换成为糟糕的选择。
 
-First, the driver does not know the physical address of the device at compile time. The address is assigned by the bus enumeration code at boot or hotplug, based on the Base Address Registers (BARs) that the device advertises. The driver's attach routine asks the bus subsystem for the resource; the bus subsystem returns a handle that carries the mapping. The driver then uses the handle through the `bus_space` API. There is no place in the driver's source where the physical address is a constant.
+第一，驱动程序在编译时不知道设备的物理地址。地址是由总线枚举代码在启动或热插拔时分配的，基于设备通告的基址寄存器（BAR）。驱动程序的 attach 例程向总线子系统请求资源；总线子系统返回一个携带映射的句柄。驱动程序然后通过 `bus_space` API 使用该句柄。驱动程序源代码中没有任何地方将物理地址作为常量。
 
-Second, physical addresses are not virtual addresses. The CPU runs in virtual address mode; dereferencing a pointer reads from virtual memory, not physical memory. The kernel's `pmap(9)` layer maintains the translation. A driver that wants to dereference a device's registers needs a virtual mapping into the device's physical range, with the right cache and access attributes. `bus_space_map` does this. A raw pointer cast does not.
+第二，物理地址不是虚拟地址。CPU 运行在虚拟地址模式；解引用指针从虚拟内存读取，而不是从物理内存读取。内核的 `pmap(9)` 层维护这种转换。想要解引用设备寄存器的驱动程序需要到设备物理范围的虚拟映射，并具有正确的缓存和访问属性。`bus_space_map` 做这件事。原始指针类型转换不做。
 
-Third, different architectures require different access attributes for device memory than for RAM. Device memory must usually be marked uncached, or weakly-cached, or marked as "device memory" in the MMU's page tables, so that the CPU does not reorder or cache the accesses in ways that confuse the device. On arm64, device memory pages use the `nGnRnE` or `nGnRE` attributes that disable speculative prefetching. On x86, the `PAT` and `MTRR` mechanisms mark device regions as uncached or write-combining. A raw pointer cast uses whatever attributes the surrounding virtual mapping happens to have, which is usually cached, which is usually wrong for device registers.
+第三，不同架构对设备内存和 RAM 要求不同的访问属性。设备内存通常必须标记为不可缓存、弱缓存或在 MMU 的页表中标记为"设备内存"，以便 CPU 不会以使设备困惑的方式重排序或缓存访问。在 arm64 上，设备内存页使用 `nGnRnE` 或 `nGnRE` 属性来禁用推测性预取。在 x86 上，`PAT` 和 `MTRR` 机制将设备区域标记为不可缓存或写合并。原始指针类型转换使用周围虚拟映射碰巧具有的任何属性，这通常是有缓存的，对设备寄存器来说通常是错误的。
 
-Fourth, `bus_space` carries extra information beyond just where to read and write. The tag encodes which address space (memory or I/O port) is in use. On architectures where the two are different, the tag chooses the correct CPU instruction. On architectures where a driver might map a region with byte-swapping for endianness, the tag encodes that too. The tag-plus-handle interface is a portable way to express "access this device with the right semantics", where a raw pointer is just "poke this virtual address and hope".
+第四，`bus_space` 携带关于在哪里读写之外的额外信息。标签编码了正在使用的地址空间（内存或 I/O 端口）。在两者不同的架构上，标签选择正确的 CPU 指令。在驱动程序可能为字节序而映射带有字节交换的区域时，标签也编码了这一点。标签加句柄的接口是一种可移植的方式来表达"以正确的语义访问此设备"，而原始指针只是"戳一下这个虚拟地址然后祈祷"。
 
-Fifth, `bus_space` supports tracing, hardware access auditing, and optional sanity checks through the `bus_san(9)` layer when the kernel is built with sanitisers enabled. A raw pointer cast is invisible to those tools. If you ever want to know when your driver read a particular register, `bus_space` can tell you; a raw dereference cannot.
+第五，`bus_space` 支持跟踪、硬件访问审计，以及在内核启用清理器时通过 `bus_san(9)` 层进行可选的健全性检查。原始指针类型转换对这些工具是不可见的。如果你想知道驱动程序何时读取了特定寄存器，`bus_space` 可以告诉你；原始解引用不能。
 
-The short version is: FreeBSD drivers use `bus_space` because it abstracts a real problem the driver needs to solve, and the raw pointer cast works on some platforms by accident rather than by design. Accepting the abstraction is inexpensive; refusing it creates bugs that surface weeks after deployment.
+简短版本是：FreeBSD 驱动程序使用 `bus_space` 是因为它抽象了驱动程序需要解决的真实问题，而原始指针类型转换在某些平台上有效只是巧合而非设计。接受这种抽象代价很低；拒绝它会在部署数周后产生 bug。
 
-### Categories of Resources a Driver Cares About
+### 驱动程序关心的资源类别
 
-Most drivers deal with a small handful of resource categories. Each has a different access pattern. Chapter 16 focuses on one of them (memory-mapped registers), and the others are covered in later chapters. Knowing the whole catalogue helps you place the current topic.
+大多数驱动程序处理少量的资源类别。每个类别有不同的访问模式。第 16 章专注于其中之一（内存映射寄存器），其他在后续章节中介绍。了解整个目录有助于你定位当前主题。
 
-**Memory-mapped I/O (MMIO) registers.** A range of device physical addresses, mapped into the kernel's virtual address space, used to send commands and receive status. Every modern device has at least one MMIO region; most have several. Chapter 16's focus.
+**内存映射 I/O（MMIO）寄存器。** 一段设备物理地址范围，映射到内核的虚拟地址空间，用于发送命令和接收状态。每个现代设备至少有一个 MMIO 区域；大多数有多个。第 16 章的焦点。
 
-**Port-mapped I/O (PIO) registers.** A range of I/O port numbers on x86, accessed through the `in` and `out` CPU instructions. Older devices used this as their primary mechanism. Newer devices sometimes expose a small compatibility window through ports (a legacy serial controller, for example) while putting the main interface in MMIO. The `bus_space` API abstracts both behind the same read and write calls, which is why this chapter treats them together.
+**端口映射 I/O（PIO）寄存器。** x86 上的一段 I/O 端口号范围，通过 `in` 和 `out` CPU 指令访问。较旧的设备使用它作为主要机制。较新的设备有时通过端口暴露一个小的兼容窗口（例如传统串行控制器），同时将主接口放在 MMIO 中。`bus_space` API 将两者抽象在相同的读写调用后面，这就是为什么本章将它们放在一起处理。
 
-**Interrupts.** A signal from the device to the CPU that something has happened. The driver registers an interrupt handler through `bus_setup_intr(9)`, and the kernel arranges for the handler to run when the interrupt line asserts. Chapter 19 covers interrupts.
+**中断。** 从设备到 CPU 的信号，表示发生了某事。驱动程序通过 `bus_setup_intr(9)` 注册中断处理程序，内核安排在中断线触发时运行该处理程序。第 19 章涵盖中断。
 
-**DMA channels.** The device reads or writes directly into system RAM, bypassing the CPU. The driver prepares a DMA descriptor that tells the device which RAM addresses it may use. FreeBSD's `bus_dma(9)` API manages the mappings, the cache coherence, and the synchronisation. Chapters 20 and 21 cover DMA.
+**DMA 通道。** 设备绕过 CPU 直接读取或写入系统 RAM。驱动程序准备一个 DMA 描述符，告诉设备可以使用哪些 RAM 地址。FreeBSD 的 `bus_dma(9)` API 管理映射、缓存一致性和同步。第 20 章和第 21 章涵盖 DMA。
 
-**Configuration space.** On PCI, a separate address space per device, used to describe the device to the OS. BARs live here, the vendor and device IDs live here, power management state lives here. Most drivers read configuration space only once, during attach, to discover the device's capabilities. Chapter 18 covers PCI configuration space.
+**配置空间。** 在 PCI 上，每个设备的独立地址空间，用于向操作系统描述设备。BAR 在这里，供应商和设备 ID 在这里，电源管理状态在这里。大多数驱动程序只在 attach 期间读取一次配置空间，以发现设备的能力。第 18 章涵盖 PCI 配置空间。
 
-**Bus-specific capabilities.** MSI, MSI-X, PCIe extended capabilities, hot-plug events, errata workarounds. Bus-specific chapters cover these.
+**总线特定的能力。** MSI、MSI-X、PCIe 扩展能力、热插拔事件、勘误解决方案。总线特定的章节涵盖这些。
 
-This chapter lives in the MMIO box. The `bus_space` abstraction also covers PIO, so we will see port-mapped paths in passing, but the working example is MMIO throughout.
+本章位于 MMIO 框内。`bus_space` 抽象也涵盖 PIO，所以我们会顺带看到端口映射路径，但工作示例始终是 MMIO。
 
-### The Register, Closer Up
+### 寄存器，近看
 
-A register, in the device's language, is a unit of communication. It has a name, an offset, a width, a set of fields, and a protocol.
+在设备的语言中，寄存器是一个通信单元。它有名称、偏移量、宽度、一组字段和一个协议。
 
-The **name** is how the datasheet refers to it. `CONTROL`, `STATUS`, `DATA_IN`, `DATA_OUT`, `INTR_MASK`. Names are for humans; the device does not know them.
+**名称**是数据手册引用它的方式。`CONTROL`、`STATUS`、`DATA_IN`、`DATA_OUT`、`INTR_MASK`。名称是给人类用的；设备不知道它们。
 
-The **offset** is the distance from the start of the device's register block to the start of this specific register. Offsets are usually given in hexadecimal. `CONTROL` at `0x00`. `STATUS` at `0x04`. `DATA_IN` at `0x08`. `DATA_OUT` at `0x0c`. `INTR_MASK` at `0x10`. The driver uses offsets in every read and write.
+**偏移量**是从设备寄存器块起始处到这个特定寄存器起始处的距离。偏移量通常以十六进制给出。`CONTROL` 在 `0x00`。`STATUS` 在 `0x04`。`DATA_IN` 在 `0x08`。`DATA_OUT` 在 `0x0c`。`INTR_MASK` 在 `0x10`。驱动程序在每次读写中使用偏移量。
 
-The **width** is how many bits the register carries. Common widths are 8, 16, 32, and 64 bits. A 32-bit register is accessed with `bus_space_read_4` and `bus_space_write_4`, where the `4` is the width in bytes. Mismatching the width is a surprisingly common bug; reading a 32-bit register with an 8-bit access reads only one byte, and on some platforms with byte-lane restrictions it may return the wrong byte or no byte at all.
+**宽度**是寄存器携带的位数。常见宽度是 8、16、32 和 64 位。一个 32 位寄存器用 `bus_space_read_4` 和 `bus_space_write_4` 访问，其中 `4` 是以字节为单位的宽度。宽度不匹配是一个令人惊讶的常见 bug；用 8 位访问读取 32 位寄存器只读一个字节，而在某些有字节通道限制的平台上，它可能返回错误的字节或不返回任何字节。
 
-The **fields** inside a register are sub-bit-ranges that each mean something specific. A 32-bit `CONTROL` register might have an `ENABLE` bit at bit 0, a `RESET` bit at bit 1, a 4-bit `MODE` field at bits 4 through 7, and a 16-bit `THRESHOLD` field at bits 16 through 31, with the remaining bits reserved. The driver uses bit masks and shifts to extract or set specific fields, and the datasheet defines every mask and shift.
+寄存器内部的**字段**是子位范围，每个都有特定含义。一个 32 位的 `CONTROL` 寄存器可能在第 0 位有一个 `ENABLE` 位，在第 1 位有一个 `RESET` 位，在第 4 到 7 位有一个 4 位的 `MODE` 字段，在第 16 到 31 位有一个 16 位的 `THRESHOLD` 字段，其余位保留。驱动程序使用位掩码和移位来提取或设置特定字段，数据手册定义了每个掩码和移位。
 
-The **protocol** is the rules the driver must follow when reading or writing the register. Some protocols are trivial ("write this register with the value you want"). Some are subtle ("set the ENABLE bit, then poll the READY bit in STATUS for up to 100 microseconds, then write the DATA_IN register"). Some have side effects that the driver must know about ("reading STATUS clears the error bits"). Getting the protocol right is the bulk of driver development time in many hardware projects.
+**协议**是驱动程序在读写寄存器时必须遵循的规则。有些协议很简单（"用你想要的值写这个寄存器"）。有些很微妙（"设置 ENABLE 位，然后轮询 STATUS 中的 READY 位最多 100 微秒，然后写 DATA_IN 寄存器"）。有些有驱动程序必须了解的副作用（"读取 STATUS 会清除错误位"）。在许多硬件项目中，正确实现协议占了驱动程序开发时间的大部分。
 
-For Chapter 16 the registers are simple, because the device is simulated. But the vocabulary is the vocabulary of real datasheets, and every term introduced here transfers directly to any real device you will meet later.
+对于第 16 章，寄存器很简单，因为设备是模拟的。但词汇是真实数据手册的词汇，这里引入的每个术语都可以直接迁移到你以后将遇到的任何真实设备。
 
-### A First Mental Model: The Control Panel
+### 第一个心智模型：控制面板
 
-A useful analogy, only if you keep it disciplined, is that of a control panel on an industrial machine. The machine does its work on its own schedule. The panel exposes knobs the operator can turn to tell the machine what to do, gauges the operator can read to see what the machine is doing, and a few lights that go on and off to signal events. The operator does not reach inside the machine; the operator reaches the machine through the panel.
+一个有用的类比（前提是你保持克制）是工业机器上的控制面板。机器按照自己的时间表工作。面板暴露了操作员可以转动的旋钮来告诉机器该做什么，操作员可以读取的仪表来了解机器在做什么，以及一些亮灭的灯来发出事件信号。操作员不会把手伸进机器内部；操作员通过面板与机器交互。
 
-The driver is the operator. The register block is the control panel. A knob on the panel is a control field in a register. A gauge is a status field. A light is a status bit. The wiring behind the panel is the device's internal logic, which the driver does not see and cannot directly influence. The cable between the operator and the panel is `bus_space`: it carries the operator's turns of the knob and the gauge's readings back and forth, in a language the operator and the panel both understand.
+驱动程序就是操作员。寄存器块就是控制面板。面板上的旋钮是寄存器中的控制字段。仪表是状态字段。灯是状态位。面板后面的布线是设备的内部逻辑，驱动程序看不到也不能直接影响。操作员和面板之间的电缆是 `bus_space`：它以一种操作员和面板都懂的语言，来回传递操作员对旋钮的转动和仪表的读数。
 
-The analogy breaks down quickly if pushed. Real hardware has timing constraints the panel does not. Real hardware has side effects that the panel does not. Real hardware speaks a protocol that changes when the machine's internal state changes. But for the first pass, the panel is good enough: the driver writes to a control field, the device reacts, the driver reads a status field, the device tells it what happened.
+如果过度推演，这个类比很快就会崩溃。真实硬件有面板没有的时序约束。真实硬件有面板没有的副作用。真实硬件说的协议会随着机器内部状态的改变而改变。但对于第一遍来说，面板已经够用了：驱动程序写入控制字段，设备做出反应，驱动程序读取状态字段，设备告诉它发生了什么。
 
-Later sections replace the analogy with more precise mental models: the register block as a window into device state, the MMIO region as a memory range with side-effects, the `bus_space` interface as a platform-aware messenger. For now, the panel is the on-ramp.
+后续章节用更精确的心智模型替换了这个类比：寄存器块作为设备状态的窗口、MMIO 区域作为带副作用的内存范围、`bus_space` 接口作为平台感知的信使。目前，面板是入口匝道。
 
-### Why Simulating Hardware Is a Good First Practice
+### 为什么模拟硬件是好的首次实践
 
-Chapter 16's teaching strategy is to simulate a device rather than require the reader to have a specific piece of real hardware. The reasons are practical and deliberate.
+第 16 章的教学策略是模拟一个设备，而不是要求读者拥有特定的真实硬件。这些原因是实际的和经过深思熟虑的。
 
-A reader who is practising register-style access for the first time benefits enormously from an environment where they can see the register values directly. A real PCI device's registers are hidden behind a BAR; the reader can read them with `pciconf -r`, but only for specific known offsets, and the values change based on device state in ways a datasheet may not fully document. A simulated device, by contrast, is a struct in kernel memory. The reader can print its contents with a sysctl. The reader can modify it from user space through an ioctl. The reader can inspect it in ddb. The simulation closes the loop between action and observation, which is what makes the practice effective.
+首次练习寄存器式访问的读者从能直接看到寄存器值的环境中获益匪浅。真实 PCI 设备的寄存器隐藏在 BAR 后面；读者可以用 `pciconf -r` 读取它们，但只能读取特定的已知偏移量，而且这些值以数据手册可能不完全记录的方式根据设备状态变化。相比之下，模拟设备是内核内存中的一个结构体。读者可以用 sysctl 打印其内容。可以通过 ioctl 从用户空间修改它。可以在 ddb 中检查它。模拟关闭了操作和观察之间的循环，这正是使练习有效的原因。
 
-A simulated device is also safe. A real device that receives a wrong register value may lock up, corrupt data, or require a physical power cycle. A simulated device that receives a wrong register value does nothing worse than set a wrong bit in kernel memory; if the driver leaks that, `INVARIANTS` will complain. Beginners benefit from the safety net.
+模拟设备也是安全的。收到错误寄存器值的真实设备可能会锁定、损坏数据或需要物理加电循环。收到错误寄存器值的模拟设备最坏也只是在内核内存中设置了错误的位；如果驱动程序泄漏了它，`INVARIANTS` 会报告。初学者从安全网中受益。
 
-A simulated device is reproducible. Every reader running the Chapter 16 code sees the same register values in the same order. A real device's behaviour depends on firmware version, hardware revision, and environmental conditions. Teaching over a reproducible target is much easier than teaching over the union of every possible target.
+模拟设备是可复现的。运行第 16 章代码的每个读者都以相同的顺序看到相同的寄存器值。真实设备的行为取决于固件版本、硬件修订和环境条件。在可复现的目标上教学比在所有可能目标的联合上教学容易得多。
 
-Chapter 17 expands the simulation with timers, events, and fault injection. Chapter 18 introduces a real PCI device (typically a virtio device in a VM) so the reader can practise the real-hardware path. Chapter 16 lays the ground by teaching the vocabulary against a static simulation, which is the gentlest version of the material.
+第 17 章通过计时器、事件和故障注入扩展模拟。第 18 章引入真实 PCI 设备（通常是虚拟机中的 virtio 设备），以便读者可以练习真实硬件路径。第 16 章通过在静态模拟上教授词汇来奠定基础，这是最温和的材料版本。
 
-### A Glance at Real Drivers That Use Hardware I/O
+### 使用硬件 I/O 的真实驱动程序一览
 
-Before moving on, a short tour of real FreeBSD drivers that exercise the patterns Chapter 16 teaches. You do not need to read these files yet; they are waypoints you can return to as the chapter unfolds.
+在继续之前，快速浏览使用第 16 章所授模式的真实 FreeBSD 驱动程序。你现在不需要阅读这些文件；它们是你可以在本章展开过程中返回的路标。
 
-`/usr/src/sys/dev/uart/uart_bus_pci.c` is a PCI glue layer for UART (serial) controllers. It shows how a driver finds its PCI device, claims an MMIO resource, and hands the resource to a lower layer that actually drives the hardware. It is small and readable, and it uses `bus_space` only indirectly.
+`/usr/src/sys/dev/uart/uart_bus_pci.c` 是 UART（串行）控制器的 PCI 粘合层。它展示了驱动程序如何找到其 PCI 设备、声明 MMIO 资源，并将资源交给实际驱动硬件的较低层。它小而可读，只间接使用 `bus_space`。
 
-`/usr/src/sys/dev/uart/uart_dev_ns8250.c` is the real UART driver for the classic 8250-family serial controller. It is the file where register reads and writes happen. The register layout is defined in `uart_bus.h` and `uart_dev_ns8250.h`. The reads use the abstraction the chapter teaches.
+`/usr/src/sys/dev/uart/uart_dev_ns8250.c` 是经典 8250 系列串行控制器的真实 UART 驱动程序。它是寄存器读写发生的地方。寄存器布局定义在 `uart_bus.h` 和 `uart_dev_ns8250.h` 中。读取使用了本章教授的抽象。
 
-`/usr/src/sys/dev/ale/if_ale.c` is an Ethernet driver for the Attansic L1E chipset. Its `if_alevar.h` defines `CSR_READ_4` and `CSR_WRITE_4` macros over `bus_read_4` and `bus_write_4`, which is a pattern you will adopt in your own driver by Stage 4 of this chapter.
+`/usr/src/sys/dev/ale/if_ale.c` 是 Attansic L1E 芯片组的以太网驱动程序。它的 `if_alevar.h` 在 `bus_read_4` 和 `bus_write_4` 上定义了 `CSR_READ_4` 和 `CSR_WRITE_4` 宏，这是你将在本章第 4 阶段在自己的驱动程序中采用的模式。
 
-`/usr/src/sys/dev/e1000/if_em.c` is the driver for Intel's gigabit Ethernet controllers (e1000 family). It is larger and more complex than `if_ale.c`, but it uses the same `bus_space` vocabulary. Its attach path is a good reference for how a non-trivial driver allocates MMIO resources.
+`/usr/src/sys/dev/e1000/if_em.c` 是 Intel 千兆以太网控制器（e1000 系列）的驱动程序。它比 `if_ale.c` 更大更复杂，但使用相同的 `bus_space` 词汇。它的 attach 路径是非平凡驱动程序如何分配 MMIO 资源的良好参考。
 
-`/usr/src/sys/dev/led/led.c` is the LED driver. It is a pseudo-device driver that does not talk to real hardware at all; it exposes a small interface through `/dev/led.NAME` and delegates the actual LED control to whichever driver registered it. Chapter 16's simulated device borrows the shape of this driver: a small, self-contained module with a clear interface and no dependency on external hardware.
+`/usr/src/sys/dev/led/led.c` 是 LED 驱动程序。它是一个根本不与真实硬件通信的伪设备驱动程序；它通过 `/dev/led.NAME` 暴露一个小接口，并将实际的 LED 控制委托给注册它的任何驱动程序。第 16 章的模拟设备借鉴了这个驱动程序的形式：一个小型的、自包含的模块，有清晰的接口，不依赖外部硬件。
 
-These files will reappear throughout Part 4. Chapter 16 uses them as tour points; later chapters dissect them where their patterns are the chapter's focus.
+这些文件将在第四部分中反复出现。第 16 章将它们用作巡览点；后续章节在它们的模式是章节焦点的地方分析它们。
 
-### What Comes Next in This Chapter
+### 本章接下来的内容
 
-Section 2 moves from the abstract picture to the specific mechanism of memory-mapped I/O. It explains what a mapping is, why device memory is accessed with different rules than ordinary memory, and how the driver can think about alignment, endianness, and caching. Section 3 introduces `bus_space(9)` itself. Section 4 builds the simulated device. Section 5 integrates it into `myfirst`. Section 6 adds the safety discipline. Sections 7 and 8 finish the chapter with debugging, refactoring, and versioning.
+第 2 节从抽象图景转向内存映射 I/O 的具体机制。它解释什么是映射、为什么设备内存必须以不同于普通内存的规则访问，以及驱动程序应该如何考虑对齐、字节序和缓存。第 3 节介绍 `bus_space(9)` 本身。第 4 节构建模拟设备。第 5 节将其集成到 `myfirst` 中。第 6 节添加安全规范。第 7 和 8 节以调试、重构和版本化完成本章。
 
-The pace from here is slower than Section 1. Section 1 was meant to be read linearly and absorbed as a whole; the later sections are meant to be read section by section, with breaks to type the code and run it.
+从这里开始的节奏比第 1 节慢。第 1 节旨在线性阅读并作为一个整体吸收；后续章节旨在逐节阅读，中间有休息来输入代码并运行。
 
-### Wrapping Up Section 1
+### 第 1 节总结
 
-Hardware I/O is the activity through which a driver talks to a device. The driver cannot reach inside the device; it can only send commands and read status through a defined register interface. On modern platforms the interface is usually memory-mapped; on x86 there is a legacy port-mapped path as well. The FreeBSD abstraction `bus_space(9)` hides the difference from the driver most of the time. A register is a named, offset-located, width-specific unit of communication, with fields and a protocol that the device's datasheet defines.
+硬件 I/O 是驱动程序与设备对话的活动。驱动程序无法触及设备内部；它只能通过定义好的寄存器接口发送命令和读取状态。在现代平台上，接口通常是内存映射的；在 x86 上还有一个传统的端口映射路径。FreeBSD 的抽象 `bus_space(9)` 大部分时间对驱动程序隐藏了差异。寄存器是一个命名的、按偏移量定位的、宽度特定的通信单元，带有由设备数据手册定义的字段和协议。
 
-Chapter 16's simulation lets you practise the vocabulary without real hardware. Later Part 4 chapters apply the vocabulary to real subsystems. The vocabulary is what transfers, and the rest of this chapter exists to give you that vocabulary with enough depth to use it comfortably.
+第 16 章的模拟让你在没有真实硬件的情况下练习词汇。后续第四部分章节将词汇应用到真实子系统。词汇是可以迁移的，本章的其余部分旨在给你足够的深度来舒适地使用这些词汇。
 
-Section 2 begins by looking closely at memory-mapped I/O.
+第 2 节从仔细审视内存映射 I/O 开始。
 
 
 
-## Section 2: Understanding Memory-Mapped I/O (MMIO)
+## 第 2 节：理解内存映射 I/O（MMIO）
 
-Section 1 introduced the idea that a device's registers can be reached through ordinary-looking memory accesses. That idea is worth slowing down for. Memory-mapped I/O is the dominant mechanism on modern FreeBSD platforms, and understanding it well is what makes every later chapter in Part 4 feel tractable rather than mysterious.
+第 1 节介绍了设备的寄存器可以通过看起来普通的内存访问来达到的概念。这个概念值得放慢脚步来理解。内存映射 I/O 是现代 FreeBSD 平台上的主导机制，深入理解它将使第四部分的每个后续章节显得可驾驭而非神秘。
 
-This section answers three closely related questions. How does a device appear in memory? Why must the CPU access that memory with different rules than ordinary memory? What does a driver need to think about when reading and writing a register?
+本节回答三个密切相关的问题。设备如何出现在内存中？为什么 CPU 必须以不同于普通内存的规则访问该内存？驱动程序在读写寄存器时需要考虑什么？
 
-The section works from the ground up: physical addresses, virtual mappings, cache attributes, alignment, and endianness. Each piece is small. The composition is where the subtlety lives.
+本节从基础开始：物理地址、虚拟映射、缓存属性、对齐和字节序。每个部分都很小。微妙之处在于它们的组合。
 
-### Physical Addresses and Device Memory
+### 物理地址与设备内存
 
-The CPU executes instructions. Each load and store instruction names a virtual address, which the memory management unit (MMU) translates into a physical address. Physical addresses are what the memory controller sees. The memory controller's job is to route the access to the right destination.
+CPU 执行指令。每条加载和存储指令命名一个虚拟地址，内存管理单元（MMU）将其转换为物理地址。物理地址是内存控制器看到的。内存控制器的工作是将访问路由到正确的目的地。
 
-For most physical addresses, the destination is DRAM. The controller reads or writes a location in system RAM and returns the result to the CPU. This is the common case. Every `malloc(9)` allocation the driver makes returns kernel memory whose physical address is backed by DRAM.
+对于大多数物理地址，目的地是 DRAM。控制器读取或写入系统 RAM 中的一个位置并将结果返回给 CPU。这是常见情况。驱动程序进行的每个 `malloc(9)` 分配返回的内核内存，其物理地址都由 DRAM 支持。
 
-Some physical address ranges, however, are routed to devices instead. The memory controller is configured at boot (by firmware, usually by the BIOS or UEFI on x86, or by the device tree on arm and the `acpi` tables on everything) to send accesses in certain ranges to specific devices. A PCI device might live at physical address `0xfebf0000` through `0xfebfffff`, a 64 KiB region. An embedded UART might live at `0x10000000` through `0x10000fff`, a 4 KiB region. Whatever the range, an access inside it routes to the device rather than to RAM.
+然而，一些物理地址范围被路由到设备。内存控制器在启动时由固件配置（在 x86 上通常是 BIOS 或 UEFI，在 arm 上是设备树，在所有平台上是 `acpi` 表），将某些范围内的访问发送到特定设备。一个 PCI 设备可能位于物理地址 `0xfebf0000` 到 `0xfebfffff`，一个 64 KiB 的区域。一个嵌入式 UART 可能位于 `0x10000000` 到 `0x10000fff`，一个 4 KiB 的区域。无论范围如何，其中的访问路由到设备而不是 RAM。
 
-From the CPU's point of view, the access looks identical to an access to RAM. The instruction is the same; the address happens to be elsewhere. From the device's point of view, the access looks like an incoming message: a read at offset X of the device's internal register file, or a write of some value at offset Y.
+从 CPU 的角度来看，该访问看起来与对 RAM 的访问完全相同。指令是相同的；地址恰好指向别处。从设备的角度来看，该访问看起来像一条传入消息：对设备内部寄存器文件偏移量 X 的读取，或在偏移量 Y 处写入某个值。
 
-The key property is that the same CPU instruction (a load or a store) is being reused for a different purpose. That is where "memory-mapped" in MMIO comes from: the device's interface is mapped into the CPU's memory address space, so memory-access instructions reach it.
+关键属性是相同的 CPU 指令（加载或存储）被重新用于不同目的。这就是 MMIO 中"内存映射"的由来：设备的接口被映射到 CPU 的内存地址空间中，因此内存访问指令可以到达它。
 
-Port-mapped I/O, the x86 alternative, uses separate instructions (`in`, `out`, and their wider variants) that target a different address space. The port space has its own 16-bit address range on x86. Modern FreeBSD drivers rarely reach port space directly, because modern devices prefer MMIO, but the abstraction is the same: the driver writes a value at an address, and the address happens to route to a device.
+端口映射 I/O，即 x86 的替代方案，使用独立的指令（`in`、`out` 及其更宽的变体）来寻址不同的地址空间。端口空间在 x86 上有自己的 16 位地址范围。现代 FreeBSD 驱动程序很少直接访问端口空间，因为现代设备更偏好 MMIO，但抽象是相同的：驱动程序在某个地址写入一个值，该地址恰好路由到设备。
 
-### The Virtual Mapping
+### 虚拟映射
 
-The CPU does not access physical memory directly. Every memory access goes through the MMU, which translates a virtual address into a physical address using page tables. The kernel maintains those page tables in its `pmap(9)` layer. For a driver to read device registers, it needs a virtual mapping into the device's physical range.
+CPU 不直接访问物理内存。每次内存访问都经过 MMU，MMU 使用页表将虚拟地址转换为物理地址。内核在其 `pmap(9)` 层中维护这些页表。驱动程序要读取设备寄存器，它需要到设备物理范围的虚拟映射。
 
-When the kernel's bus subsystem discovers a device and the driver's attach routine requests an MMIO resource, the bus layer does two things. First, it finds the physical address range the device occupies, which the device's Base Address Register (BAR) or the platform's device tree describes. Second, it establishes a virtual mapping from a fresh kernel virtual address range to that physical range, with appropriate cache and access attributes. The result is a virtual address that, when dereferenced, produces an access at the corresponding physical address, which the memory controller then routes to the device.
+当内核的总线子系统发现设备并且驱动程序的 attach 例程请求 MMIO 资源时，总线层做两件事。第一，它找到设备占用的物理地址范围，这由设备的基址寄存器（BAR）或平台的设备树描述。第二，它建立一个从新的内核虚拟地址范围到该物理范围的虚拟映射，并带有适当的缓存和访问属性。结果是一个虚拟地址，当被解引用时，在相应的物理地址产生访问，内存控制器随后将其路由到设备。
 
-The handle that `bus_alloc_resource` returns is (on most platforms) a wrapper around that kernel virtual address. The driver does not typically see the address; it passes the resource handle to `bus_space_read_*` and `bus_space_write_*`, which extract the virtual address internally. But the underlying mechanism is a plain virtual-to-physical mapping, set up once at attach and torn down at detach.
+`bus_alloc_resource` 返回的句柄（在大多数平台上）是该内核虚拟地址的包装。驱动程序通常不直接看到该地址；它将资源句柄传递给 `bus_space_read_*` 和 `bus_space_write_*`，后者在内部提取虚拟地址。但底层机制是一个简单的虚拟到物理映射，在 attach 时设置一次，在 detach 时拆除。
 
-This matters for two reasons. First, it explains why `bus_alloc_resource` is not something a driver can skip. Without the resource allocation, there is no virtual mapping; without a virtual mapping, any attempt to access the device will fault or access random memory. Second, it explains why the virtual address is not a constant: the kernel picks it at attach time, and two boots of the same system may produce different addresses.
+这很重要，原因有二。第一，它解释了为什么 `bus_alloc_resource` 不是驱动程序可以跳过的。没有资源分配，就没有虚拟映射；没有虚拟映射，任何访问设备的尝试都会产生异常或访问随机内存。第二，它解释了为什么虚拟地址不是一个常量：内核在 attach 时选择它，同一系统的两次启动可能产生不同的地址。
 
-### Cache Attributes Matter
+### 缓存属性很重要
 
-Memory pages have cache attributes. Ordinary RAM uses "write-back" caching: the CPU caches reads and writes in its L1, L2, and L3 caches, writing back to RAM only when the cache line is evicted or explicitly flushed. Write-back caching is great for performance on RAM, where the memory controller's job is to preserve whatever value the CPU most recently wrote.
+内存页有缓存属性。普通 RAM 使用"写回"缓存：CPU 在其 L1、L2 和 L3 缓存中缓存读写，仅在缓存行被驱逐或显式刷新时才写回 RAM。写回缓存对 RAM 的性能很好，因为内存控制器的工作是保留 CPU 最近写入的任何值。
 
-Device memory is different. A device's registers usually have side effects on read and on write. Reading a `STATUS` register may consume an event the device has signalled. Writing a `DATA_IN` register may queue data for transmission. Caching a read of a status register means the CPU returns a stale value on the second read; caching a write of a data register means the write goes to the cache and never reaches the device until the cache happens to evict the line.
+设备内存不同。设备的寄存器通常在读取和写入时有副作用。读取 `STATUS` 寄存器可能会消费设备已发出的事件信号。写入 `DATA_IN` 寄存器可能会将数据排队等待传输。缓存对状态寄存器的读取意味着 CPU 在第二次读取时返回过期的值；缓存对数据寄存器的写入意味着写入进入缓存而永远不会到达设备，直到缓存碰巧驱逐该行。
 
-For these reasons, device memory pages are marked with different cache attributes than ordinary memory. On x86, the attributes are controlled through the PAT (Page Attribute Table) and MTRR (Memory Type Range Registers). Device memory is typically marked `UC` (uncached) or `WC` (write-combining). On arm64, device memory pages use the `Device-nGnRnE` or `Device-nGnRE` attributes, which disable caching and speculation. The specific names are architecture-dependent; the principle is the same: the CPU must treat device memory differently from RAM.
+由于这些原因，设备内存页被标记为与普通内存不同的缓存属性。在 x86 上，属性通过 PAT（页属性表）和 MTRR（内存类型范围寄存器）控制。设备内存通常标记为 `UC`（不可缓存）或 `WC`（写合并）。在 arm64 上，设备内存页使用 `Device-nGnRnE` 或 `Device-nGnRE` 属性，禁用缓存和推测。具体名称取决于架构；原则是相同的：CPU 必须以不同于 RAM 的方式对待设备内存。
 
-`bus_space_map` (or the equivalent path inside `bus_alloc_resource`) knows to request the right cache attributes when it establishes the virtual mapping. A driver that dereferences a raw pointer into a device region without going through `bus_space` skips this step and gets whatever attributes the surrounding mapping happens to have, which is usually wrong.
+`bus_space_map`（或 `bus_alloc_resource` 内部的等效路径）知道在建立虚拟映射时请求正确的缓存属性。通过原始指针解引用到设备区域而不经过 `bus_space` 的驱动程序跳过了这一步，得到周围映射碰巧具有的任何属性，这通常是错误的。
 
-This is one of the most concrete reasons to use the FreeBSD abstraction: the abstraction encodes a correctness requirement (uncached access to devices) that a raw pointer cast cannot.
+这是使用 FreeBSD 抽象的最具体原因之一：抽象编码了一个正确性要求（对设备的不可缓存访问），而原始指针类型转换无法做到。
 
-### Alignment
+### 对齐
 
-Hardware registers have alignment requirements. A 32-bit register must be accessed with a 32-bit load or store at an offset that is a multiple of 4. A 64-bit register must be accessed with a 64-bit load or store at an offset that is a multiple of 8. On most architectures, an unaligned access to device memory is either slower (decomposed into multiple smaller accesses by the hardware) or outright illegal (trapping with an alignment fault).
+硬件寄存器有对齐要求。32 位寄存器必须以 4 的倍数的偏移量用 32 位加载或存储访问。64 位寄存器必须以 8 的倍数的偏移量用 64 位加载或存储访问。在大多数架构上，对设备内存的未对齐访问要么更慢（被硬件分解为多个较小的访问），要么完全不合法（触发对齐异常）。
 
-The rule for drivers is simple: when reading or writing a register, use the function whose width matches the register's width, and use the correct offset. If the register is 32 bits wide at offset `0x10`, the access is `bus_space_read_4(tag, handle, 0x10)` or `bus_space_write_4(tag, handle, 0x10, value)`. If the register is 16 bits wide at offset `0x08`, it is `bus_space_read_2(tag, handle, 0x08)` or `bus_space_write_2(tag, handle, 0x08, value)`. The byte-wide variants `bus_space_read_1` and `bus_space_write_1` exist for 8-bit registers.
+驱动程序的规则很简单：读写寄存器时，使用宽度与寄存器宽度匹配的函数，并使用正确的偏移量。如果寄存器宽 32 位，偏移量为 `0x10`，访问为 `bus_space_read_4(tag, handle, 0x10)` 或 `bus_space_write_4(tag, handle, 0x10, value)`。如果寄存器宽 16 位，偏移量为 `0x08`，则是 `bus_space_read_2(tag, handle, 0x08)` 或 `bus_space_write_2(tag, handle, 0x08, value)`。字节宽度变体 `bus_space_read_1` 和 `bus_space_write_1` 用于 8 位寄存器。
 
-Mismatching the width is a common early-stage bug and often silent on x86, which has very permissive alignment rules. On arm64 the same code may fault on first contact. Drivers that are developed on x86 and then ported to arm64 often trip on exactly this issue, which is why the FreeBSD style guidance favours matching widths strictly from the beginning.
+宽度不匹配是早期常见的 bug，在 x86 上通常是无声的，因为 x86 的对齐规则非常宽松。在 arm64 上，相同的代码可能在首次接触时就会触发异常。在 x86 上开发然后移植到 arm64 的驱动程序经常恰好在这个问题上绊倒，这就是为什么 FreeBSD 风格指南主张从一开始就严格匹配宽度。
 
-There is also an offset alignment rule. The offset must be a multiple of the access width. A 32-bit read at offset `0x10` is fine (`0x10` is a multiple of 4). A 32-bit read at offset `0x11` is wrong, even if the device nominally has a register starting there; the hardware will usually refuse or return garbage. This rule is easy to follow when the offsets come from a well-named header; it becomes a trap when offsets are computed arithmetically and the arithmetic is wrong.
+还有一个偏移量对齐规则。偏移量必须是访问宽度的倍数。偏移量 `0x10` 处的 32 位读取没问题（`0x10` 是 4 的倍数）。偏移量 `0x11` 处的 32 位读取是错误的，即使设备名义上在那里有一个寄存器；硬件通常会拒绝或返回垃圾。当偏移量来自命名良好的头文件时，这个规则很容易遵循；当偏移量是通过算术计算得出的而算术又出错时，它就成了陷阱。
 
-### Endianness
+### 字节序
 
-Device memory and the CPU's native byte order may disagree. A device that originated in a PowerPC or network context may present 32-bit registers in big-endian order, meaning the most significant byte of the register is at the lowest byte address within the register. An x86 CPU is little-endian, so the lowest byte address holds the least significant byte. When the CPU reads the device's big-endian register and interprets it with little-endian semantics, the bytes are in the wrong order.
+设备内存和 CPU 的本机字节顺序可能不一致。源自 PowerPC 或网络环境的设备可能以大端序呈现 32 位寄存器，意味着寄存器的最高有效字节在寄存器内的最低字节地址。x86 CPU 是小端序，所以最低字节地址存放最低有效字节。当 CPU 读取设备的大端序寄存器并以小端序语义解释它时，字节的顺序是错误的。
 
-FreeBSD's `bus_space` family has stream variants (`bus_space_read_stream_*`) and ordinary variants (`bus_space_read_*`). On architectures where the bus tag encodes an endian swap, the ordinary variants swap bytes to produce a host-order value. The stream variants do not swap; they return the bytes in device order. A driver that is reading a device whose registers are in a different endianness than the CPU will use the ordinary variants most of the time, relying on the tag to handle the swap. A driver that is reading a data payload (a stream of bytes whose interpretation depends on the protocol, not on the register layout) may use the stream variants.
+FreeBSD 的 `bus_space` 系列有流式变体（`bus_space_read_stream_*`）和普通变体（`bus_space_read_*`）。在总线标签编码了字节序交换的架构上，普通变体交换字节以产生主机序值。流式变体不交换；它们按设备顺序返回字节。读取寄存器字节序与 CPU 不同的设备的驱动程序大部分时候使用普通变体，依赖标签来处理交换。读取数据负载（一个字节流，其解释取决于协议而非寄存器布局）的驱动程序可能使用流式变体。
 
-On x86 the distinction often does not matter because the bus tag does not encode an endian swap by default. The stream variants are aliases for the ordinary ones in `/usr/src/sys/x86/include/bus.h`:
+在 x86 上，这种区别通常无关紧要，因为总线标签默认不编码字节序交换。流式变体在 `/usr/src/sys/x86/include/bus.h` 中是普通变体的别名：
 
 ```c
 #define bus_space_read_stream_1(t, h, o)  bus_space_read_1((t), (h), (o))
@@ -333,113 +333,113 @@ On x86 the distinction often does not matter because the bus tag does not encode
 #define bus_space_read_stream_4(t, h, o)  bus_space_read_4((t), (h), (o))
 ```
 
-The comment in that file explains: "Stream accesses are the same as normal accesses on x86; there are no supported bus systems with an endianess different from the host one." On other architectures, the two families can differ, and a driver that cares about endianness picks the appropriate variant based on what the device expects.
+该文件中的注释解释道："Stream accesses are the same as normal accesses on x86; there are no supported bus systems with an endianess different from the host one." 在其他架构上，这两个系列可能不同，关心字节序的驱动程序根据设备的期望选择适当的变体。
 
-For Chapter 16, the simulation is designed to be host-endian. The chapter's drivers use the ordinary `bus_space_read_*` and `bus_space_write_*` without worrying about byte swaps. Later chapters that deal with real network controllers will revisit the endianness story.
+对于第 16 章，模拟被设计为主机字节序。本章的驱动程序使用普通的 `bus_space_read_*` 和 `bus_space_write_*`，不用担心字节交换。处理真实网络控制器的后续章节将重新讨论字节序问题。
 
-### Read and Write Side Effects
+### 读写的副作用
 
-One of the most important properties of device memory, and one that trips up drivers that treat it as ordinary memory, is that reads and writes can have side effects.
+设备内存最重要的属性之一，也是把把它当作普通内存的驱动程序绊倒的属性，是读写可能有副作用。
 
-A write to a control register is, by design, a side effect: writing `1` to the `ENABLE` bit tells the device to start operating. The driver expects that side effect, because that is what the register is for. The subtlety is that the write has a side effect on the device even though the value written is also remembered; a driver that writes `0x00000001` to `CONTROL` and then reads `CONTROL` may see `0x00000001` (if the register echoes the written value) or some other value (if the register echoes the device's current state, which may differ from the last written value).
+向控制寄存器写入值，按设计，就是一种副作用：向 `ENABLE` 位写入 `1` 告诉设备开始运行。驱动程序预期那个副作用，因为那就是寄存器的用途。微妙之处在于，即使写入的值也被记住了，写入对设备仍有副作用；向 `CONTROL` 写入 `0x00000001` 然后读取 `CONTROL` 的驱动程序可能看到 `0x00000001`（如果寄存器回显写入的值）或其他某个值（如果寄存器回显设备当前的状态，这可能与最后写入的值不同）。
 
-A read from a status register may also be a side effect. Some devices implement "read-to-clear" semantics, where reading the register returns the current status and, as part of the read, clears pending error bits or interrupt flags. A driver that reads the status twice in close succession may see different values on the two reads, because the first read changed the device's internal state. This is by design; the datasheet says so.
+从状态寄存器读取也可能有副作用。一些设备实现了"读即清除"语义，读取寄存器返回当前状态，并且作为读取的一部分，清除挂起的错误位或中断标志。连续两次读取状态的驱动程序可能在两次读取中看到不同的值，因为第一次读取改变了设备的内部状态。这是设计使然；数据手册如是说。
 
-Some registers are **write-only**. Reading them returns a fixed value (often all zeros) and reveals nothing about the device. Writing them has the intended effect. A driver that tries to read a write-only register to check its current value will be misled.
+一些寄存器是**只写**的。读取它们返回一个固定值（通常全为零），不揭示任何关于设备的信息。写入它们有预期效果。试图读取只写寄存器来检查其当前值的驱动程序会被误导。
 
-Some registers are **read-only**. Writing them is either ignored or hazardous. A driver that writes a read-only register may do nothing (if the hardware is defensive) or may cause undefined behaviour (if it is not).
+一些寄存器是**只读**的。写入它们要么被忽略，要么有危险。写入只读寄存器的驱动程序可能什么都不做（如果硬件有防护）或导致未定义行为（如果没有）。
 
-Some registers are **read-modify-write** unsafe. A naive update pattern (read the current value, modify one field, write the value back) is safe on a register where the read returns the current contents and the write replaces them. It is unsafe on a register where the read has side effects, where the write has side effects on unintended fields, or where another agent (another CPU, a DMA engine, an interrupt handler) can modify the register between the read and the write.
+一些寄存器对**读-改-写**不安全。一个朴素更新模式（读取当前值、修改一个字段、写回该值）在读返回当前内容且写替换它们的寄存器上是安全的。但在读有副作用、写对非目标字段有副作用，或者另一个代理（另一个 CPU、DMA 引擎、中断处理程序）可以在读和写之间修改寄存器的寄存器上是不安全的。
 
-For Chapter 16 the simulated device has a simple protocol: reads and writes each affect only the specific field the caller changes, and no read has side effects. This is not realistic; Chapter 17 introduces read-to-clear and write-only behaviours. For now, the simplicity is a feature: the reader can focus on the mechanics of access without also juggling the device's protocol quirks.
+对于第 16 章，模拟设备有一个简单的协议：读写各自只影响调用者更改的特定字段，没有读取有副作用。这并不现实；第 17 章引入读即清除和只写行为。目前，简单性是一个特性：读者可以专注于访问的机制，而不必同时应付设备的协议怪癖。
 
-### A Concrete Picture: A Device's Register Block
+### 一个具体的画面：设备的寄存器块
 
-A concrete example, though invented, makes the picture stick. Imagine a simple temperature-and-fan controller exposed as a 64-byte MMIO region. The register map might look like this:
+一个具体的例子（虽然是虚构的）能让画面深入人心。想象一个作为 64 字节 MMIO 区域暴露的简单温度和风扇控制器。寄存器映射可能如下：
 
-| Offset | Width  | Name            | Direction | Description                               |
-|--------|--------|-----------------|-----------|-------------------------------------------|
-| 0x00   | 32 bit | `CONTROL`       | Read/Write| Global enable, reset, and mode bits.      |
-| 0x04   | 32 bit | `STATUS`        | Read-only | Device ready, fault, data-available.      |
-| 0x08   | 32 bit | `TEMP_SAMPLE`   | Read-only | Most recent temperature reading.          |
-| 0x0c   | 32 bit | `FAN_PWM`       | Read/Write| Fan PWM duty cycle (0-255).               |
-| 0x10   | 32 bit | `INTR_MASK`     | Read/Write| Per-interrupt enable bits.                |
-| 0x14   | 32 bit | `INTR_STATUS`   | Read/Clear| Pending interrupt flags (read-to-clear).  |
-| 0x18   | 32 bit | `DEVICE_ID`     | Read-only | Fixed identifier; vendor code.            |
-| 0x1c   | 32 bit | `FIRMWARE_REV`  | Read-only | Device firmware revision.                 |
-| 0x20-0x3f | 32 bytes | reserved  | -         | Must be written as zero; reads undefined. |
+| 偏移量 | 宽度   | 名称            | 方向     | 描述                                     |
+|--------|--------|-----------------|----------|------------------------------------------|
+| 0x00   | 32 位 | `CONTROL`       | 读/写    | 全局使能、复位和模式位。                  |
+| 0x04   | 32 位 | `STATUS`        | 只读     | 设备就绪、故障、数据可用。                |
+| 0x08   | 32 位 | `TEMP_SAMPLE`   | 只读     | 最近的温度读数。                          |
+| 0x0c   | 32 位 | `FAN_PWM`       | 读/写    | 风扇 PWM 占空比（0-255）。               |
+| 0x10   | 32 位 | `INTR_MASK`     | 读/写    | 每个中断的使能位。                        |
+| 0x14   | 32 位 | `INTR_STATUS`   | 读/清除  | 挂起的中断标志（读即清除）。              |
+| 0x18   | 32 位 | `DEVICE_ID`     | 只读     | 固定标识符；供应商代码。                  |
+| 0x1c   | 32 位 | `FIRMWARE_REV`  | 只读     | 设备固件版本。                            |
+| 0x20-0x3f | 32 字节 | 保留         | -        | 必须写入零；读取未定义。                  |
 
-A driver for this device would read `DEVICE_ID` at attach to confirm the hardware is what the driver expects, write `CONTROL` to enable the device, poll `STATUS` to confirm the device is ready, periodically read `TEMP_SAMPLE` to report the temperature, and periodically write `FAN_PWM` to adjust the fan. The interrupt path would read `INTR_STATUS` to see which events are pending (which also clears them) and write `INTR_MASK` during setup to choose which interrupts to enable.
+这个设备的驱动程序会在 attach 时读取 `DEVICE_ID` 来确认硬件是驱动程序所期望的，写入 `CONTROL` 来启用设备，轮询 `STATUS` 确认设备就绪，定期读取 `TEMP_SAMPLE` 报告温度，定期写入 `FAN_PWM` 调整风扇。中断路径会读取 `INTR_STATUS` 查看哪些事件挂起（这也清除它们），在设置期间写入 `INTR_MASK` 选择启用哪些中断。
 
-Chapter 16's simulated device borrows heavily from this shape. The simulation has a `CONTROL`, a `STATUS`, a `DATA_IN`, a `DATA_OUT`, an `INTR_MASK`, and an `INTR_STATUS`. It is deliberately a toy; the fields and protocol are chosen so the reader can manipulate them easily from user space through the driver's existing `read(2)` and `write(2)` paths. The register map is kept simple because Chapter 17 will introduce the complexity that real devices add on top.
+第 16 章的模拟设备大量借鉴了这个形状。模拟有一个 `CONTROL`、一个 `STATUS`、一个 `DATA_IN`、一个 `DATA_OUT`、一个 `INTR_MASK` 和一个 `INTR_STATUS`。它故意是一个玩具；字段和协议被选择为读者可以通过驱动程序现有的 `read(2)` 和 `write(2)` 路径从用户空间轻松操作它们。寄存器映射保持简单，因为第 17 章将引入真实设备在此之上添加的复杂性。
 
-### The Shape of a Register Access
+### 寄存器访问的形式
 
-Putting the pieces together, a single register access consists of:
+把各部分组合起来，一次寄存器访问由以下步骤组成：
 
-1. The driver has a `bus_space_tag_t` and a `bus_space_handle_t` that together describe a specific device region with specific cache attributes.
-2. The driver picks an offset within the region, corresponding to a register defined in the device's datasheet.
-3. The driver picks an access width that matches the register's width.
-4. The driver calls `bus_space_read_*` or `bus_space_write_*` with tag, handle, offset, and (for writes) value.
-5. The kernel's `bus_space` implementation for the current architecture compiles the call down to the appropriate CPU instruction (a `mov` on x86 MMIO, an `inb`/`outb` on x86 PIO, a `ldr`/`str` on arm64, and so on).
-6. The memory controller or I/O fabric routes the access to the device.
-7. The device responds: for a read, it returns the requested value; for a write, it performs the action the register's protocol defines.
+1. 驱动程序拥有一个 `bus_space_tag_t` 和一个 `bus_space_handle_t`，它们共同描述了一个具有特定缓存属性的特定设备区域。
+2. 驱动程序在该区域内选择一个偏移量，对应于设备数据手册中定义的寄存器。
+3. 驱动程序选择与寄存器宽度匹配的访问宽度。
+4. 驱动程序使用标签、句柄、偏移量以及（对于写入）值调用 `bus_space_read_*` 或 `bus_space_write_*`。
+5. 当前架构的内核 `bus_space` 实现将调用编译为适当的 CPU 指令（x86 MMIO 上的 `mov`、x86 PIO 上的 `inb`/`outb`、arm64 上的 `ldr`/`str` 等）。
+6. 内存控制器或 I/O 结构将访问路由到设备。
+7. 设备响应：对于读取，它返回请求的值；对于写入，它执行寄存器协议定义的操作。
 
-The abstraction hides all of this from the driver, most of the time. The driver writes `bus_space_read_4(tag, handle, 0x04)` and gets a 32-bit value back. The machinery between the C call and the device is the kernel's and the hardware's job.
+抽象大部分时间对驱动程序隐藏了所有这些。驱动程序写入 `bus_space_read_4(tag, handle, 0x04)` 并获得一个 32 位值。C 调用和设备之间的机制是内核和硬件的工作。
 
-What the driver must remain aware of is the handful of correctness rules: alignment, width, side effects, and access ordering. The chapter revisits ordering in Section 6.
+驱动程序必须保持意识的是少数几条正确性规则：对齐、宽度、副作用和访问排序。第 6 节将重新讨论排序。
 
-### What MMIO Is Not
+### MMIO 不是什么
 
-A short list of things MMIO is not, to clear up common confusions.
+简短列出 MMIO 不是什么，以澄清常见混淆。
 
-**MMIO is not DMA.** DMA is when the device reads or writes system RAM on its own. MMIO is when the CPU reads or writes the device's registers. Both may be used in the same driver, for different purposes. DMA is faster for bulk data; MMIO is necessary for commands and status. Chapter 20 and Chapter 21 cover DMA.
+**MMIO 不是 DMA。** DMA 是设备自行读写系统 RAM。MMIO 是 CPU 读写设备的寄存器。两者可能在同一驱动程序中用于不同目的。DMA 对批量数据更快；MMIO 对命令和状态是必需的。第 20 章和第 21 章涵盖 DMA。
 
-**MMIO is not shared memory.** Shared memory (in the POSIX sense) is RAM accessible to multiple processes. MMIO is device memory accessible to the kernel only. User space cannot (and should not) access MMIO directly; the driver mediates.
+**MMIO 不是共享内存。** 共享内存（POSIX 意义上的）是多个进程可访问的 RAM。MMIO 是只有内核可访问的设备内存。用户空间不能（也不应该）直接访问 MMIO；驱动程序充当中介。
 
-**MMIO is not a block of RAM with the device living behind it.** MMIO is a direct interface to the device's internal registers. Reading MMIO does not return kernel memory; it returns whatever the device decides to return at that offset. Writing MMIO does not store a value in kernel memory; it sends a message to the device at that offset.
+**MMIO 不是设备在其后面的一块 RAM。** MMIO 是设备内部寄存器的直接接口。读取 MMIO 不返回内核内存；它返回设备在该偏移量处决定返回的任何内容。写入 MMIO 不在内核内存中存储值；它在该偏移量处向设备发送消息。
 
-**MMIO is not free.** Each access is a transaction on the CPU's bus. On a deep cache hierarchy with high memory latency, a single uncached MMIO read can take hundreds of cycles, because the CPU cannot use the cache and must wait for the device to respond. Drivers that issue thousands of MMIO accesses per operation are usually doing something wrong; most operations can be batched or eliminated.
+**MMIO 不是免费的。** 每次访问是 CPU 总线上的一次事务。在具有高内存延迟的深缓存层次结构中，单次不可缓存的 MMIO 读取可能需要数百个周期，因为 CPU 不能使用缓存，必须等待设备响应。每次操作发出数千次 MMIO 访问的驱动程序通常做错了什么；大多数操作可以批处理或消除。
 
-### Wrapping Up Section 2
+### 第 2 节总结
 
-Memory-mapped I/O is the mechanism by which a modern CPU reaches a device through ordinary load and store instructions, with the address routed to the device instead of to RAM. The kernel's virtual mapping layer and the `bus_space` abstraction together hide the plumbing, but the driver must still be aware of alignment, endianness, cache attributes, and side effects. A register is accessed with a read or write of the right width at the right offset; the kernel compiles the call into the appropriate CPU instruction for the current architecture.
+内存映射 I/O 是现代 CPU 通过普通加载和存储指令到达设备的机制，地址被路由到设备而不是 RAM。内核的虚拟映射层和 `bus_space` 抽象共同隐藏了管道，但驱动程序仍必须意识到对齐、字节序、缓存属性和副作用。寄存器通过以正确宽度在正确偏移量处的读写来访问；内核将调用编译为当前架构的适当 CPU 指令。
 
-Section 3 introduces `bus_space(9)` itself: the tag, the handle, the read and write functions, and the shape of the API as it appears in every FreeBSD driver that talks to hardware. After Section 3, you will be ready to simulate a register block in Section 4 and start writing code.
+第 3 节介绍 `bus_space(9)` 本身：标签、句柄、读写函数，以及 API 在每个与硬件通信的 FreeBSD 驱动程序中出现的形式。第 3 节之后，你将准备好在第 4 节中模拟寄存器块并开始编写代码。
 
 
 
-## Section 3: Introduction to `bus_space(9)`
+## 第 3 节：`bus_space(9)` 简介
 
-`bus_space(9)` is the FreeBSD abstraction for portable hardware access. Every driver that talks to memory-mapped or port-mapped hardware uses it, directly or through a thin wrapper. The abstraction is small: two opaque types, a dozen read and write functions in several widths, a barrier function, and a few helpers for multi-register and region accesses. Section 3 walks through the whole thing in the order a reader would naturally meet it.
+`bus_space(9)` 是 FreeBSD 用于可移植硬件访问的抽象层。每个与内存映射或端口映射硬件通信的驱动程序都使用它，直接使用或通过薄包装使用。这个抽象很小：两个不透明类型、十几种不同宽度的读写函数、一个屏障函数，以及一些用于多寄存器和区域访问的辅助函数。第 3 节按读者自然遇到的顺序走完整个内容。
 
-The section starts with the two types, moves to the read and write functions, covers the multi and region helpers, introduces the barrier function, and closes with the `bus_*` shorthand defined over a `struct resource *` that most real drivers use in practice. By the end you will recognise every `bus_space` call you meet in `/usr/src/sys/dev/`, and you will have a mental model for writing your own.
+本节从两个类型开始，转到读写函数，涵盖多访问和区域访问辅助函数，引入屏障函数，最后以大多数真实驱动程序实际使用的定义在 `struct resource *` 上的 `bus_*` 简写结束。学完后，你将认出在 `/usr/src/sys/dev/` 中遇到的每个 `bus_space` 调用，并拥有编写自己调用的心智模型。
 
-### The Two Types: `bus_space_tag_t` and `bus_space_handle_t`
+### 两个类型：`bus_space_tag_t` 和 `bus_space_handle_t`
 
-Every `bus_space` call takes a tag and a handle as its first two arguments, in that order. Understanding what each one represents is the first step.
+每个 `bus_space` 调用都按顺序接受一个标签和一个句柄作为前两个参数。理解每个代表什么是第一步。
 
-A **`bus_space_tag_t`** identifies an address space. "Address space" here is narrower than its general usage; it specifically refers to the combination of a bus and an access method. On x86, there are two address spaces: memory and I/O port. Each has its own tag value. On other architectures, there may be more: a memory space with host-endian access, a memory space with swapped-endian access, and so on. The tag tells the `bus_space` functions which rules to apply.
+**`bus_space_tag_t`** 标识一个地址空间。"地址空间"在这里比其一般用法更窄；它特指总线和访问方法的组合。在 x86 上，有两个地址空间：内存和 I/O 端口。每个都有自己的标签值。在其他架构上，可能有更多：具有主机字节序访问的内存空间、具有交换字节序访问的内存空间等。标签告诉 `bus_space` 函数应用哪些规则。
 
-The tag is architecture-specific. On x86, the tag is an integer: `0` for I/O port space (`X86_BUS_SPACE_IO`) and `1` for memory space (`X86_BUS_SPACE_MEM`). On arm64, the tag is a pointer to a structure that describes the bus's endian and access behaviour. On MIPS, it is yet another shape. Drivers do not usually see these architecture details; they obtain the tag from the bus subsystem (through `rman_get_bustag(resource)` or equivalent) and pass it through without inspection.
+标签是架构特定的。在 x86 上，标签是一个整数：I/O 端口空间为 `0`（`X86_BUS_SPACE_IO`），内存空间为 `1`（`X86_BUS_SPACE_MEM`）。在 arm64 上，标签是指向描述总线字节序和访问行为的结构的指针。在 MIPS 上，它又是另一种形式。驱动程序通常不直接看到这些架构细节；它们从总线子系统获取标签（通过 `rman_get_bustag(resource)` 或等效方式）并直接传递而不检查。
 
-A **`bus_space_handle_t`** identifies a specific region within the address space. It is effectively a pointer, but the pointer's meaning depends on the tag. For a memory tag on x86, the handle is the kernel virtual address at which the device's physical range has been mapped. For an I/O port tag on x86, the handle is the I/O port base address. For more elaborate tags, the handle may be a structure or an encoded value. Drivers treat the handle as opaque and pass it through.
+**`bus_space_handle_t`** 标识地址空间内的特定区域。它实际上是一个指针，但指针的含义取决于标签。对于 x86 上的内存标签，句柄是设备物理范围被映射到的内核虚拟地址。对于 x86 上的 I/O 端口标签，句柄是 I/O 端口基地址。对于更复杂的标签，句柄可能是一个结构或一个编码值。驱动程序将句柄视为不透明的并直接传递。
 
-The pairing is important. A tag alone does not identify a specific device; it identifies only the address space. A handle alone does not carry the access rules. The pair (tag, handle) together identifies a specific mappable region with specific access rules, and that pair is what the `bus_space_read_*` and `bus_space_write_*` functions operate on.
+这种配对很重要。仅标签不能标识特定设备；它只标识地址空间。仅句柄不携带访问规则。一对（标签，句柄）共同标识具有特定访问规则的特定可映射区域，`bus_space_read_*` 和 `bus_space_write_*` 函数就操作在这个对上。
 
-In practice a driver obtains a `struct resource *` from the bus subsystem at attach time and extracts the tag and handle from it with `rman_get_bustag` and `rman_get_bushandle`. It stores the pair in the softc, or it stores the resource pointer and uses the shorthand `bus_read_*` and `bus_write_*` macros that extract the tag and handle internally. Section 5 walks through the real pattern.
+实际上，驱动程序在 attach 时从总线子系统获取 `struct resource *`，并用 `rman_get_bustag` 和 `rman_get_bushandle` 从中提取标签和句柄。它将该对存储在 softc 中，或者存储资源指针并使用在内部提取标签和句柄的简写 `bus_read_*` 和 `bus_write_*` 宏。第 5 节走完实际的模式。
 
-### Offsets
+### 偏移量
 
-Every read and write function takes an **offset** inside the region. The offset is a `bus_size_t`, which is typically a 64-bit unsigned integer, measured in bytes from the start of the region. A 32-bit register at the start of a device's MMIO region has offset 0. A 32-bit register at the next slot has offset 4. A 32-bit register at offset `0x10` is 16 bytes into the region.
+每个读写函数都接受区域内的一个**偏移量**。偏移量是 `bus_size_t`，通常是一个 64 位无符号整数，以字节为单位从区域起始处计算。设备 MMIO 区域起始处的 32 位寄存器偏移量为 0。下一个槽位的 32 位寄存器偏移量为 4。偏移量 `0x10` 处的 32 位寄存器在区域内 16 字节处。
 
-Offsets are expressed in bytes regardless of the access width. `bus_space_read_4(tag, handle, 0x10)` reads a 32-bit value starting at byte offset `0x10`. `bus_space_read_2(tag, handle, 0x12)` reads a 16-bit value starting at byte offset `0x12`. The function's suffix names the width in bytes, not the offset granularity.
+偏移量以字节表示，与访问宽度无关。`bus_space_read_4(tag, handle, 0x10)` 读取从字节偏移 `0x10` 开始的 32 位值。`bus_space_read_2(tag, handle, 0x12)` 读取从字节偏移 `0x12` 开始的 16 位值。函数的后缀以字节命名宽度，而不是偏移粒度。
 
-The driver is responsible for ensuring the offset falls within the mapped region. `bus_space` does not check bounds; an out-of-range access is a driver bug that reads or writes whatever happens to be beyond the device's mapping, which on most platforms is either unmapped memory (faulting the kernel) or another device's memory (corrupting that device's state). Keep your offsets in headers, derive them from the datasheet, and never compute them arithmetically without bounds-checking the result.
+驱动程序负责确保偏移量在映射区域内。`bus_space` 不检查边界；超出范围的访问是驱动程序的 bug，会读写设备映射之外的任何内容，在大多数平台上要么是未映射内存（导致内核异常），要么是另一个设备的内存（损坏该设备的状态）。将偏移量保留在头文件中，从数据手册推导它们，永远不要在没有边界检查结果的情况下用算术计算偏移量。
 
-### The Read Functions
+### 读取函数
 
-The basic read functions come in four widths:
+基本读取函数有四种宽度：
 
 ```c
 u_int8_t  bus_space_read_1(bus_space_tag_t tag, bus_space_handle_t handle,
@@ -452,9 +452,9 @@ uint64_t  bus_space_read_8(bus_space_tag_t tag, bus_space_handle_t handle,
                            bus_size_t offset);
 ```
 
-The `_1`, `_2`, `_4`, `_8` suffixes are access widths in bytes. `_1` is an 8-bit read, `_2` is a 16-bit read, `_4` is a 32-bit read, `_8` is a 64-bit read. The return type is the corresponding unsigned integer.
+`_1`、`_2`、`_4`、`_8` 后缀是以字节为单位的访问宽度。`_1` 是 8 位读取，`_2` 是 16 位读取，`_4` 是 32 位读取，`_8` 是 64 位读取。返回类型是对应的无符号整数。
 
-Not all widths are supported on all platforms. On x86, `bus_space_read_8` is defined only for `__amd64__` (the 64-bit x86) and only for memory space, not I/O port space. The definition in `/usr/src/sys/x86/include/bus.h` is explicit:
+并非所有宽度都在所有平台上受支持。在 x86 上，`bus_space_read_8` 仅为 `__amd64__`（64 位 x86）定义，且仅用于内存空间，不用于 I/O 端口空间。`/usr/src/sys/x86/include/bus.h` 中的定义很明确：
 
 ```c
 #ifdef __amd64__
@@ -469,9 +469,9 @@ bus_space_read_8(bus_space_tag_t tag, bus_space_handle_t handle,
 #endif
 ```
 
-A 64-bit I/O port access returns `BUS_SPACE_INVALID_DATA` (all bits set). A 64-bit memory access dereferences the handle plus offset as a `volatile uint64_t *`. The `volatile` qualifier is what stops the compiler from caching or reordering the access.
+64 位 I/O 端口访问返回 `BUS_SPACE_INVALID_DATA`（所有位置位）。64 位内存访问将句柄加偏移量作为 `volatile uint64_t *` 解引用。`volatile` 限定符正是阻止编译器缓存或重排序访问的关键。
 
-The 32-bit case is similar:
+32 位情况类似：
 
 ```c
 static __inline u_int32_t
@@ -484,13 +484,13 @@ bus_space_read_4(bus_space_tag_t tag, bus_space_handle_t handle,
 }
 ```
 
-Memory space compiles to a `volatile` dereference. I/O port space compiles to an `inl` instruction that reads a long from an I/O port.
+内存空间编译为 `volatile` 解引用。I/O 端口空间编译为从 I/O 端口读取长字的 `inl` 指令。
 
-The 16-bit (`inw`, `*(volatile u_int16_t *)`) and 8-bit (`inb`, `*(volatile u_int8_t *)`) cases follow the same pattern. On a 64-bit x86, `bus_space_read_4` on a memory region compiles to a single `mov` instruction from the mapped address. The cost of the abstraction at runtime, on this common platform, is literally one instruction's worth of call-frame setup if the inline expands, which it does in release builds.
+16 位（`inw`、`*(volatile u_int16_t *)`）和 8 位（`inb`、`*(volatile u_int8_t *)`）情况遵循相同模式。在 64 位 x86 上，内存区域上的 `bus_space_read_4` 编译为从映射地址的单条 `mov` 指令。在这个常见平台上，抽象在运行时的开销，如果内联展开的话，实际上只是一条指令的调用帧设置，而它在发布版本中确实会展开。
 
-### The Write Functions
+### 写入函数
 
-The write functions mirror the read functions:
+写入函数与读取函数镜像：
 
 ```c
 void bus_space_write_1(bus_space_tag_t tag, bus_space_handle_t handle,
@@ -503,7 +503,7 @@ void bus_space_write_8(bus_space_tag_t tag, bus_space_handle_t handle,
                        bus_size_t offset, uint64_t value);
 ```
 
-On x86 memory space, a write compiles to a `volatile` store:
+在 x86 内存空间上，写入编译为 `volatile` 存储：
 
 ```c
 static __inline void
@@ -517,15 +517,15 @@ bus_space_write_4(bus_space_tag_t tag, bus_space_handle_t bsh,
 }
 ```
 
-Port-mapped I/O compiles to an `outl`. The driver writes the same source line regardless of platform; the kernel's per-architecture `bus.h` does the rest.
+端口映射 I/O 编译为 `outl`。驱动程序无论平台都写相同的源代码行；内核的每架构 `bus.h` 完成其余工作。
 
-As with reads, `bus_space_write_8` to I/O port space on x86 is not supported; the function silently returns without emitting a write. This reflects the hardware: x86 I/O ports are 32-bit at most.
+与读取一样，x86 上对 I/O 端口空间的 `bus_space_write_8` 不受支持；函数静默返回而不发出写入。这反映了硬件：x86 I/O 端口最多 32 位。
 
-### The Multi and Region Helpers
+### 多访问和区域访问辅助函数
 
-Sometimes a driver wants to read or write many values from or to a single register, or many values across a range of registers. The `bus_space` API provides two families of helpers.
+有时驱动程序想要从单个寄存器读写多个值，或跨一系列寄存器读写多个值。`bus_space` API 提供了两个系列的辅助函数。
 
-**Multi accesses** repeatedly access a single register, transferring a buffer of values through it. The register stays at a fixed offset; the buffer is consumed or produced. The use case is a FIFO-style register, where the device's internal queue is exposed through a single address, and reading or writing that address pops or pushes one entry.
+**多访问**重复访问单个寄存器，通过它传输值的缓冲区。寄存器保持在固定偏移量；缓冲区被消费或产生。用例是 FIFO 式寄存器，设备内部队列通过单个地址暴露，读取或写入该地址弹出一个或压入一个条目。
 
 ```c
 void bus_space_read_multi_1(bus_space_tag_t tag, bus_space_handle_t handle,
@@ -536,9 +536,9 @@ void bus_space_read_multi_4(bus_space_tag_t tag, bus_space_handle_t handle,
                             bus_size_t offset, u_int32_t *buf, size_t count);
 ```
 
-`bus_space_read_multi_4(tag, handle, 0x20, buf, 16)` reads a 32-bit value from offset `0x20` sixteen times, storing each value in successive entries of `buf`. The offset does not change between reads; only the buffer pointer advances.
+`bus_space_read_multi_4(tag, handle, 0x20, buf, 16)` 从偏移量 `0x20` 读取 32 位值十六次，将每个值存储在 `buf` 的连续条目中。读取之间偏移量不变；只有缓冲区指针前进。
 
-The write variants mirror the reads:
+写入变体与读取镜像：
 
 ```c
 void bus_space_write_multi_1(bus_space_tag_t tag, bus_space_handle_t handle,
@@ -549,7 +549,7 @@ void bus_space_write_multi_4(bus_space_tag_t tag, bus_space_handle_t handle,
                              bus_size_t offset, const u_int32_t *buf, size_t count);
 ```
 
-**Region accesses** transfer across a range of offsets. The offset advances each step; the buffer advances each step. The use case is a memory-like region inside the device, such as a block of configuration data or a frame buffer slice.
+**区域访问**跨一系列偏移量传输。偏移量每步前进；缓冲区每步前进。用例是设备内部的类内存区域，如配置数据块或帧缓冲区切片。
 
 ```c
 void bus_space_read_region_1(bus_space_tag_t tag, bus_space_handle_t handle,
@@ -562,30 +562,30 @@ void bus_space_write_region_4(bus_space_tag_t tag, bus_space_handle_t handle,
                               bus_size_t offset, const u_int32_t *buf, size_t count);
 ```
 
-`bus_space_read_region_4(tag, handle, 0x100, buf, 16)` reads 16 consecutive 32-bit values starting at offset `0x100` and ending at offset `0x13c`, storing them in `buf[0]` through `buf[15]`.
+`bus_space_read_region_4(tag, handle, 0x100, buf, 16)` 从偏移量 `0x100` 开始到偏移量 `0x13c` 结束，读取 16 个连续的 32 位值，存储在 `buf[0]` 到 `buf[15]` 中。
 
-The distinction between multi and region corresponds to two different hardware patterns. A FIFO register at a single offset is a multi; a configuration block that spans many offsets is a region. Using the wrong family leaves the driver doing the wrong thing, even if the loop count matches, so take care to pick the right one.
+多访问和区域访问之间的区别对应于两种不同的硬件模式。单个偏移量处的 FIFO 寄存器是多访问；跨越多个偏移量的配置块是区域访问。使用错误的系列会让驱动程序做错误的事情，即使循环次数匹配，所以注意选择正确的系列。
 
-Chapter 16's simulated device does not use multi or region accesses; the driver addresses registers one at a time. Chapter 17's richer simulation and later PCI-based chapters introduce the multi and region patterns where they apply.
+第 16 章的模拟设备不使用多访问或区域访问；驱动程序逐个访问寄存器。第 17 章更丰富的模拟和后续基于 PCI 的章节在适用的地方引入多访问和区域访问模式。
 
-### The Barrier Function
+### 屏障函数
 
-`bus_space_barrier` is the function that most drivers forget exists until they need it, and its correct use is one of the quiet disciplines of solid hardware programming.
+`bus_space_barrier` 是大多数驱动程序在需要之前忘记其存在的函数，其正确使用是扎实硬件编程的静默规范之一。
 
 ```c
 void bus_space_barrier(bus_space_tag_t tag, bus_space_handle_t handle,
                        bus_size_t offset, bus_size_t length, int flags);
 ```
 
-The function enforces ordering on `bus_space` reads and writes issued before the call, relative to those issued after. The `flags` argument is a bitmask:
+该函数对调用之前发出的 `bus_space` 读写和之后发出的读写强制排序。`flags` 参数是位掩码：
 
-- `BUS_SPACE_BARRIER_READ` makes prior reads complete before subsequent reads.
-- `BUS_SPACE_BARRIER_WRITE` makes prior writes complete before subsequent writes.
-- The two may be OR-ed together to enforce both directions.
+- `BUS_SPACE_BARRIER_READ` 使之前的读取在后续读取之前完成。
+- `BUS_SPACE_BARRIER_WRITE` 使之前的写入在后续写入之前完成。
+- 两者可以 OR 在一起以强制两个方向。
 
-The `offset` and `length` parameters describe the region the barrier applies to. On x86 these are ignored; the barrier applies to the whole CPU. On other architectures, a bus bridge may be able to enforce barriers more narrowly, and the parameters are informative.
+`offset` 和 `length` 参数描述屏障应用的区域。在 x86 上这些被忽略；屏障应用于整个 CPU。在其他架构上，总线桥可能能够更窄地强制屏障，这些参数是提供信息的。
 
-On x86 specifically, `bus_space_barrier` compiles to a small and well-defined sequence. From `/usr/src/sys/x86/include/bus.h`:
+在 x86 上具体来说，`bus_space_barrier` 编译为一个简小且定义明确的序列。来自 `/usr/src/sys/x86/include/bus.h`：
 
 ```c
 static __inline void
@@ -603,25 +603,25 @@ bus_space_barrier(bus_space_tag_t tag __unused, bus_space_handle_t bsh __unused,
 }
 ```
 
-A read barrier on amd64 emits a `lock addl` on the stack, which is a cheap way to issue a full memory fence on x86. A write barrier emits only a compiler barrier (`__compiler_membar()`), because x86 hardware retires writes in program order and the only reordering a driver can experience on writes is from the compiler. The distinction between "the CPU might reorder this" and "the compiler might reorder this" matters, and the x86 `bus_space_barrier` encodes it with minimum cost.
+amd64 上的读取屏障在栈上发出 `lock addl`，这是在 x86 上发出完整内存屏障的廉价方式。写入屏障仅发出编译器屏障（`__compiler_membar()`），因为 x86 硬件按程序顺序完成写入，驱动程序在写入上唯一可能经历的重排序来自编译器。"CPU 可能重排序这个"和"编译器可能重排序这个"之间的区别很重要，x86 的 `bus_space_barrier` 以最低成本编码了它。
 
-On arm64 the barrier compiles to a `dsb` or `dmb` instruction depending on the flags, because arm64's memory model is weaker and actual CPU reordering is possible. The driver's source does not change; the same `bus_space_barrier` call picks the right instruction for each platform.
+在 arm64 上，屏障根据标志编译为 `dsb` 或 `dmb` 指令，因为 arm64 的内存模型更弱，实际的 CPU 重排序是可能的。驱动程序的源代码不变；相同的 `bus_space_barrier` 调用为每个平台选择正确的指令。
 
-When is a barrier required? The rule of thumb is: when the correctness of one register access depends on another access having completed first. Examples:
+什么时候需要屏障？经验法则是：当一个寄存器访问的正确性取决于另一个访问先完成时。示例：
 
-- A driver writes a command to `CONTROL` and reads the result from `STATUS`. The read must not be speculated before the write. A `bus_space_barrier(tag, handle, 0, 0, BUS_SPACE_BARRIER_WRITE | BUS_SPACE_BARRIER_READ)` between them enforces the ordering.
-- A driver clears an interrupt flag in `INTR_STATUS` and expects the clear to reach the device before re-enabling interrupts. A write barrier after the clear, before the re-enable, is the correct discipline.
-- A driver posts a DMA descriptor to memory and then writes a "doorbell" register to tell the device to process it. A write barrier between the memory write and the doorbell write is required on weakly-ordered platforms.
+- 驱动程序向 `CONTROL` 写入命令并从 `STATUS` 读取结果。读取不能被推测到写入之前。在它们之间加 `bus_space_barrier(tag, handle, 0, 0, BUS_SPACE_BARRIER_WRITE | BUS_SPACE_BARRIER_READ)` 强制排序。
+- 驱动程序在 `INTR_STATUS` 中清除中断标志，期望清除在重新启用中断之前到达设备。清除之后的写入屏障，在重新启用之前，是正确的做法。
+- 驱动程序将 DMA 描述符写入内存，然后写入"门铃"寄存器告诉设备处理它。在内存写入和门铃写入之间的写入屏障在弱序平台上是必需的。
 
-On x86, many of these cases are handled by the platform's strong ordering model, and a driver written without explicit barriers often works. The same driver ported to arm64 may fail subtly. The rule "use barriers when ordering matters" produces portable code; the rule "barriers do nothing on x86 so skip them" produces code that breaks on half of FreeBSD's supported platforms.
+在 x86 上，这些情况中的许多由平台的强排序模型处理，没有显式屏障的驱动程序通常也能工作。同一个驱动程序移植到 arm64 可能会微妙地失败。"在排序重要时使用屏障"的规则产生可移植的代码；"屏障在 x86 上什么也不做所以跳过它们"的规则产生的代码在 FreeBSD 支持的平台的一半上会出错。
 
-Section 6 of this chapter revisits barriers with worked examples in the simulated driver.
+本章第 6 节将在模拟驱动程序中用实例重新讨论屏障。
 
-### The `bus_*` Shorthand over a `struct resource *`
+### `struct resource *` 上的 `bus_*` 简写
 
-The `bus_space_*` family takes a tag and a handle. In practice, drivers do not usually carry those around; they carry a `struct resource *`, which is what `bus_alloc_resource_any` returns. The resource structure contains the tag and the handle, among other things. Passing them separately would be noise.
+`bus_space_*` 系列接受标签和句柄。实际上，驱动程序通常不随身携带它们；它们携带 `struct resource *`，这就是 `bus_alloc_resource_any` 返回的。资源结构包含标签和句柄以及其他内容。分别传递它们会是噪音。
 
-To eliminate the noise, `/usr/src/sys/sys/bus.h` defines a family of shorthand macros that take a `struct resource *` and extract the tag and handle internally:
+为了消除噪音，`/usr/src/sys/sys/bus.h` 定义了一族简写宏，接受 `struct resource *` 并在内部提取标签和句柄：
 
 ```c
 #define bus_read_1(r, o) \
@@ -638,24 +638,24 @@ To eliminate the noise, `/usr/src/sys/sys/bus.h` defines a family of shorthand m
     bus_space_barrier((r)->r_bustag, (r)->r_bushandle, (o), (l), (f))
 ```
 
-There are equivalents for `_multi` and `_region` variants, stream variants, and the barrier. The macros cover the same functionality as the underlying `bus_space_*` family, just with a more compact call shape.
+`_multi` 和 `_region` 变体、流式变体和屏障有对应的等价宏。这些宏覆盖与底层 `bus_space_*` 系列相同的功能，只是调用形式更紧凑。
 
-Most drivers in `/usr/src/sys/dev/` use the shorthand. A typical usage looks like this, adapted from `if_alevar.h`:
+`/usr/src/sys/dev/` 中的大多数驱动程序使用简写。一个典型的用法如下，改编自 `if_alevar.h`：
 
 ```c
 #define CSR_READ_4(sc, reg)       bus_read_4((sc)->res[0], (reg))
 #define CSR_WRITE_4(sc, reg, val) bus_write_4((sc)->res[0], (reg), (val))
 ```
 
-The driver defines its own `CSR_READ_4` and `CSR_WRITE_4` macros in terms of `bus_read_4` and `bus_write_4`, abstracting one more layer on top. The softc holds an array of `struct resource *` pointers, and the macros reach through to the first one (the main MMIO region) without the driver having to write out the resource dereference every time.
+驱动程序在 `bus_read_4` 和 `bus_write_4` 之上定义自己的 `CSR_READ_4` 和 `CSR_WRITE_4` 宏，在顶层再抽象一层。softc 保存 `struct resource *` 指针数组，宏直接到达第一个（主 MMIO 区域），驱动程序不必每次都写出资源解引用。
 
-This is a deliberate pattern. It makes register access statements short and scanable. It centralises the resource reference in one place, so if the driver later maps a second region, only the macros change. And it gives the driver's code a consistent look that anyone familiar with `/usr/src/sys/dev/` will recognise immediately.
+这是刻意的模式。它使寄存器访问语句短小可扫描。它将资源引用集中在一个地方，所以如果驱动程序后来映射了第二个区域，只有宏需要改变。它给驱动程序的代码以一致的样式，任何熟悉 `/usr/src/sys/dev/` 的人都能立即认出。
 
-Chapter 16's simulated driver adopts this pattern by Stage 4. The early stages use the `bus_space_*` family directly, to keep the mechanism visible; the final refactor wraps the accesses in `CSR_READ_*` and `CSR_WRITE_*` macros the way a production driver would.
+第 16 章的模拟驱动程序在第 4 阶段采用这个模式。早期阶段直接使用 `bus_space_*` 系列以保持机制可见；最终重构将访问包装在 `CSR_READ_*` 和 `CSR_WRITE_*` 宏中，就像生产驱动程序那样。
 
-### Setup and Teardown
+### 设置和拆除
 
-A driver that uses `bus_space` does not call `bus_space_map` directly in most cases. Instead, it asks the bus subsystem for a resource through `bus_alloc_resource_any`:
+使用 `bus_space` 的驱动程序在大多数情况下不直接调用 `bus_space_map`。相反，它通过 `bus_alloc_resource_any` 向总线子系统请求资源：
 
 ```c
 int rid = 0;
@@ -668,42 +668,42 @@ if (res == NULL) {
 }
 ```
 
-The arguments are:
+参数是：
 
-- `dev` is the `device_t` for the driver's device.
-- `SYS_RES_MEMORY` selects a memory-mapped resource. `SYS_RES_IOPORT` selects a port-mapped resource. `SYS_RES_IRQ` selects an IRQ (used in Chapter 19).
-- `rid` is the "resource ID", the index of the resource within the device's resources. A PCI device's first BAR is usually rid 0 (which for a legacy PCI device corresponds to the BAR at PCI config offset `0x10`). `rid` is a pointer because the bus subsystem may update it to reflect the actual rid it used, though for `_any` allocations on a known rid, the value passed in is usually returned unchanged.
-- `RF_ACTIVE` tells the bus to activate the resource immediately, which includes establishing the virtual mapping. Without `RF_ACTIVE`, the resource is reserved but not mapped.
+- `dev` 是驱动程序设备的 `device_t`。
+- `SYS_RES_MEMORY` 选择内存映射资源。`SYS_RES_IOPORT` 选择端口映射资源。`SYS_RES_IRQ` 选择 IRQ（第 19 章使用）。
+- `rid` 是"资源 ID"，设备资源中资源的索引。PCI 设备的第一个 BAR 通常是 rid 0（对于传统 PCI 设备对应 PCI 配置偏移 `0x10` 处的 BAR）。`rid` 是指针，因为总线子系统可能更新它以反映它使用的实际 rid，尽管对于已知 rid 上的 `_any` 分配，传入的值通常原样返回。
+- `RF_ACTIVE` 告诉总线立即激活资源，包括建立虚拟映射。没有 `RF_ACTIVE`，资源被保留但未映射。
 
-On success, `res` is a valid `struct resource *` whose tag and handle can be extracted with `rman_get_bustag(res)` and `rman_get_bushandle(res)`, or whose tag and handle are used implicitly by the `bus_read_*` and `bus_write_*` shorthand macros.
+成功时，`res` 是一个有效的 `struct resource *`，其标签和句柄可以用 `rman_get_bustag(res)` 和 `rman_get_bushandle(res)` 提取，或者由 `bus_read_*` 和 `bus_write_*` 简写宏隐式使用。
 
-At detach, the driver releases the resource:
+在 detach 时，驱动程序释放资源：
 
 ```c
 bus_release_resource(dev, SYS_RES_MEMORY, rid, res);
 ```
 
-The release undoes the allocation, including tearing down the virtual mapping and marking the range available for reuse.
+释放撤销分配，包括拆除虚拟映射并将范围标记为可重用。
 
-This is the boilerplate every driver follows for MMIO resources. Chapter 16's simulated device skips it entirely, because there is no bus to allocate from; the "resource" is a chunk of kernel memory the driver allocated with `malloc(9)`. Chapter 17 introduces a slightly more sophisticated simulation that mimics the allocation path. Chapter 18, when real PCI enters the picture, uses the full `bus_alloc_resource_any` flow.
+这是每个驱动程序为 MMIO 资源遵循的样板。第 16 章的模拟设备完全跳过了它，因为没有总线可以分配；"资源"是驱动程序用 `malloc(9)` 分配的一块内核内存。第 17 章引入一个稍微更复杂的模拟来模仿分配路径。第 18 章，当真实 PCI 出现时，使用完整的 `bus_alloc_resource_any` 流程。
 
-### A First Stand-Alone Example
+### 第一个独立示例
 
-Even without real hardware, a simple stand-alone program illustrates the shape of a `bus_space` call. Imagine a driver that wants to read the 32-bit `DEVICE_ID` register at offset `0x18` from a device whose MMIO region has been allocated as `res`:
+即使没有真实硬件，一个简单的独立程序也能说明 `bus_space` 调用的形式。想象一个驱动程序想要从 MMIO 区域已分配为 `res` 的设备中读取偏移量 `0x18` 处的 32 位 `DEVICE_ID` 寄存器：
 
 ```c
 uint32_t devid = bus_read_4(sc->res, 0x18);
 ```
 
-One line. The `sc->res` holds the `struct resource *`. The offset `0x18` comes from the datasheet. The return value is the 32-bit contents of the register.
+一行。`sc->res` 保存 `struct resource *`。偏移量 `0x18` 来自数据手册。返回值是寄存器的 32 位内容。
 
-To write a control value:
+写入控制值：
 
 ```c
 bus_write_4(sc->res, 0x00, 0x00000001); /* set ENABLE bit */
 ```
 
-To enforce ordering between the write and a subsequent read:
+在写入和后续读取之间强制排序：
 
 ```c
 bus_write_4(sc->res, 0x00, 0x00000001);
@@ -711,13 +711,13 @@ bus_barrier(sc->res, 0, 0, BUS_SPACE_BARRIER_WRITE | BUS_SPACE_BARRIER_READ);
 uint32_t status = bus_read_4(sc->res, 0x04);
 ```
 
-The barrier ensures the write reaches the device before the read is issued. On x86 the barrier is cheap; on arm64 it emits a fence instruction. The driver does not know or care which; the abstraction handles it.
+屏障确保写入在读取发出之前到达设备。在 x86 上屏障开销很低；在 arm64 上它发出一条围栏指令。驱动程序不知道也不关心哪个；抽象处理它。
 
-These are three-line shapes that will appear, with small variations, in every driver you write in Part 4 and beyond. The patterns look identical whether the target is a real network card, a USB controller, a storage adapter, or a simulated device.
+这些三行模式将在你在第四部分及以后编写的每个驱动程序中出现，只有小变化。无论目标是真实网卡、USB 控制器、存储适配器还是模拟设备，模式看起来都一样。
 
-### A Look at a Real Driver's `bus_space` Usage
+### 真实驱动程序中 `bus_space` 使用的一瞥
 
-To connect the vocabulary to real code, open `/usr/src/sys/dev/ale/if_alevar.h` and scroll to the `CSR_WRITE_*` / `CSR_READ_*` macro block. You will find:
+要将词汇与真实代码联系起来，打开 `/usr/src/sys/dev/ale/if_alevar.h` 滚动到 `CSR_WRITE_*` / `CSR_READ_*` 宏块。你会发现：
 
 ```c
 #define CSR_WRITE_4(_sc, reg, val)    \
@@ -732,72 +732,72 @@ To connect the vocabulary to real code, open `/usr/src/sys/dev/ale/if_alevar.h` 
         bus_read_4((_sc)->ale_res[0], (reg))
 ```
 
-The softc stores an array `ale_res[]` of resources; the macros reach into the first slot. Everywhere else in the driver, a register access reads as `CSR_READ_4(sc, ALE_SOME_REG)` and reads naturally.
+softc 存储资源数组 `ale_res[]`；宏直接到达第一个槽位。在驱动程序的其他地方，寄存器访问读作 `CSR_READ_4(sc, ALE_SOME_REG)`，读起来很自然。
 
-Or open `/usr/src/sys/dev/e1000/if_em.c` and search for `bus_alloc_resource_any`. You will find:
+或者打开 `/usr/src/sys/dev/e1000/if_em.c` 搜索 `bus_alloc_resource_any`。你会发现：
 
 ```c
 sc->memory = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid, RF_ACTIVE);
 ```
 
-The resource goes into the softc's `memory` field; the rest of the driver uses macros over `sc->memory`. The pattern repeats in every driver you will meet in Part 4.
+资源进入 softc 的 `memory` 字段；驱动程序的其余部分使用 `sc->memory` 上的宏。这个模式在你将在第四部分遇到的每个驱动程序中重复。
 
-Chapter 16 builds up to this pattern gradually. Stage 1 uses plain struct access to emphasise the mechanics. Stage 2 introduces `bus_space_*` directly against a simulated handle. Stage 3 adds barriers and locking. Stage 4 wraps everything in `CSR_*` macros over a `struct resource *`-compatible pointer, matching the real-driver idiom.
+第 16 章逐步构建到这个模式。第 1 阶段使用普通结构体访问来强调机制。第 2 阶段直接对模拟句柄引入 `bus_space_*`。第 3 阶段添加屏障和加锁。第 4 阶段将一切包装在兼容 `struct resource *` 指针的 `CSR_*` 宏中，匹配真实驱动程序的惯用法。
 
-> **A note on line numbers.** The chapter cites FreeBSD source by function, macro, or structure name rather than by line number, because line numbers drift between releases while symbol names survive. For approximate coordinates in FreeBSD 14.3, for orientation only: the `CSR_WRITE_*` macros in `if_alevar.h` sit near line 228, `em_allocate_pci_resources` in `if_em.c` near line 2415, `ale_attach` in `if_ale.c` near line 451, and the `ale_attach` resource-alloc and register-read block spans roughly lines 463 to 580. Open the file and jump to the symbol; the line is whatever your editor reports.
+> **关于行号的说明。** 本章通过函数、宏或结构名称而非行号引用 FreeBSD 源代码，因为行号在版本之间会变化而符号名称会保留。对于 FreeBSD 14.3 中的大致位置（仅供定位）：`if_alevar.h` 中的 `CSR_WRITE_*` 宏大约在第 228 行，`if_em.c` 中的 `em_allocate_pci_resources` 大约在第 2415 行，`if_ale.c` 中的 `ale_attach` 大约在第 451 行，`ale_attach` 的资源分配和寄存器读取块大致跨越第 463 到 580 行。打开文件跳转到符号；行号就是你的编辑器报告的数字。
 
-### Wrapping Up Section 3
+### 第 3 节总结
 
-`bus_space(9)` is a small, focused abstraction over hardware access. A tag identifies an address space; a handle identifies a specific region within it. Read and write functions come in 8, 16, 32, and 64-bit widths. Multi accesses repeat on a single offset; region accesses walk across offsets. Barriers enforce ordering where it matters. The `bus_*` shorthand over a `struct resource *` is what most drivers use day to day.
+`bus_space(9)` 是硬件访问的一个小而专注的抽象。标签标识地址空间；句柄标识其中的特定区域。读写函数有 8、16、32 和 64 位宽度。多访问在单个偏移量上重复；区域访问跨偏移量步进。屏障在排序重要的地方强制排序。`struct resource *` 上的 `bus_*` 简写是大多数驱动程序日常使用的。
 
-The mechanism underneath compiles to CPU instructions that match the platform: a `mov` on x86 MMIO, an `in` or `out` on x86 PIO, a `ldr` or `str` on arm64. The driver writes portable code; the compiler does the translation.
+底层机制编译为与平台匹配的 CPU 指令：x86 MMIO 上的 `mov`、x86 PIO 上的 `in` 或 `out`、arm64 上的 `ldr` 或 `str`。驱动程序编写可移植的代码；编译器完成翻译。
 
-Section 4 now takes you from vocabulary to practice. We build a simulated register block in kernel memory, wrap it with accessor helpers, and start Stage 1 of the Chapter 16 driver refactor.
+第 4 节现在带你从词汇到实践。我们在内核内存中构建一个模拟寄存器块，用访问器辅助函数包装它，并开始第 16 章驱动程序重构的第 1 阶段。
 
 
 
-## Section 4: Simulating Hardware for Testing
+## 第 4 节：为测试模拟硬件
 
-Real hardware is a tough teacher. It is expensive to buy, fragile to mishandle, inconsistent across revisions, and unkind to beginners. For Chapter 16's purposes we want something different: an environment where the reader can practise register-style access, see the results, break things safely, and observe what happens. The answer is to simulate a device in kernel memory.
+真实硬件是一位严厉的老师。它购买成本高、误操作容易损坏、不同修订版之间不一致，对初学者也不友好。对于第 16 章的目的，我们需要不同的东西：一个让读者可以练习寄存器式访问、查看结果、安全地破坏东西并观察发生什么的环境。答案是在内核内存中模拟一个设备。
 
-This section builds that simulation from scratch. First a mental model (what does "simulate a device" mean?), then a register map for the device we are going to fake, then the allocation, the accessors, and the first integration with the `myfirst` driver. By the end of Section 4 the driver has Stage 1: a softc that carries a register block, accessors that read and write it, and a couple of sysctls that let you poke at the simulation from user space.
+本节从零开始构建该模拟。首先是心智模型（"模拟设备"意味着什么？），然后是我们要伪造的设备的寄存器映射，接着是分配、访问器，以及与 `myfirst` 驱动程序的首次集成。到第 4 节结束时，驱动程序完成了第 1 阶段：一个携带寄存器块的 softc、读写它的访问器，以及几个让你从用户空间戳弄模拟的 sysctl。
 
-### What "Simulating Hardware" Means Here
+### "模拟硬件"在这里的含义
 
-The simulation is deliberately minimal in Section 4. A chunk of kernel memory, allocated once, sized to match a register block, and accessed through functions that look like `bus_space` calls. Reads fetch values from the chunk; writes store values into the chunk. There is no dynamic behaviour yet: no timers changing a status register, no events setting a ready bit, no fault injection. Chapter 17 adds all of that. Section 4 gives you the skeleton.
+第 4 节的模拟刻意保持最小化。一块内核内存，分配一次，大小匹配寄存器块，通过看起来像 `bus_space` 调用的函数访问。读取从块中获取值；写入将值存储到块中。目前没有动态行为：没有计时器改变状态寄存器，没有事件设置就绪位，没有故障注入。第 17 章添加所有这些。第 4 节给你骨架。
 
-This narrowness is deliberate. Chapter 16's job is to teach the access mechanism. A richer simulation, where the reader has to reason about both the mechanism and the device's behaviour, would compete for attention with the vocabulary the reader is still learning. Section 4's simulation exists so every register read and write returns a predictable result, which lets the reader focus on correctness of access rather than on whether the device liked the access or not.
+这种窄范围是刻意的。第 16 章的工作是教授访问机制。更丰富的模拟，读者必须同时推理机制和设备行为，会与读者仍在学习的词汇争夺注意力。第 4 节的模拟存在是为了让每次寄存器读写返回可预测的结果，让读者专注于访问的正确性，而不是设备是否接受了该访问。
 
-A small but important point about the simulation: because the "device" is kernel memory, the reader can inspect it, poke it, and dump it through mechanisms the kernel already provides (`sysctl`, `ddb`, `gdb` on a core dump). This transparency is a pedagogical feature. A real device's registers are only visible through the register interface; the simulated registers are visible through the interface *and* through the allocator. When something goes wrong in the driver, the reader can compare "what the driver thinks the register is" with "what the register actually contains". That debugging pathway is very educational and will be lost when we eventually point the driver at real hardware.
+关于模拟的一个小但重要的点：因为"设备"是内核内存，读者可以通过内核已有的机制（`sysctl`、`ddb`、核心转储上的 `gdb`）检查它、戳弄它和转储它。这种透明性是一个教学特性。真实设备的寄存器只能通过寄存器接口看到；模拟寄存器可以通过接口*和*通过分配器看到。当驱动程序出了问题时，读者可以比较"驱动程序认为寄存器是什么"和"寄存器实际包含什么"。这条调试路径非常有教育意义，当我们最终让驱动程序面对真实硬件时会失去它。
 
-### The Register Map for the Simulated Device
+### 模拟设备的寄存器映射
 
-Before allocating anything, decide what the device looks like. Picking a register map up front is exactly what a datasheet does for real hardware, and doing it before writing code is a habit worth building.
+在分配任何东西之前，先决定设备是什么样的。预先选择寄存器映射正是数据手册对真实硬件所做的事情，在编写代码之前做这件事是一个值得培养的习惯。
 
-The Chapter 16 simulated device is a minimal "widget": it can accept a command, report a status, receive a single byte of data, and send a single byte back. The register map is:
+第 16 章的模拟设备是一个最小的“小部件”：它可以接受命令、报告状态、接收一个数据字节并发送一个字节回来。寄存器映射如下：
 
-| Offset | Width  | Name            | Direction | Description                                             |
+| 偏移量 | 宽度   | 名称            | 方向       | 描述                                             |
 |--------|--------|-----------------|-----------|---------------------------------------------------------|
-| 0x00   | 32 bit | `CTRL`          | Read/Write| Control: enable, reset, mode bits.                      |
-| 0x04   | 32 bit | `STATUS`        | Read-only | Status: ready, busy, error, data available.            |
-| 0x08   | 32 bit | `DATA_IN`       | Write-only| Data written to the device for processing.              |
-| 0x0c   | 32 bit | `DATA_OUT`      | Read-only | Data the device has produced.                           |
-| 0x10   | 32 bit | `INTR_MASK`     | Read/Write| Interrupt enable mask.                                  |
-| 0x14   | 32 bit | `INTR_STATUS`   | Read/Clear| Pending interrupt flags (read-to-clear, Chapter 17).    |
-| 0x18   | 32 bit | `DEVICE_ID`     | Read-only | Fixed identifier: 0x4D594649 ('MYFI').                 |
-| 0x1c   | 32 bit | `FIRMWARE_REV`  | Read-only | Firmware revision: encoded as major<<16 | minor.        |
-| 0x20   | 32 bit | `SCRATCH_A`     | Read/Write| Free scratch register. Always echoes writes.            |
-| 0x24   | 32 bit | `SCRATCH_B`     | Read/Write| Free scratch register. Always echoes writes.            |
+| 0x00   | 32 位 | `CTRL`          | 读/写    | 控制：使能、复位、模式位。                      |
+| 0x04   | 32 位 | `STATUS`        | 只读     | 状态：就绪、忙、错误、数据可用。            |
+| 0x08   | 32 位 | `DATA_IN`       | 只写    | 写入设备以供处理的数据。              |
+| 0x0c   | 32 位 | `DATA_OUT`      | 只读     | 设备已产生的数据。                           |
+| 0x10   | 32 位 | `INTR_MASK`     | 读/写    | 中断使能掩码。                                  |
+| 0x14   | 32 位 | `INTR_STATUS`   | 读/清除  | 挂起的中断标志（读即清除，第 17 章）。    |
+| 0x18   | 32 位 | `DEVICE_ID`     | 只读     | 固定标识符：0x4D594649（'MYFI'）。                 |
+| 0x1c   | 32 位 | `FIRMWARE_REV`  | 只读     | 固件修订版：编码为 major<<16 | minor。        |
+| 0x20   | 32 位 | `SCRATCH_A`     | 读/写    | 自由暂存寄存器。始终回显写入。            |
+| 0x24   | 32 位 | `SCRATCH_B`     | 读/写    | 自由暂存寄存器。始终回显写入。            |
 
-The total size is 40 bytes of register space, which we round up to 64 bytes to give ourselves room to grow in Chapter 17.
+总大小是 40 字节的寄存器空间，我们向上取整到 64 字节，为第 17 章的扩展留出空间。
 
-For Chapter 16, all register access is simplified to direct read-and-write on kernel memory. Read-to-clear semantics on `INTR_STATUS`, write-only semantics on `DATA_IN`, and the behaviour of `CTRL` on reset are deferred to Chapter 17. For now, `DATA_IN` echoes whatever the driver wrote; `INTR_STATUS` holds whatever value the driver last set; and the whole block behaves like a plain block of 32-bit slots.
+对于第 16 章，所有寄存器访问都简化为对内核内存的直接读写。`INTR_STATUS` 上的读即清除语义、`DATA_IN` 上的只写语义以及 `CTRL` 在复位时的行为推迟到第 17 章。目前，`DATA_IN` 回显驱动程序写入的任何内容；`INTR_STATUS` 保存驱动程序最后设置的任何值；整个块表现得像一个普通的 32 位槽块。
 
-This is deliberate. Chapter 16 is teaching register access. Chapter 17 introduces the protocol layer. Splitting the two keeps each chapter focused.
+这是刻意的。第 16 章教授寄存器访问。第 17 章引入协议层。将两者分开保持每章的焦点。
 
-### The Register Offsets Header
+### 寄存器偏移量头文件
 
-A real driver separates register offsets into a header so the datasheet mapping lives in one place. The Chapter 16 driver follows the same discipline. Create a file `myfirst_hw.h` alongside `myfirst.c`:
+真实驱动程序将寄存器偏移量分离到头文件中，这样数据手册映射就存在于一个地方。第 16 章的驱动程序遵循同样的规范。在 `myfirst.c` 旁边创建一个文件 `myfirst_hw.h`：
 
 ```c
 /* myfirst_hw.h -- Chapter 16 simulated register definitions. */
@@ -847,13 +847,13 @@ A real driver separates register offsets into a header so the datasheet mapping 
 #endif /* _MYFIRST_HW_H_ */
 ```
 
-Every offset is a named constant. Every bit mask has a name. Every fixed value has a constant. Later chapters add more registers and more bits; the header grows incrementally. The discipline of "no magic numbers inside the driver's code" starts here and pays off throughout Part 4.
+每个偏移量是一个命名常量。每个位掩码都有一个名称。每个固定值都有一个常量。后续章节会向这个头文件添加更多寄存器；目前以上十个寄存器就是整个设备。
 
-A note on the `u` suffix on the numeric constants. The `u` makes each constant an `unsigned int`, which is important when the value has the high bit set (32-bit registers use the full `0x80000000` bit, which a plain `int` constant cannot represent portably). Using `u` everywhere keeps the driver consistent; getting into the habit prevents the class of bug where a signed-vs-unsigned mismatch leads to a sign-extended comparison that silently passes or fails.
+关于数字常量上的 `u` 后缀的说明。`u` 使每个常量成为 `unsigned int`，当常量用于与无符号类型（`uint32_t`、`bus_size_t` 等）的比较或赋值时很重要。没有 `u`，编译器可能在 `WARNS=6` 时发出有符号/无符号比较警告。
 
-### Allocating the Register Block
+### 分配寄存器块
 
-With the offsets defined, the driver needs a register block. For the simulation, the block is kernel memory. Add the following to the softc (in `myfirst.c` where the softc is declared):
+定义了偏移量后，驱动程序需要一个寄存器块。对于模拟，该块是内核内存。向 softc 添加以下字段：
 
 ```c
 struct myfirst_softc {
@@ -865,17 +865,17 @@ struct myfirst_softc {
 };
 ```
 
-`regs_buf` is a byte pointer to an allocation. Using `uint8_t *` rather than `uint32_t *` makes the per-byte offset arithmetic in the accessors straightforward; we cast to the appropriate width at each access.
+`regs_buf` 是指向分配的字节指针。使用 `uint8_t *` 而不是 `uint32_t *` 使按字节偏移的算术更直接：头文件中的每个偏移量都是字节偏移量，访问器辅助函数在内部转换为 `uint32_t`。`regs_len` 记录分配大小供拆除路径使用。
 
-Before the allocation itself, a small but useful improvement. The Chapter 15 driver uses `M_DEVBUF`, the kernel's generic driver-memory bucket, for its allocations. That works, but it blurs our driver's footprint with every other driver on the system: `vmstat -m` reports the aggregated usage under `devbuf`, with no way to tell what came from `myfirst`. Chapter 16 is a good moment to introduce a per-driver malloc type. Near the top of `myfirst.c`, alongside the other file-scoped declarations:
+在分配之前，一个小但有用的改进。第 15 章驱动程序使用 `M_DEVBUF`，内核的通用 malloc 类型。第 16 章引入驱动程序特定的类型：
 
 ```c
 static MALLOC_DEFINE(M_MYFIRST, "myfirst", "myfirst driver allocations");
 ```
 
-`MALLOC_DEFINE` registers a new malloc bucket named `myfirst`, with the long description used by `vmstat -m`. Every allocation the driver makes from this chapter onward is tagged with `M_MYFIRST`, so `vmstat -m` can report the driver's total memory use directly. Chapter 15's allocations that previously used `M_DEVBUF` can be migrated to `M_MYFIRST` in the same pass, or left alone; the practical difference is small and the migration is purely cosmetic.
+`MALLOC_DEFINE` 注册一个名为 `myfirst` 的新 malloc 桶，带有 `vmstat -m` 使用的长描述。每个标记为 `M_MYFIRST` 的分配都会出现在该桶下。加载驱动程序后，`vmstat -m | grep myfirst` 显示计数和总字节数。
 
-With the type defined, the allocation happens in `myfirst_attach`, before any code that might access the registers:
+定义了类型后，分配在 `myfirst_attach` 中进行，在任何可能访问寄存器的代码之前：
 
 ```c
 /* In myfirst_attach, after softc initialisation, before registering /dev nodes. */
@@ -888,11 +888,11 @@ sc->regs_buf = malloc(sc->regs_size, M_MYFIRST, M_WAITOK | M_ZERO);
 *(uint32_t *)(sc->regs_buf + MYFIRST_REG_STATUS)       = MYFIRST_STATUS_READY;
 ```
 
-`M_WAITOK | M_ZERO` produces a zero-filled allocation that can sleep to complete if memory is tight, which is fine at attach time. `M_WAITOK` is the right choice because the caller is the kernel's attach path, which is a process context and can block; `M_NOWAIT` would be required only from a callout or filter-interrupt context.
+`M_WAITOK | M_ZERO` 产生一个零填充的分配，如果内存紧张可以睡眠等待完成，这在 attach 时没问题。64 字节的分配覆盖所有十个寄存器并有余量。
 
-The initialisation writes three fixed values: the device ID, the firmware revision, and an initial `STATUS` with the `READY` bit set. A real device would set these through hardware logic at power-on; the simulation does them explicitly in code.
+初始化写入三个固定值：设备 ID、固件修订版，以及设置了 `READY` 位的初始 `STATUS`。所有其他寄存器从零开始。
 
-The teardown is symmetric, in `myfirst_detach`:
+拆除是对称的，在 `myfirst_detach` 中：
 
 ```c
 /* In myfirst_detach, after all consumers of regs_buf have quiesced. */
@@ -903,15 +903,15 @@ if (sc->regs_buf != NULL) {
 }
 ```
 
-As always in the Chapter 11-15 tradition, the free happens after every code path that could touch the memory has finished. By the time we reach this point in detach, the callouts are drained, the taskqueue is drained, the cdev is destroyed, and no syscall can reach the driver.
+按照第 11-15 章的传统，释放在每个可能接触该内存的代码路径都完成后进行：
 
-A subtle but important point: the allocation uses `malloc(9)` rather than `contigmalloc(9)` or `bus_dmamem_alloc(9)`. For simulation, any kernel memory works. For real hardware with DMA requirements, the allocation would need to be physically contiguous, page-aligned, and bounce-buffered as appropriate; that is Chapter 20's topic, not ours.
+一个微妙但重要的点：分配使用 `malloc(9)` 而不是 `contigmalloc(9)` 或 `bus_dmamem_alloc(9)`。对于模拟，物理连续性不重要，因为 CPU 通过内核的虚拟映射访问寄存器，而不是通过设备的 DMA 引擎。真实设备的 MMIO 区域来自 `bus_alloc_resource`；模拟使用 `malloc` 是因为背后没有总线。
 
-### The First Accessor Helpers
+### 第一个访问器辅助函数
 
-Direct struct access through raw casts (`*(uint32_t *)(sc->regs_buf + MYFIRST_REG_CTRL)`) works but is ugly, unsafe (no bounds checking), and inconsistent with the `bus_space` idiom the chapter is teaching. Replace it with named accessors.
+通过原始类型转换直接访问结构体（`*(uint32_t *)(sc->regs_buf + MYFIRST_REG_CTRL)`）可以工作但难看、不安全（没有边界检查）且难以 grep。真实驱动程序将寄存器访问包装在辅助函数或宏中，集中类型转换、边界检查和（稍后的）加锁。
 
-In `myfirst_hw.h`, add function prototypes and inline definitions:
+在 `myfirst_hw.h` 中，添加函数原型和内联定义：
 
 ```c
 /* Simulated accessor helpers. Stage 1: direct memory, no barriers. */
@@ -936,15 +936,15 @@ myfirst_reg_write(uint8_t *regs_buf, size_t regs_size, bus_size_t offset,
 }
 ```
 
-Two helpers: one read, one write. Each bounds-checks the offset with `KASSERT` so an out-of-range access is caught immediately on a debug kernel. Each uses `volatile` to prevent the compiler from caching or reordering the access. `bus_size_t` is the same type `bus_space` uses for offsets; using it keeps the accessors compatible with the later transition.
+两个辅助函数：一个读取，一个写入。每个都用 `KASSERT` 进行偏移量边界检查，使超出范围的访问在调试内核中立即被捕获。每个将字节指针基址加偏移量转换为 `volatile uint32_t *` 并解引用。`volatile` 防止编译器缓存或重排序该访问。
 
-A driver that wants to read `STATUS` from its softc now writes:
+想要从 softc 读取 `STATUS` 的驱动程序现在写：
 
 ```c
 uint32_t status = myfirst_reg_read(sc->regs_buf, sc->regs_size, MYFIRST_REG_STATUS);
 ```
 
-Two arguments of boilerplate per call feels like a lot. Real drivers wrap their accessors in shorter macros that take the softc directly. Let us do the same:
+每次调用两个参数的样板感觉很多。真实驱动程序将访问器包装在更短的宏中，接受 softc 和寄存器名称。在 `myfirst_hw.h` 中添加：
 
 ```c
 #define MYFIRST_REG_READ(sc, offset) \
@@ -953,15 +953,15 @@ Two arguments of boilerplate per call feels like a lot. Real drivers wrap their 
         myfirst_reg_write((sc)->regs_buf, (sc)->regs_size, (offset), (value))
 ```
 
-Now the register access reads:
+现在寄存器访问读作：
 
 ```c
 uint32_t status = MYFIRST_REG_READ(sc, MYFIRST_REG_STATUS);
 ```
 
-Short, named, scannable. The macros do not add cost beyond the inline expansion the compiler would have done anyway.
+简短、命名、可扫描。这些宏不增加超过编译器本来就会做的内联展开的开销。
 
-One more helper worth introducing for Stage 1. A common operation is "read a register, modify one field, write it back":
+第 1 阶段值得引入的另一个辅助函数。一个常见的操作是“读取寄存器，修改一个字段，写回”。这被称为读-改-写模式，并为它设置一个辅助函数可以省去以后重复的代码。在 `myfirst_hw.h` 中添加：
 
 ```c
 static __inline void
@@ -977,7 +977,7 @@ myfirst_reg_update(struct myfirst_softc *sc, bus_size_t offset,
 }
 ```
 
-The helper reads the register, clears the bits named in `clear_mask`, sets the bits named in `set_mask`, and writes the result back. A typical use:
+辅助函数读取寄存器，清除 `clear_mask` 中命名的位，设置 `set_mask` 中命名的位，并写回结果。这在形式上与真实驱动程序用于切换寄存器中各个字段的模式相同。
 
 ```c
 /* Clear the ENABLE bit in CTRL. */
@@ -991,11 +991,11 @@ myfirst_reg_update(sc, MYFIRST_REG_CTRL, MYFIRST_CTRL_MODE_MASK,
     3 << MYFIRST_CTRL_MODE_SHIFT);
 ```
 
-A caveat: `myfirst_reg_update` as written is not atomic. Between the read and the write, another context could read the same register, modify it, and write it back; our write would then overwrite the other context's update. For Stage 1 this is acceptable, because the simulated registers are accessed only from the syscall context and are not shared with interrupts or tasks yet. Section 6 revisits the atomicity story and introduces locking around the update.
+一个警告：`myfirst_reg_update` 按照目前写法不是原子的。在读取和写入之间，另一个上下文可能会修改寄存器。对于第 16 章的模拟这不是问题，因为只有一个上下文接触寄存器。第 6 节添加了适当的锁。
 
-### Exposing the Registers Through Sysctls
+### 通过 Sysctl 暴露寄存器
 
-To make the Stage 1 register block observable without writing a user-space tool, expose each register as a read-only sysctl. In `myfirst_attach`, alongside the other sysctl definitions:
+为了使第 1 阶段寄存器块可观察而不必编写用户空间工具，通过 sysctl 暴露每个寄存器。在 `myfirst_attach` 中，在寄存器初始化之后，添加：
 
 ```c
 /* Chapter 16, Stage 1: sysctls that read the simulated registers. */
@@ -1015,9 +1015,9 @@ SYSCTL_ADD_PROC(&sc->sysctl_ctx,
     myfirst_sysctl_reg, "IU", "Device ID register (read-only view)");
 ```
 
-(Equivalent entries for each interesting register follow the same pattern. The examples/part-04 source has the full list.)
+（每个有趣寄存器的等价条目遵循相同模式。examples/part-04 源代码有完整列表。）
 
-The sysctl handler translates the arg1/arg2 pair into a register read:
+sysctl 处理程序将 arg1/arg2 对转换为寄存器读取：
 
 ```c
 static int
@@ -1034,7 +1034,7 @@ myfirst_sysctl_reg(SYSCTL_HANDLER_ARGS)
 }
 ```
 
-With these sysctls in place, the reader can type:
+有了这些 sysctl，读者可以输入：
 
 ```text
 # sysctl dev.myfirst.0.reg_ctrl
@@ -1045,11 +1045,11 @@ dev.myfirst.0.reg_status: 1
 dev.myfirst.0.reg_device_id: 1298498121
 ```
 
-`1298498121` in decimal is `0x4D594649`, the fixed device ID. `1` in `reg_status` is the `READY` bit. These are the values the attach path set; the reader can see them from user space. The loop from "the driver writes a register" to "the reader observes the register value" is closed.
+`1298498121` 十进制即 `0x4D594649`，固定设备 ID。`reg_status` 中的 `1` 是 `READY` 位。这些是 attach 路径设置的值；读者可以从用户空间看到它们。从“驱动程序写入寄存器”到“读者观察寄存器值”的循环被关闭了。
 
-### A Writeable Sysctl for `CTRL` and `DATA_IN`
+### `CTRL` 和 `DATA_IN` 的可写 Sysctl
 
-Reading is half the story. The Stage 1 simulation also benefits from a writeable sysctl that lets the reader poke register values:
+读取只是故事的一半。第 1 阶段模拟也受益于一个可写 sysctl，让读者从用户空间修改 `CTRL` 和 `DATA_IN` 寄存器。
 
 ```c
 SYSCTL_ADD_PROC(&sc->sysctl_ctx,
@@ -1059,7 +1059,7 @@ SYSCTL_ADD_PROC(&sc->sysctl_ctx,
     "Control register (writeable, Stage 1 test aid)");
 ```
 
-With the write handler:
+有了写入处理程序：
 
 ```c
 static int
@@ -1081,9 +1081,9 @@ myfirst_sysctl_reg_write(SYSCTL_HANDLER_ARGS)
 }
 ```
 
-The handler reads the current value, accepts a new value from the caller, writes it back. Writes are unrestricted for now; later sections add validation and side effects.
+处理程序读取当前值，接受来自调用者的新值，写回。写入受 `sc->mtx` 保护。
 
-The reader can now experiment:
+读者现在可以实验：
 
 ```text
 # sysctl dev.myfirst.0.reg_ctrl_set
@@ -1094,29 +1094,29 @@ dev.myfirst.0.reg_ctrl_set: 0 -> 1
 dev.myfirst.0.reg_ctrl: 1
 ```
 
-Setting the `ctrl_set` sysctl to `1` enables the (notional) device by setting the `ENABLE` bit in `CTRL`. Reading `reg_ctrl` confirms it. The loop is now complete: user space writes, the register updates, user space reads, the value matches.
+将 `ctrl_set` sysctl 设置为 `1` 通过在 `CTRL` 中设置 `ENABLE` 位来启用（名义上的）设备。再次设置为 `0` 将其清除。
 
-### The Observer Pattern: Coupling Registers to Driver State
+### 观察者模式：将寄存器与驱动程序状态耦合
 
-At this point the driver has a register block that is inert. Writing to `CTRL` does not make the driver do anything. Reading from `STATUS` returns whatever was last written. The registers exist; the driver ignores them.
+此时驱动程序有一个惰性的寄存器块。写入 `CTRL` 不会使驱动程序做任何事情不同。读取 `STATUS` 总是返回相同的值。寄存器还没有连接到驱动程序的行为。
 
-Stage 1's closing step couples two small pieces of driver state to the register block, so that user-space observation of registers reflects something real.
+第 1 阶段的最后一步将驱动程序状态的两个小片段与寄存器块耦合，以便用户可见的状态变化。
 
-The first coupling: clear the `READY` bit in `STATUS` while the driver is in a reset state, and set it when the driver is attached and operational. In `myfirst_attach`, immediately after allocating `regs_buf`:
+第一个耦合：在驱动程序处于复位状态时清除 `STATUS` 中的 `READY` 位，并在 attach 完成时设置它：
 
 ```c
 MYFIRST_REG_WRITE(sc, MYFIRST_REG_STATUS, MYFIRST_STATUS_READY);
 ```
 
-In `myfirst_detach`, before freeing `regs_buf`:
+在 `myfirst_detach` 中，在释放 `regs_buf` 之前：
 
 ```c
 MYFIRST_REG_WRITE(sc, MYFIRST_REG_STATUS, 0);
 ```
 
-(In practice, detach's `free(regs_buf)` makes the clearing pointless, but the explicit clear documents the intent and mirrors how a real driver would signal the device that the driver is going away.)
+（实际上，detach 的 `free(regs_buf)` 使这个清除变得毫无意义，但显式清除记录了意图，并反映了真实驱动程序如何向设备发出驱动程序即将离开的信号。）
 
-The second coupling: if the user-space caller sets `CTRL.ENABLE`, set a soft flag in the softc that the driver uses to decide whether to emit heartbeat output. If the user clears it, the flag clears. This needs a small change in the writeable sysctl handler and a short routine that applies the change:
+第二个耦合：如果用户空间调用者设置了 `CTRL.ENABLE`，在 softc 中设置一个软标志，使驱动程序可以注意到转变。
 
 ```c
 static void
@@ -1130,7 +1130,7 @@ myfirst_ctrl_update(struct myfirst_softc *sc, uint32_t old, uint32_t new)
 }
 ```
 
-The writeable sysctl handler calls it after updating the register:
+可写 sysctl 处理程序在更新寄存器后调用它：
 
 ```c
 static int
@@ -1158,23 +1158,23 @@ myfirst_sysctl_reg_write(SYSCTL_HANDLER_ARGS)
 }
 ```
 
-Now writing `1` to `reg_ctrl_set` produces a `device_printf` in `dmesg` noting the transition. Writing `0` to `reg_ctrl_set` produces another. The register is no longer inert; it drives an observable behaviour.
+现在向 `reg_ctrl_set` 写入 `1` 会在 `dmesg` 中产生一条 `device_printf`，记录状态转变。向 `reg_ctrl_set` 写入 `0` 会产生另一条。寄存器不再是惰性的；它驱动了一个可观察的行为。
 
-This is a tiny example of a pattern that will recur: the register is a control surface, the driver reacts to register changes, user-space (or in real drivers, the device) triggers those changes. In Chapter 17 we automate the device side with a callout that changes registers on a timer; in Chapter 18 we point the driver at a real PCI device.
+这是一个将会反复出现的模式的微小示例：寄存器是控制面，驱动程序响应它。
 
-### What Stage 1 Accomplished
+### 第 1 阶段完成了什么
 
-At the end of Section 4, the driver has:
+在第 4 节结束时，驱动程序有：
 
-- A `myfirst_hw.h` header with register offsets, bit masks, and fixed values.
-- A `regs_buf` in the softc, allocated at attach and freed at detach.
-- Accessor helpers (`myfirst_reg_read`, `myfirst_reg_write`, `myfirst_reg_update`) and macros (`MYFIRST_REG_READ`, `MYFIRST_REG_WRITE`) that wrap access.
-- Sysctls that expose several registers for read and a writeable sysctl for one of them.
-- A small coupling between `CTRL.ENABLE` and a driver-level printf.
+- 一个 `myfirst_hw.h` 头文件，包含寄存器偏移量、位掩码和固定值。
+- softc 中的 `regs_buf`，在 attach 时分配，在 detach 时释放。
+- 访问器辅助函数和宏。
+- 暴露多个寄存器用于读取的 sysctl，以及一个可写 sysctl。
+- `CTRL.ENABLE` 与驱动程序级 printf 之间的一个小耦合。
 
-The version tag becomes `0.9-mmio-stage1`. The driver still does everything Chapter 15 gave it; it has simply grown a register-shaped appendage.
+版本标签变为 `0.9-mmio-stage1`。驱动程序仍然拥有第 15 章给它的所有功能；它只是长出了一个寄存器形状的附肢。
 
-Build, load, and test:
+构建、加载并测试：
 
 ```text
 # cd examples/part-04/ch16-accessing-hardware/stage1-register-map
@@ -1188,39 +1188,39 @@ Build, load, and test:
 # kldunload myfirst
 ```
 
-You should see the ENABLE transitions in `dmesg` and the register values changing through `sysctl`. If any step fails, Section 4's troubleshooting entries at the end of the chapter catch the most common problems.
+你应该在 `dmesg` 中看到 ENABLE 转变，在 `sysctl` 中看到寄存器值的变化。如果任何步骤失败，本章末尾第 4 节的故障排除条目会捕获最常见的问题。
 
-### A Note on What Stage 1 Is Not
+### 第 1 阶段不是什么
 
-Stage 1 is a register-shaped state container. It is not yet using `bus_space(9)` at the API level. The accessors are plain C memory access behind a named helper. Section 5 takes the next step: replace those helpers with real `bus_space_*` calls that operate on the same kernel memory, so the driver's access pattern matches what a real driver with a real resource would look like.
+第 1 阶段是一个寄存器形状的状态容器。它尚未在 API 层面使用 `bus_space(9)`。访问器是命名辅助函数背后的普通 C 内存访问。第 5 节迈出下一步：用操作相同内核内存的真实 `bus_space_*` 调用替换这些辅助函数，使驱动程序的访问模式匹配带有真实资源的真实驱动程序的样子。
 
-The reason to introduce the abstraction in two passes is pedagogical. Stage 1 makes the mechanism visible: you can see exactly what `MYFIRST_REG_READ` does under the covers. Stage 2 replaces the visible mechanism with the portable API, and you can compare the two and see that the API is doing nothing the helper was not already doing, only more portably and with platform-appropriate barriers where needed. The two-step teaches both.
+分两遍引入抽象的原因是教学性的。第 1 阶段让机制可见：你可以准确看到 `MYFIRST_REG_READ` 在底层做了什么。第 2 阶段用可移植 API 替换可见机制，你可以比较两者，看到 API 没有做辅助函数没有做的任何事，只是更可移植并在需要时带有平台适当的屏障。这两步教学教授了两方面。
 
-### Wrapping Up Section 4
+### 总结第 4 节
 
-Simulating hardware starts with a register map and a chunk of kernel memory. A small header declares the offsets, bit masks, and fixed values. A softc field holds the allocation. Accessor helpers wrap read and write. Sysctls expose the registers so the reader can observe and poke them from user space. Small couplings between registers and driver-level behaviour make the abstraction concrete.
+模拟硬件从一个寄存器映射和一块内核内存开始。一个小型头文件声明偏移量、位掩码和固定值。softc 的一个字段持有分配。访问器辅助函数包装读写。sysctl 暴露寄存器，使读者可以从用户空间观察和戳弄它们。寄存器与驱动程序级行为之间的小耦合使抽象变得具体。
 
-The driver is now at Stage 1 of Chapter 16. Section 5 integrates `bus_space(9)` into this setup, replacing the direct accessors with the portable API the rest of FreeBSD uses.
+驱动程序现在处于第 16 章的第 1 阶段。第 5 节将 `bus_space(9)` 集成到这个设置中，用 FreeBSD 其余部分使用的可移植 API 替换直接访问器。
 
 
 
-## Section 5: Using `bus_space` in a Real Driver Context
+## 第 5 节：在真实驱动程序上下文中使用 `bus_space`
 
-Section 4 gave the driver a simulated register block and direct accessors. Section 5 replaces the direct accessors with the `bus_space(9)` API and integrates register access into the `myfirst` data path. The shape of the driver changes in a few small but deliberate ways, all of which look more like a real hardware driver than the Stage 1 version did.
+第 4 节给驱动程序提供了模拟寄存器块和直接访问器。第 5 节用 `bus_space(9)` API 替换直接访问器，并将寄存器访问集成到 `myfirst` 数据路径中。驱动程序的形状以几个小而刻意的方式变化，所有这些都比第 1 阶段版本更像真实的硬件驱动程序。
 
-This section starts with the smallest possible change (replace the accessor bodies with `bus_space_*` calls) and builds up. By the end, the driver's `write(2)` path produces a register access as a side effect, the driver's `read(2)` path reflects register state, and a task can change register values on a timer so the reader can watch the device "breathe" without user-space poking.
+本节从最小的可能变化开始（用 `bus_space_*` 调用替换访问器主体）并逐步构建。到最后，驱动程序的 `write(2)` 路径产生寄存器访问作为副作用，`read(2)` 路径反映寄存器状态，一个任务可以按计时器改变寄存器值，让读者无需用户空间戳弄就能看到设备"呼吸"。
 
-### The Pedagogical Trick: Using `bus_space` on Kernel Memory
+### 教学技巧：在内核内存上使用 `bus_space`
 
-A minor sleight-of-hand that makes Section 5 possible: on x86, the `bus_space_read_*` and `bus_space_write_*` functions for memory space compile to a plain `volatile` dereference of `handle + offset`. The handle is just a `uintptr_t`-shaped value that the functions cast to a pointer. If we set the handle to `(bus_space_handle_t)sc->regs_buf`, and the tag to `X86_BUS_SPACE_MEM`, the `bus_space_read_4(tag, handle, offset)` call will do `*(volatile u_int32_t *)(regs_buf + offset)`, which is exactly what our Stage 1 accessor did.
+使第 5 节成为可能的一个小技巧：在 x86 上，内存空间的 `bus_space_read_*` 和 `bus_space_write_*` 函数编译为 `handle + offset` 的普通 `volatile` 解引用。句柄只是一个 `uintptr_t` 形状的值，函数将其转换为指针。如果我们将句柄设置为 `(bus_space_handle_t)sc->regs_buf`，标签设置为 `X86_BUS_SPACE_MEM`，`bus_space_read_4(tag, handle, offset)` 调用会执行 `*(volatile u_int32_t *)(regs_buf + offset)`，这正是第 1 阶段访问器所做的。
 
-That means, on x86 at least, we can drive our simulated register block through the real `bus_space` API by filling in a tag and handle that point at our `malloc`'d memory. The driver's code then becomes indistinguishable, at the source level, from a driver that is accessing real MMIO. That is the whole point: the vocabulary transfers.
+这意味着，至少在 x86 上，我们可以通过填写指向我们 `malloc` 分配内存的标签和句柄，通过真实的 `bus_space` API 来驱动我们的模拟寄存器块。驱动程序代码在源代码级别就变得与访问真实 MMIO 的驱动程序无法区分。这就是全部意义：词汇是可以迁移的。
 
-On non-x86 platforms, the trick is slightly less clean. On arm64 and some other architectures, `bus_space_tag_t` is a pointer to a structure describing the bus, and using a manufactured tag requires more setup. For Chapter 16 the simulation path is x86-centric; the chapter acknowledges the architectural limitation and defers portability-across-architectures to the later portability chapter. The lessons Chapter 16 teaches are universally applicable; only this one shortcut for simulation is x86-specific.
+在非 x86 平台上，这个技巧稍微不那么干净。
 
-### Stage 2: Setting Up the Simulated Tag and Handle
+### 第 2 阶段：设置模拟标签和句柄
 
-Add two fields to the softc:
+向 softc 添加两个字段：
 
 ```c
 struct myfirst_softc {
@@ -1232,7 +1232,7 @@ struct myfirst_softc {
 };
 ```
 
-In `myfirst_attach`, after allocating `regs_buf`:
+在 `myfirst_attach` 中，分配 `regs_buf` 之后：
 
 ```c
 #if defined(__amd64__) || defined(__i386__)
@@ -1243,13 +1243,13 @@ sc->regs_tag = X86_BUS_SPACE_MEM;
 sc->regs_handle = (bus_space_handle_t)(uintptr_t)sc->regs_buf;
 ```
 
-That is all the setup. The handle is the virtual address of the allocation cast through `uintptr_t`; the tag is the architecture's constant for memory space.
+这就是全部设置。
 
-The `#error` for non-x86 is a deliberate teaching signal: the chapter explicitly flags what is portable (the vocabulary) and what is not (this specific simulation shortcut). Chapter 17 and the portability chapter will teach a cleaner alternative. Until then, x86 is the supported platform for the chapter's exercises.
+非 x86 上的 `#error` 是一个刻意的教学信号：本章明确标记了什么是可移植的（词汇）和什么是不可移植的（这个特定的模拟快捷方式）。第 17 章和可移植性章节将教授更干净的替代方案。在那之前，x86 是本章练习支持的平台。
 
-### Replacing the Accessors
+### 替换访问器
 
-With the tag and handle set up, the accessors become one-liners over `bus_space_*`:
+设置好标签和句柄后，访问器变成
 
 ```c
 static __inline uint32_t
@@ -1271,18 +1271,18 @@ myfirst_reg_write(struct myfirst_softc *sc, bus_size_t offset, uint32_t value)
 }
 ```
 
-The signature changes: the helpers now take a `struct myfirst_softc *` rather than `regs_buf` and `regs_size` separately. Internal bounds checking is retained; the KASSERT fires if a bug in the driver produces an out-of-range offset. The body uses `bus_space_read_4` and `bus_space_write_4` instead of direct memory access.
+签名变了：辅助函数现在接受
 
-The `MYFIRST_REG_READ` and `MYFIRST_REG_WRITE` macros simplify accordingly:
+`MYFIRST_REG_READ` 和 `MYFIRST_REG_WRITE` 宏相应简化：
 
 ```c
 #define MYFIRST_REG_READ(sc, offset)        myfirst_reg_read((sc), (offset))
 #define MYFIRST_REG_WRITE(sc, offset, value) myfirst_reg_write((sc), (offset), (value))
 ```
 
-Every register access in the driver, including the sysctl handlers and `myfirst_reg_update`, continues to use these macros. None of the call sites change. The driver's behaviour is identical to Stage 1, but the access path now travels through `bus_space`, and the path would work just as well if `regs_tag` and `regs_handle` came from `rman_get_bustag` and `rman_get_bushandle` on a real resource.
+驱动程序中的每个寄存器访问，包括 sysctl
 
-Build the driver and confirm it still passes the Stage 1 sysctl exercises:
+构建驱动程序并确认它仍通过
 
 ```text
 # cd examples/part-04/ch16-accessing-hardware/stage2-bus-space
@@ -1295,13 +1295,13 @@ dev.myfirst.0.reg_device_id: 1298498121
 # kldunload myfirst
 ```
 
-The output matches Stage 1. The driver now uses `bus_space` the way a real driver does.
+输出与第 1 阶段匹配。驱动程序现在使用
 
-### Exposing `DATA_IN` Through the Write Path
+### 通过写入路径暴露 `DATA_IN`
 
-With the accessor layer in place, Stage 2 couples the driver's `write(2)` syscall to the `DATA_IN` register. Every byte written to the device file `/dev/myfirst0` now ends up at the `DATA_IN` register, where the reader can observe it.
+有了访问器层，第 2 阶段将数据路径连接到寄存器，使写入产生可观察的副作用。
 
-Modify `myfirst_write` (the `d_write` callback). The existing handler reads bytes from the uio, copies them into the ring buffer, signals waiters, and returns. The new handler does the same, plus: just before returning, it writes the most recently copied byte to `DATA_IN` and sets the `DATA_AV` bit in `STATUS`:
+修改 `myfirst_write`（`d_write` 回调），在环缓冲区复制之后记录写入的最后一个字节到 `DATA_IN`，并在 `STATUS` 中设置 `DATA_AV` 位：
 
 ```c
 static int
@@ -1345,7 +1345,7 @@ myfirst_write(struct cdev *cdev, struct uio *uio, int flag)
 }
 ```
 
-Now, after any `echo foo > /dev/myfirst0`, the `DATA_IN` register contains the byte value of `'o'` (the last character of `"foo\n"` is `\n`, actually, which is `0x0a`), and the `DATA_AV` bit in `STATUS` is set. The reader can observe this through sysctl:
+现在，在执行 `echo foo > /dev/myfirst0` 之后，`DATA_IN` 寄存器包含 `'o'` 的字节值（`"foo\n"` 的最后一个字符实际上是 `\n`，即 `0x0a`），`STATUS` 中的 `DATA_AV` 位被设置。读者可以通过 sysctl 观察到这一点：
 
 ```text
 # echo -n "Hello" > /dev/myfirst0
@@ -1355,11 +1355,11 @@ dev.myfirst.0.reg_data_in: 111
 dev.myfirst.0.reg_status: 9
 ```
 
-`111` is the ASCII code for `'o'`, the last byte of "Hello". `9` is `MYFIRST_STATUS_READY | MYFIRST_STATUS_DATA_AV` (`1 | 8 = 9`). The driver has, for the first time, produced an externally-observable register-level side effect in response to user-space action.
+`111` 是 `'o'` 的 ASCII 码，"Hello" 的最后一个字节。`9` 是 `MYFIRST_STATUS_READY | MYFIRST_STATUS_DATA_AV`（`1 | 8 = 9`）。驱动程序首次产生了对用户空间操作的寄存器级可观察副作用。
 
-### Exposing `DATA_OUT` Through the Read Path
+### 通过读取路径暴露 `DATA_OUT`
 
-Symmetrically, every byte read from `/dev/myfirst0` can update `DATA_OUT` to reflect what was last read. Modify `myfirst_read`:
+对称地，每次从驱动程序读取时，`DATA_OUT` 反映读取的最后一个字节，当环缓冲区排空时清除 `DATA_AV`：
 
 ```c
 static int
@@ -1389,11 +1389,11 @@ myfirst_read(struct cdev *cdev, struct uio *uio, int flag)
 
         /* ... existing unlock and cv_signal ... */
 
-        /* Chapter 16 Stage 2: reflect the last byte in DATA_OUT. */
+        /* 第 16 章第 2 阶段：将最后一个字节反映到 DATA_OUT。 */
         if (read_any) {
                 MYFIRST_REG_WRITE(sc, MYFIRST_REG_DATA_OUT,
                     (uint32_t)last_byte);
-                /* If the ring buffer is now empty, clear DATA_AV. */
+                /* 如果环缓冲区现在为空，清除 DATA_AV。 */
                 if (cbuf_is_empty(&sc->cb))
                         myfirst_reg_update(sc, MYFIRST_REG_STATUS,
                             MYFIRST_STATUS_DATA_AV, 0);
@@ -1403,9 +1403,9 @@ myfirst_read(struct cdev *cdev, struct uio *uio, int flag)
 }
 ```
 
-Now `DATA_OUT` reflects the last byte the reader read, and `DATA_AV` clears when the ring buffer drains. The loop from "user writes a byte" to "driver updates register" to "user reads a byte" to "driver updates registers" is closed.
+现在 `DATA_OUT` 反映读取者读取的最后一个字节，`DATA_AV` 在环缓冲区排空时清除。从"用户写入一个字节"到"驱动程序更新寄存器"到"用户读取一个字节"到"驱动程序更新寄存器"的循环被闭合了。
 
-Testing:
+测试：
 
 ```text
 # echo -n "ABC" > /dev/myfirst0
@@ -1418,20 +1418,20 @@ dev.myfirst.0.reg_data_out: 67
 dev.myfirst.0.reg_status: 1
 ```
 
-`67` is `'C'`, the last byte written. After the `dd` consumes all three bytes, `DATA_OUT` holds `'C'` (the last byte read) and `STATUS` is back to just `READY` because `DATA_AV` cleared.
+`67` 是 `'C'`，最后写入的字节。`dd` 消费了全部三个字节后，`DATA_OUT` 持有 `'C'`（最后读取的字节），`STATUS` 回到只有 `READY`，因为 `DATA_AV` 已被清除。
 
-### Driving Register State From a Task
+### 通过任务驱动寄存器状态
 
-The register block so far reflects driver actions triggered by user-space syscalls. To illustrate a task-driven pattern, add a small task that periodically increments `SCRATCH_A`. This is an artificial example; it exists so the reader can see register values changing autonomously in response to task-triggered events, preparing for Chapter 17 where callouts and timers drive more realistic changes.
+到目前为止寄存器块反映驱动程序操作的结果。第 2 阶段添加了一个小任务，自主改变一个寄存器，使驱动程序在用户不戳弄时也能"呼吸"。
 
-In the softc:
+在 softc 中：
 
 ```c
 struct task     reg_ticker_task;
 int             reg_ticker_enabled;
 ```
 
-The task callback:
+任务回调：
 
 ```c
 static void
@@ -1447,14 +1447,14 @@ myfirst_reg_ticker_cb(void *arg, int pending)
 }
 ```
 
-The task is enqueued from the existing tick_source callout (Chapter 14's callout that already fires on a timer). In the callout callback, alongside the selwake task enqueue:
+任务从现有的 tick_source callout（第 14 章已经按计时器触发的 callout）入队。在 callout 回调中，与 selwake 任务入队一起：
 
 ```c
 if (sc->reg_ticker_enabled)
         taskqueue_enqueue(sc->tq, &sc->reg_ticker_task);
 ```
 
-And a sysctl to enable it:
+以及一个启用它的 sysctl：
 
 ```c
 SYSCTL_ADD_INT(&sc->sysctl_ctx,
@@ -1463,20 +1463,20 @@ SYSCTL_ADD_INT(&sc->sysctl_ctx,
     "Enable the periodic register ticker (increments SCRATCH_A each tick)");
 ```
 
-Initialisation in attach:
+attach 中的初始化：
 
 ```c
 TASK_INIT(&sc->reg_ticker_task, 0, myfirst_reg_ticker_cb, sc);
 sc->reg_ticker_enabled = 0;
 ```
 
-Drain in detach, in the existing task drain block:
+在 detach 中排空，在现有的任务排空块中：
 
 ```c
 taskqueue_drain(sc->tq, &sc->reg_ticker_task);
 ```
 
-With this in place, enabling the ticker produces a visible register effect:
+有了这个，启用 ticker 后：
 
 ```text
 # sysctl dev.myfirst.0.reg_ticker_enabled=1
@@ -1489,11 +1489,11 @@ dev.myfirst.0.reg_scratch_a: 10
 # sysctl dev.myfirst.0.reg_ticker_enabled=0
 ```
 
-The register value climbs at one per second, as the tick_source callout fires. The driver is now exhibiting autonomous register-level behaviour, triggered by a task, mediated by `bus_space`.
+寄存器值以每秒一个的速度增长，完全自主，不需要用户空间交互。
 
-### The Full Stage 2 Sysctl Tree
+### 第 2 阶段完整的 Sysctl 树
 
-After Stage 2 the full sysctl tree under `dev.myfirst.0` looks roughly like:
+第 2 阶段之后完整的 sysctl 树如下：
 
 ```text
 dev.myfirst.0.debug_level
@@ -1522,38 +1522,40 @@ dev.myfirst.0.reg_ctrl_set
 dev.myfirst.0.reg_ticker_enabled
 ```
 
-Ten register views, one writeable register, one ticker toggle, plus every previous sysctl from Chapters 11 through 15. The driver has grown, but every addition is small and named.
+十个寄存器视图、一个可写寄存器、一个 ticker 开关，加上第 11 到 15 章的每个 sysctl。驱动程序增长了，但每个新增部分都小而有命名。
 
-### A Note on Reads From `STATUS` While the Driver Is Running
+### 关于驱动程序运行时从 `STATUS` 读取的说明
 
-In the Stage 1 and Stage 2 setups, reading `STATUS` via sysctl returns whatever bits the driver most recently set. No read has side effects. This is intentional for Chapter 16. But notice a subtle consequence: the driver can set the `STATUS.DATA_AV` bit in the write path and clear it in the read path, and the user-space reader can observe the bit change over time. Running `sysctl -w dev.myfirst.0.reg_status=0` is possible through the writeable sysctl, but the driver's automatic updates will re-set the bit on the next write to the device file.
+在第 1 阶段和第 2 阶段的设置中，`STATUS` 寄存器是静态的：在 attach 时设置 `READY`，其他什么都不做。当驱动程序的数据路径开始修改 `DATA_AV` 位并且 ticker 修改 `SCRATCH_A` 时，`STATUS` 的读取可能会在不同时刻返回不同的值，具体取决于读取相对于写入发生的时间。
 
-This is how a "polled" device driver works at a conceptual level: the driver polls the status register periodically, reacts to state changes, and updates driver-visible state accordingly. A real device's `STATUS` bits change for hardware reasons; the simulated device's bits change for simulated-driver reasons. The mechanism is the same.
+这就是”轮询式”设备驱动程序的工作方式：读取状态寄存器，检查感兴趣的位，做出决定。读者已经通过 sysctl 完成了这种操作。当第 17 章引入动态行为时，轮询与中断的区别将变得更加重要。
 
-Chapter 19 introduces interrupts, which replace the polling model with an event-driven one. Until then, polling is a reasonable pattern for the simulated device.
+第 19 章引入中断，替换轮询循环以实现效率。
 
-### The Detach Path, Updated
+### 更新后的 Detach 路径
 
-Every chapter in Part 3 added a few lines to the detach ordering. Chapter 16 Stage 2 adds two: drain the `reg_ticker_task` and free the register buffer. The full detach order at Stage 2:
+第 3 部分的每章都给 detach 路径增加了新步骤。第 16 章增加寄存器缓冲区释放。更新后的顺序：
 
-1. Refuse detach if `active_fhs > 0`.
-2. Clear `is_attached` (atomically), broadcast cvs.
-3. Drain all callouts (heartbeat, watchdog, tick_source).
-4. Drain all tasks (selwake, bulk_writer, reset_delayed, recovery, reg_ticker).
-5. `seldrain(&sc->rsel)`, `seldrain(&sc->wsel)`.
-6. `taskqueue_free(sc->tq)`.
-7. Destroy cdev.
-8. Release sysctl context.
-9. **Free `regs_buf`.** (New in Stage 2.)
-10. Destroy cbuf, counters, cvs, sx locks, semaphore, mutex.
+1. 如果 `active_fhs > 0`，拒绝 detach。
+2. 清除 `is_attached`（原子操作），广播 cv。
+3. 排空所有 callout（heartbeat、watchdog、tick_source）。
+4. 排空所有任务（selwake、bulk_writer、reset_delayed、recovery、reg_ticker）。
+5. `seldrain(&sc->rsel)`、`seldrain(&sc->wsel)`。
+6. `taskqueue_free(sc->tq)`。
+7. 销毁 cdev。
+8. 释放 sysctl 上下文。
+9. **释放 `regs_buf`。**（第 2 阶段新增。）
+10. 销毁 cbuf、计数器、cv、sx 锁、信号量、互斥锁。
 
-The `regs_buf` free happens after the sysctl context is torn down, because a sysctl handler could in principle be running on another CPU during detach. After `sysctl_ctx_free`, no sysctl handler can reach the softc, and the free is safe. Real drivers follow the same discipline for their resource releases.
+`regs_buf` 的释放在 sysctl 上下文拆除之后进行，因为在 detach 期间，sysctl 处理程序原则上可能在另一个 CPU 上运行。在 `sysctl_ctx_free` 之后，没有 sysctl 处理程序能到达 softc，释放是安全的。真实驱动程序对其资源释放遵循相同的规范。
 
-### Updating `LOCKING.md` (Now `HARDWARE.md` Too)
+### 更新 `LOCKING.md`（现在也是 `HARDWARE.md`）
 
-Part 3 established `LOCKING.md` as the driver's synchronisation map. Chapter 16 opens a sibling document: `HARDWARE.md`. It lives alongside `LOCKING.md` and documents the register interface, access patterns, and ownership rules for hardware-facing state.
+第 3 部分建立了 `LOCKING.md` 作为驱动程序锁定规范的文档。第 16 章添加一个平行的 `HARDWARE.md` 来记录寄存器接口。
 
-A first cut:
+第一版：
+
+第一版：
 
 ```text
 # myfirst Hardware Interface
@@ -1594,20 +1596,20 @@ a lock. See Section 6 for the locking story.
 - Ticker task:           MYFIRST_REG_WRITE(SCRATCH_A)
 ```
 
-The document is short now and will grow as later chapters add more registers and more access paths. The discipline of documenting the register interface alongside the code is the same as Part 3's discipline of documenting locks.
+该文档现在很短，会在后续章节添加更多寄存器和更多访问路径时增长。将寄存器接口与代码一起记录的规范，与第 3 部分记录锁的规范相同。
 
-### Stage 2 Complete
+### 第 2 阶段完成
 
-At the end of Section 5, the driver is at `0.9-mmio-stage2`. It has:
+在第 5 节结束时，驱动程序处于 `0.9-mmio-stage2`。它拥有：
 
-- A real `bus_space_*` access path over a simulated tag and handle.
-- `DATA_IN` reflecting the last written byte, with `DATA_AV` tracking the ring buffer's state.
-- `DATA_OUT` reflecting the last read byte.
-- A task that autonomously increments a scratch register on a timer.
-- Full sysctl visibility into every register.
-- A `HARDWARE.md` document describing the interface.
+- 一个通过模拟标签和句柄的真实 `bus_space_*` 访问路径。
+- `DATA_IN` 反映最后写入的字节，`DATA_AV` 跟踪环缓冲区的状态。
+- `DATA_OUT` 反映最后读取的字节。
+- 一个按计时器自主递增暂存寄存器的任务。
+- 每个寄存器的完整 sysctl 可见性。
+- 一个描述接口的 `HARDWARE.md` 文档。
 
-Build, load, test, observe, unload:
+构建、加载、测试、观察、卸载：
 
 ```text
 # cd examples/part-04/ch16-accessing-hardware/stage2-bus-space
@@ -1623,11 +1625,11 @@ Build, load, test, observe, unload:
 # kldunload myfirst
 ```
 
-The outputs should tell a consistent story about what the driver and the registers are doing.
+输出应该讲述一个关于驱动程序和寄存器正在做什么的一致故事。
 
-### A Look at a Real Pattern: The `em` Attach Path
+### 真实模式的一瞥：`em` 的 Attach 路径
 
-Now that Stage 2 mirrors a real driver's structure, a brief look at what Stage 2 would look like if the register block were a real PCI MMIO region, just to anchor the expectation. In `/usr/src/sys/dev/e1000/if_em.c`, inside `em_allocate_pci_resources`, you will find:
+既然第 2 阶段已经镜像了真实驱动程序的结构，简短看一下如果寄存器块是真实的 PCI MMIO 区域，第 2 阶段会是什么样子，只是为了锚定预期。在 `/usr/src/sys/dev/e1000/if_em.c` 中，在 `em_allocate_pci_resources` 内部，你会发现：
 
 ```c
 sc->memory = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid, RF_ACTIVE);
@@ -1640,39 +1642,39 @@ sc->osdep.mem_bus_space_handle = rman_get_bushandle(sc->memory);
 sc->hw.hw_addr = (uint8_t *)&sc->osdep.mem_bus_space_handle;
 ```
 
-The resource is allocated, the tag and handle are extracted into the softc's `osdep` structure, and an additional `hw_addr` pointer is set up for the hardware-abstraction-layer code that Intel shares between drivers. The rest of the driver uses macros (`E1000_READ_REG`, `E1000_WRITE_REG`) defined over `bus_space_*` to talk to the hardware.
+资源被分配后，标签和句柄被提取到 softc 的 `osdep` 结构中，并设置了一个额外的 `hw_addr` 指针，供 Intel 在驱动程序之间共享的硬件抽象层代码使用。驱动程序的其余部分使用定义在 `bus_space_*` 之上的宏（`E1000_READ_REG`、`E1000_WRITE_REG`）与硬件对话。
 
-The shape is the same as our Stage 2. The difference is exactly one function call: `bus_alloc_resource_any` for a real driver, `malloc(9)` plus a handcrafted tag for ours. Everything above the allocation layer is identical.
+形状与我们的第 2 阶段相同。区别正好是一个函数调用：真实驱动程序用 `bus_alloc_resource_any`，我们用 `malloc(9)` 加手工标签。分配层之上的所有东西都是相同的。
 
-Chapter 18 will swap our `malloc` for `bus_alloc_resource_any` and point the driver at a real PCI device. The driver's upper layers will not change.
+第 18 章将把我们的 `malloc` 替换为 `bus_alloc_resource_any`，并将驱动程序指向真实的 PCI 设备。驱动程序的上层不会改变。
 
-### Wrapping Up Section 5
+### 总结第 5 节
 
-Stage 2 replaces the direct accessors of Stage 1 with real `bus_space(9)` calls operating on the simulated tag and handle. The driver's `write(2)` and `read(2)` paths now produce register-level side effects. A task updates a scratch register on a timer. The `HARDWARE.md` document describes the register interface. The driver's shape closely matches that of a real driver like `if_em`.
+第 2 阶段用操作模拟标签和句柄的真实 `bus_space(9)` 调用替换了第 1 阶段的直接访问器。驱动程序的 `write(2)` 和 `read(2)` 路径现在产生寄存器级副作用。一个任务按计时器更新暂存寄存器。`HARDWARE.md` 文档描述了寄存器接口。驱动程序的形状与 `if_em` 等真实驱动程序紧密匹配。
 
-Section 6 introduces the safety discipline that real MMIO demands: memory barriers, locking around shared registers, and the reasons busy-wait loops are a mistake. Stage 3 of the driver adds that discipline.
+第 6 节引入真实 MMIO 所要求的安全规范：内存屏障、共享寄存器周围的加锁，以及忙等循环是错误的原因。驱动程序的第 3 阶段添加了该规范。
 
 
 
-## Section 6: Safety and Synchronization with MMIO
+## 第 6 节：MMIO 的安全与同步
 
-Stage 2 works, but it is unsafe in three specific ways that Section 6 names and fixes. The first is that register access is not atomic. The second is that register ordering is not enforced. The third is that there is no discipline around what context may access which registers. Each of these is a category of bug that can hurt a real driver; each is fixable with discipline the chapter has already taught in Part 3, applied to the new hardware-facing state.
+第 2 阶段可以工作，但在三个方面不安全，第 6 节会命名并修复它们。第一，寄存器访问不是原子的。第二，寄存器排序没有被强制执行。第三，没有关于哪个上下文可以访问哪些寄存器的规范。这些中的每一个都是可能伤害真实驱动程序的 bug 类别；每一个都可以用第 3 部分已经教过的规范来修复，应用到新的硬件面向状态。
 
-This section walks through each problem, explains why it matters, and produces Stage 3 of the driver: a version that is correct under concurrent access, ordering-safe for platforms that need it, and clearly partitioned by context.
+本节走查每个问题，解释为什么它很重要，并产生驱动程序的第 3 阶段：一个在并发访问下正确的版本。
 
-### Why a Register Access Can Be Unsafe Without a Lock
+### 为什么寄存器访问在没有锁的情况下可能不安全
 
-Consider two user-space threads writing different bytes to `/dev/myfirst0` concurrently. In Stage 2, both call `myfirst_write`, which in turn calls `MYFIRST_REG_WRITE(sc, MYFIRST_REG_DATA_IN, last_byte)`. Without a lock, the two writes race: one finishes first, one finishes second, and `DATA_IN` ends up with whichever value was written last. That is not wrong, exactly; both bytes were really the last byte of their respective writes. But the driver has no way of telling which value in `DATA_IN` came from which writer.
+考虑两个用户空间线程并发写入不同的字节到 `/dev/myfirst0`。
 
-More subtly, consider `myfirst_reg_update`, which does a read-modify-write sequence on a register. Two threads calling it on the same register in parallel can produce a classic lost-update. Thread A reads `CTRL = 0`. Thread B reads `CTRL = 0`. Thread A sets the `ENABLE` bit and writes `CTRL = 1`. Thread B sets the `RESET` bit and writes `CTRL = 2`. The result is `CTRL = 2`, with `ENABLE` lost. On any register where multiple contexts perform read-modify-write operations, this is a data-race bug that can cause real protocol failures.
+更微妙的是，考虑 `myfirst_reg_update`，它对寄存器执行读-改-写序列。
 
-The solution is familiar: a lock. The only question is which lock. Chapter 11's `sc->mtx` protects the data path; it is the natural choice for register access that happens inside the data path. A separate mutex, `sc->reg_mtx`, can be introduced for register access that happens outside the data path (sysctl handlers, the ticker task). The two can be the same lock, or different locks, depending on the driver's access patterns.
+解决方案很熟悉：一个锁。唯一的问题是用哪个锁。
 
-For Stage 3, we take the simpler path: use `sc->mtx` for every register access. This enforces the rule "no register access without the driver mutex" with a single primitive. The cost is that sysctl handlers and the ticker task must acquire the driver mutex briefly, which serialises them with the data path. For a driver this small, the cost is negligible.
+对于第 3 阶段，我们采取更简单的路径：对所有寄存器访问使用 `sc->mtx`。
 
-### Adding the Lock
+### 添加锁
 
-Modify `myfirst_reg_read` and `myfirst_reg_write` to assert that the driver lock is held, and modify their callers to acquire it. An assertion is cheaper than acquiring the lock inside the accessor, and it makes the locking rule visible at every call site.
+修改访问器以断言驱动程序锁被持有。
 
 ```c
 static __inline uint32_t
@@ -1692,9 +1694,9 @@ myfirst_reg_write(struct myfirst_softc *sc, bus_size_t offset, uint32_t value)
 }
 ```
 
-The `MYFIRST_ASSERT` macro from Chapter 11 asserts that `sc->mtx` is held in `MA_OWNED` mode. A debug kernel catches any caller that forgot to acquire the lock; a production kernel elides the check.
+`MYFIRST_ASSERT` 宏是 `mtx_assert(&sc->mtx, MA_OWNED)` 的薄包装，在第 11 章引入。它在调试内核中确认锁被持有。
 
-Now every call site must acquire the lock. The sysctl handler becomes:
+现在每个调用点都必须获取锁。sysctl 处理程序变为：
 
 ```c
 static int
@@ -1719,9 +1721,9 @@ myfirst_sysctl_reg(SYSCTL_HANDLER_ARGS)
 }
 ```
 
-The lock is acquired before the register read, held briefly, released before the sysctl framework's `sysctl_handle_int`. The framework may sleep (it copies the value to user space), so the lock cannot be held across that call.
+锁在寄存器读取之前获取，短暂持有，在 sysctl 框架的 `sysctl_handle_int` 之前释放。框架可能会睡眠（它将值复制到用户空间），所以锁不能跨该调用持有。
 
-Similarly, the writeable sysctl handler:
+类似地，可写 sysctl 处理程序：
 
 ```c
 static int
@@ -1762,11 +1764,11 @@ myfirst_sysctl_reg_write(SYSCTL_HANDLER_ARGS)
 }
 ```
 
-The handler acquires the lock twice: once to read the current value, once to apply the new value. Between them the lock is released and `sysctl_handle_int` runs. The pattern is slightly awkward but is standard in FreeBSD: you acquire a lock for a brief operation, release it for a sleepable call, reacquire for the next brief operation, and tolerate the fact that state may have changed in between.
+处理程序两次获取锁：一次读取当前值，一次应用新值。在两次之间锁被释放，`sysctl_handle_int` 运行。这个模式略显笨拙但在 FreeBSD 中是标准的：你为一个简短操作获取锁，为可睡眠调用释放它，为下一个简短操作重新获取，并容忍状态在此期间可能已改变的事实。
 
-The `myfirst_ctrl_update` call now happens under the lock, so its printf still works but any future state changes it makes can rely on lock ownership.
+`myfirst_ctrl_update` 调用现在在锁下发生，所以它的 printf 仍然可以工作，但它可能做的任何未来状态改变都可以依赖锁的所有权。
 
-The ticker task callback likewise acquires the lock:
+ticker 任务回调同样获取锁：
 
 ```c
 static void
@@ -1786,7 +1788,7 @@ myfirst_reg_ticker_cb(void *arg, int pending)
 }
 ```
 
-And the `myfirst_write` and `myfirst_read` paths, which already held `sc->mtx` around ring-buffer access, need to extend the hold across the register updates, or to release and reacquire briefly. The simplest change is to keep the register updates inside the existing locked region:
+而 `myfirst_write` 和 `myfirst_read` 路径已经在环缓冲区访问周围持有 `sc->mtx`，需要将持有扩展到寄存器更新，或者简短释放再重新获取。最简单的改变是将寄存器更新保持在现有锁定区域内：
 
 ```c
 /* In myfirst_write, while still holding sc->mtx after the ring-buffer update: */
@@ -1796,20 +1798,20 @@ if (wrote_any) {
 }
 ```
 
-Because `myfirst_reg_update` now asserts the mutex is held, and it is, the call succeeds. The lock-hold time grows slightly, but only by a handful of `bus_space_write_4` calls, which compile to single `mov` instructions; the cost is negligible.
+因为 `myfirst_reg_update` 现在断言互斥锁被持有，而且确实被持有，调用成功。锁持有时间略有增长，但只增加了少量 `bus_space_write_4` 调用，它们编译为单条 `mov` 指令；代价可以忽略不计。
 
-### Why Barriers Matter Even On x86
+### 为什么屏障即使在 x86 上也很重要
 
-With locking in place, the driver is correct under concurrency on x86. On weakly-ordered platforms (arm64, RISC-V, some older MIPS), the story is not quite finished. A sequence like:
+有了加锁，驱动程序在 x86 上的并发下是正确的。在弱序平台（arm64、RISC-V、一些较旧的 MIPS）上，情况还不完全一样。像这样的序列：
 
 ```c
 MYFIRST_REG_WRITE(sc, MYFIRST_REG_DATA_IN, value);
 MYFIRST_REG_WRITE(sc, MYFIRST_REG_CTRL, CTRL_GO);
 ```
 
-implies that the `DATA_IN` write reaches the device before the `CTRL.GO` trigger. On x86, hardware preserves program order for stores, and the compiler's reordering is limited by the `volatile` qualifier in `bus_space_write_4`. On arm64, the CPU can reorder the two stores, and the device might see `CTRL.GO` before `DATA_IN` is ready, which breaks the protocol.
+意味着 `DATA_IN` 写入在 `CTRL.GO` 触发之前到达设备。在 x86 上，硬件为存储保留程序顺序，编译器的重排序受 `bus_space_write_4` 中的 `volatile` 限定符限制。在 arm64 上，CPU 可以重排序两个存储，设备可能在 `DATA_IN` 准备好之前看到 `CTRL.GO`，这会破坏协议。
 
-The fix is a write barrier:
+修复方法是写屏障：
 
 ```c
 MYFIRST_REG_WRITE(sc, MYFIRST_REG_DATA_IN, value);
@@ -1818,11 +1820,11 @@ bus_space_barrier(sc->regs_tag, sc->regs_handle, 0, sc->regs_size,
 MYFIRST_REG_WRITE(sc, MYFIRST_REG_CTRL, CTRL_GO);
 ```
 
-On x86 this barrier is a compiler fence. On arm64 it is a DSB or DMB that forces the first store to complete before the second is issued.
+在 x86 上这个屏障是一个编译器围栏。在 arm64 上它是一条 DSB 或 DMB，强制第一个存储在第二个发出之前完成。
 
-For Chapter 16 the protocol we are simulating does not actually require this ordering, because our "device" is kernel memory whose observers all take the same lock and do not reorder within a critical section. But the habit is worth developing. When the code eventually talks to a real device, the barriers will be there, and the driver will be portable across architectures.
+对于第 16 章，我们模拟的协议实际上不需要这种排序，因为我们的"设备"是内核内存，其观察者都获取同一把锁，不会在临界区内重排序。但这个习惯值得培养。当代码最终与真实设备对话时，屏障会在那里，驱动程序将能跨架构可移植。
 
-As a teaching vehicle, introduce a helper that makes barrier-annotated writes easy:
+作为教学工具，引入一个使带屏障注释的写入变得容易的辅助函数：
 
 ```c
 static __inline void
@@ -1836,24 +1838,24 @@ myfirst_reg_write_barrier(struct myfirst_softc *sc, bus_size_t offset,
 }
 ```
 
-Flags are `BUS_SPACE_BARRIER_READ`, `BUS_SPACE_BARRIER_WRITE`, or the OR of the two. A driver that reads status right after writing a command uses the combined flag. One that only wants subsequent writes to see this write's effect uses just `WRITE`.
+标志为 `BUS_SPACE_BARRIER_READ`、`BUS_SPACE_BARRIER_WRITE` 或两者的 OR。在写入命令后立即读取状态的驱动程序使用组合标志。只希望后续写入看到当前写入效果的驱动程序仅使用 `WRITE`。
 
-The Stage 3 driver does not use `myfirst_reg_write_barrier` in many places; it is defined and used in a single demonstration path (inside the ticker, after the scratch increment, to illustrate the usage). Later chapters that deal with real protocols will use it more heavily.
+第 3 阶段的驱动程序在很多地方不使用 `myfirst_reg_write_barrier`；它被定义并在单个演示路径中使用（在 ticker 中，在暂存递增之后，以说明用法）。后续处理真实协议的章节会更频繁地使用它。
 
-### Partitioning Register Access by Context
+### 按上下文划分寄存器访问
 
-With locking uniform, the next question is: which contexts access which registers, and is that mix intentional?
+有了统一的加锁，下一个问题是：哪些上下文访问哪些寄存器，这种混合是否有意为之？
 
-A Stage 3 audit on the driver shows:
+对驱动程序进行第 3 阶段审计显示：
 
 - Syscall context (write): accesses `DATA_IN`, `STATUS`.
 - Syscall context (read): accesses `DATA_OUT`, `STATUS`.
 - Sysctl context: accesses every register (read) and `CTRL`, `SCRATCH_A`, `SCRATCH_B`, etc. (write) through the writeable sysctl.
 - Task context (ticker): accesses `SCRATCH_A`.
 
-Every access is lock-protected. Every access touches a register the driver has explicitly allocated for that purpose. The access discipline is simple: syscalls read and write the data registers and the data-available bit; sysctls are for inspection and one-off configuration; the ticker writes one specific register. A rule of "contexts do not overlap their register responsibilities" is easy to state and easy to hold.
+每次访问都受锁保护。每次访问都接触驱动程序为该目的明确分配的寄存器。访问规范很简单：系统调用读写数据寄存器和数据可用位；sysctl 用于检查和一次性配置；ticker 写入一个特定寄存器。"上下文不重叠其寄存器职责"的规则易于陈述也易于坚持。
 
-This is the kind of thing `HARDWARE.md` exists to document. Update the document to include per-register ownership:
+这就是 `HARDWARE.md` 存在要文档化的内容。更新文档以包含每寄存器所有权：
 
 ```text
 ## Per-Register Owners
@@ -1870,11 +1872,11 @@ SCRATCH_A:     ticker task; sysctl writer
 SCRATCH_B:     sysctl writer only
 ```
 
-A future contributor can glance at this table and immediately see where a register write is expected. A future change that adds a new owner must update the table, which keeps the documentation honest.
+未来的贡献者可以扫一眼这个表格，立即看到哪里预期有寄存器写入。添加新所有者的未来更改必须更新该表格，这使文档保持诚实。
 
-### Avoiding Busy-Wait Loops
+### 避免忙等循环
 
-One style of bug that new driver authors fall into is the busy-wait loop for register state. The canonical example:
+新驱动程序作者容易陷入的一种 bug 风格是忙等循环等待寄存器状态。典型的例子：
 
 ```c
 /* BAD: busy-waits forever if the device never becomes ready. */
@@ -1882,11 +1884,11 @@ while ((MYFIRST_REG_READ(sc, MYFIRST_REG_STATUS) & MYFIRST_STATUS_READY) == 0)
         ;
 ```
 
-The loop spins reading the register until the `READY` bit becomes set. On real hardware, the time between "not ready" and "ready" may be microseconds. On an overloaded system, it may be longer. During the spin, the CPU is consumed by the loop; no other thread on that CPU can run; the driver's own other threads cannot even unlock the mutex the loop may be holding.
+循环不断读取寄存器直到 `READY` 位被设置。在真实硬件上，从"未就绪"到"就绪"之间的时间可能是微秒级。在过载系统上，可能更长。在旋转期间，CPU 被循环消耗；该 CPU 上的其他线程无法运行；驱动程序自身的其他线程甚至无法解锁循环可能持有的互斥锁。
 
-Several better patterns exist.
+有几种更好的模式。
 
-**Bounded spin with `DELAY(9)` for short waits.** If the expected wait is short (less than a few hundred microseconds, typically), use a loop with a bounded iteration count and a `DELAY` between iterations. `DELAY(usec)` busy-waits for at least `usec` microseconds, allowing the CPU to serve interrupts in the meantime.
+**使用 `DELAY(9)` 的有界旋转用于短等待。** 如果预期等待很短（通常少于几百微秒），使用有界迭代计数的循环并在迭代之间加 `DELAY`。`DELAY(usec)` 忙等至少 `usec` 微秒，允许 CPU 在此期间处理中断。
 
 ```c
 for (i = 0; i < 100; i++) {
@@ -1900,9 +1902,9 @@ if ((MYFIRST_REG_READ(sc, MYFIRST_REG_STATUS) & MYFIRST_STATUS_READY) == 0) {
 }
 ```
 
-The loop runs at most 100 times, waiting 10 microseconds between reads, for a total bound of 1 millisecond. On a successful completion the loop exits early. On timeout the driver gives up and returns an error.
+循环最多运行 100 次，在读取之间等待 10 微秒，总上限为 1 毫秒。成功完成时循环提前退出。超时时驱动程序放弃并返回错误。
 
-**Sleep-based wait with `msleep`.** For longer expected waits (milliseconds to seconds), do not busy-wait at all. Sleep the thread until a wakeup arrives, or until a timeout fires. The example below is hypothetical (our simulated device never clears `READY` in Chapter 16), but it shows the shape you will reach for when real hardware starts changing status bits:
+**使用 `msleep` 的基于睡眠的等待。** 对于更长的预期等待（毫秒到秒），不要忙等。让线程睡眠直到唤醒到来，或直到超时触发。下面的示例是假设性的（我们第 16 章的模拟设备从不清除 `READY`），但它展示了当真实硬件开始改变状态位时你会使用的模式形状：
 
 ```c
 /* Hypothetical; assumes sc->status_wait is a dummy address the driver
@@ -1919,9 +1921,9 @@ while ((MYFIRST_REG_READ(sc, MYFIRST_REG_STATUS) & MYFIRST_STATUS_READY) == 0) {
 }
 ```
 
-The thread sleeps on `&sc->status_wait`, with the driver mutex as the interlock, for up to 100ms. A wakeup from another context (typically an interrupt handler or a task that observed the register change) breaks the sleep. On arm64, where register polling would be expensive and imprecise, this pattern is strongly preferred. Chapter 17 makes this pattern concrete: a callout flips `READY` on a timer, and a syscall path sleeps on the matching channel until the callout wakes it up.
+线程在 `&sc->status_wait` 上睡眠，以驱动程序互斥锁为互锁，最长 100ms。来自另一个上下文的唤醒（通常是观察到寄存器变化的中断处理程序或任务）打破睡眠。在 arm64 上，寄存器轮询是昂贵且不精确的，这种模式强烈推荐。第 17 章使这个模式具体化：一个 callout 按计时器翻转 `READY`，一个系统调用路径在匹配的通道上睡眠，直到 callout 唤醒它。
 
-**Event-driven with `cv_wait`.** Same as above, but using a condition variable, which is more natural in Part 3's idiom:
+**使用 `cv_wait` 的事件驱动。** 与上面相同，但使用条件变量，在第 3 部分的惯用法中更自然：
 
 ```c
 MYFIRST_LOCK(sc);
@@ -1931,21 +1933,21 @@ while ((MYFIRST_REG_READ(sc, MYFIRST_REG_STATUS) & MYFIRST_STATUS_READY) == 0) {
 MYFIRST_UNLOCK(sc);
 ```
 
-With a matching `cv_signal` in whichever context sets the bit.
+在设置位的任何上下文中有匹配的 `cv_signal`。
 
-Chapter 16's simulated device does not need any of these patterns yet, because the `READY` bit is set at attach and never cleared. But the patterns are named here because Section 6 is the right place to introduce them, and Chapter 17 will use them when status bits start changing dynamically.
+第 16 章的模拟设备还不需要这些模式中的任何一个，因为 `READY` 位在 attach 时设置并且从不清除。但模式在这里命名是因为第 6 节是引入它们的正确位置，第 17 章将在状态位开始动态变化时使用它们。
 
-### Interrupts and MMIO: A Forward Pointer
+### 中断与 MMIO：一个前瞻提示
 
-A brief note on a topic Chapter 19 owns. When a real driver has an interrupt handler that runs in filter or ithread context, register access from the handler has additional constraints. Filter handlers run in an interrupt context with very limited primitives available; they typically acknowledge the interrupt by writing a register, record the event somehow, and defer the real work to a task. The acknowledgement write is the kind of thing `bus_space_write_*` exists for, and it runs under specific locking rules that differ from the ordinary driver mutex.
+关于第 19 章主题的简短说明。当真实驱动程序有在过滤器或 ithread 上下文中运行的中断处理程序时，来自处理程序的寄存器访问有额外的约束。过滤器处理程序在只有非常有限原语可用的中断上下文中运行；它们通常确认中断并可能读取状态寄存器。中断线程运行在更完整的上下文中，可以做更多工作。第 16 章的模拟不需要担心这些，因为没有中断。第 19 章详细涵盖中断处理程序约束。
 
-Chapter 16's driver has no interrupt handler, so this concern does not yet apply. Chapter 19 introduces the handler and the lock-type changes it forces. For now, treat "interrupt context accessing registers" as a topic you know exists and will learn about later; the register-access mechanism (`bus_space_*`) is the same, but the locking around it changes.
+第 16 章的驱动程序没有中断处理程序，所以这个顾虑暂时不适用。第 19 章引入处理程序及它所迫使其改变的锁类型。目前，把"中断上下文访问寄存器"当作一个你知道存在并将稍后学习的主题；寄存器访问机制（`bus_space_*`）是相同的，但周围的加锁会改变。
 
-### Stage 3 Complete
+### 第 3 阶段完成
 
-With locking added, barriers introduced, context ownership documented, and busy-wait patterns discouraged, the driver is at `0.9-mmio-stage3`. The shape of the driver is still that of Stage 2, but every register access is now lock-protected, every context's access pattern is documented, and the driver is prepared to handle more sophisticated hardware protocols in later chapters.
+添加了加锁、引入了屏障、记录了上下文所有权并劝阻了忙等模式后，驱动程序处于 `0.9-mmio-stage3`。驱动程序的形状与第 2 阶段仍然相同，但每次寄存器访问现在都受锁保护，每个上下文的访问模式都有文档，驱动程序已准备好在后续章节中处理更复杂的硬件协议。
 
-Build, test, and stress:
+构建、测试和压力测试：
 
 ```text
 # cd examples/part-04/ch16-accessing-hardware/stage3-synchronized
@@ -1954,39 +1956,39 @@ Build, test, and stress:
 # examples/part-04/ch16-accessing-hardware/labs/reg_stress.sh
 ```
 
-The stress script spawns several concurrent writers, readers, sysctl readers, and ticker-toggle operations, and checks that the final register state is consistent. Under WITNESS, any locking violation produces an immediate warning; under INVARIANTS, any out-of-bounds access produces a panic. If the script completes cleanly, the driver's register discipline is sound.
+压力测试脚本生成多个并发写入者、读取者、sysctl 读取者和 ticker 切换操作，并检查最终寄存器状态是否一致。在 WITNESS 下，任何加锁违规都会产生即时警告；在 INVARIANTS 下，任何越界访问都会产生 panic。如果脚本干净完成，驱动程序的寄存器规范是健全的。
 
-### Wrapping Up Section 6
+### 总结第 6 节
 
-MMIO safety rests on three disciplines: locking (every register access happens under the appropriate lock), ordering (barriers where the protocol requires them, even if the platform is x86), and context partitioning (each register has a named owner and an intended access path). The driver's `HARDWARE.md` captures the last two; the mutex assertions in the accessors enforce the first.
+MMIO 安全建立在三个规范之上：加锁（每次寄存器访问在适当的锁下发生）、排序（协议要求屏障的地方使用屏障，即使平台是 x86）和上下文分区（每个寄存器有命名所有者和预期访问路径）。驱动程序的 `HARDWARE.md` 捕获后两者；访问器中的互斥锁断言强制执行前者。
 
-Section 7 takes the next step: making the register access observable for debugging. Logs, sysctls, DTrace probes, and the small observability layer that catches bugs before they become crashes.
+第 7 节迈出下一步：使寄存器访问可观察以便调试。日志、sysctl、DTrace 探针，以及捕获 bug 使其不致变成崩溃的小型可观测性层。
 
 
 
-## Section 7: Debugging and Tracing Hardware Access
+## 第 7 节：调试和跟踪硬件访问
 
-A register access is, by design, invisible. It compiles to a CPU instruction that reads or writes a handful of bytes. There is no stack frame, no call log, no return value you can `printf` without adding code. When a driver works, invisibility is a virtue. When it does not, invisibility is the problem.
+寄存器访问在设计上就是不可见的。它编译为读取或写入少量字节的 CPU 指令。没有栈帧、没有调用日志、没有你可以不经添加代码就 `printf` 的返回值。当驱动程序正常工作时，不可见是一种优点。当它不正常工作时，不可见就是问题所在。
 
-Section 7 covers the tools and idioms that make register access visible enough to debug without being so noisy that the driver becomes unreadable. The goal is a small observability layer: enough instrumentation to catch bugs early, placed where a beginner can switch it on and off, and integrated with the logging the rest of the driver already does.
+第 7 节覆盖了使寄存器访问可见到足以调试但又不会太嘈杂以至于驱动程序变得不可读的工具和惯用法。目标是一个小型可观测性层：足够的仪器来尽早捕获 bug，放置在初学者可以开关的地方，并与驱动程序其余部分已经使用的日志集成。
 
-### What You Want to Observe
+### 你想观察什么
 
-Three things are worth seeing when a driver is misbehaving.
+当驱动程序行为异常时，有三件事值得看。
 
-**The value at a specific register, right now.** The sysctl handlers from Stage 2 already give you this. A `sysctl dev.myfirst.0.reg_ctrl` returns the current value at any moment, and nothing else in the driver's behaviour changes because of the read.
+**特定寄存器的当前值。** 第 2 阶段的 sysctl 处理程序已经提供了这个。`sysctl dev.myfirst.0.reg_ctrl` 在任何时刻返回当前值，并且驱动程序的行为不会因为读取而改变。
 
-**The sequence of register accesses the driver made recently.** When a bug involves register ordering or incorrect bit manipulation, knowing "the driver wrote 0x1 then 0x2 then 0x4 in that order" is exactly what you need. The raw sequence cannot be reconstructed from register contents alone.
+**驱动程序最近进行的寄存器访问序列。** 当 bug 涉及寄存器排序或错误的位操作时，知道"驱动程序依次写了 0x1、0x2、0x4"正是你需要的。原始序列无法仅从寄存器内容重构。
 
-**The stack and context for a specific register access.** When a write happens from an unexpected code path, you want to know which function did it, which thread was running, and what was on the stack. DTrace is good at this.
+**特定寄存器访问的栈和上下文。** 当写入来自意外的代码路径时，你想知道是哪个函数做的、哪个线程在运行、栈上有什么。DTrace 擅长这个。
 
-The rest of this section walks through each kind of observation and shows what to add to the driver to support it.
+本节其余部分走遍每种观察并展示向驱动程序添加什么来支持它。
 
-### A Simple Access Log
+### 一个简单的访问日志
 
-The simplest observability tool is a log of the last N register accesses, kept in a ring buffer inside the softc. Every register read and write records an entry; the sysctl exposes the ring.
+最简单的可观测性工具是最近 N 次寄存器访问的日志，保存在 softc 内的环缓冲区中。每次寄存器读写记录一个条目；sysctl 暴露该环。
 
-Define the log entry:
+定义日志条目：
 
 ```c
 #define MYFIRST_ACCESS_LOG_SIZE 64
@@ -2002,9 +2004,9 @@ struct myfirst_access_log_entry {
 };
 ```
 
-Each entry is 24 bytes, holding the time (nanoseconds since boot), the value, the offset, whether it was a read or a write, the access width, and a tag identifying the caller's context (syscall, task, sysctl). Padding rounds to 24; a log of 64 entries is 1.5 KiB, which is trivially small.
+每个条目 24 字节，保存时间（自启动以来的纳秒）、值、偏移量、是读还是写、访问宽度和标识调用者上下文的标签（系统调用、任务、sysctl）。填充到 24 字节；64 个条目的日志是 1.5 KiB，微不足道。
 
-Add the ring to the softc:
+向 softc 添加环：
 
 ```c
 struct myfirst_access_log_entry access_log[MYFIRST_ACCESS_LOG_SIZE];
@@ -2012,7 +2014,7 @@ unsigned int access_log_head;   /* index of next write */
 bool          access_log_enabled;
 ```
 
-Record an entry in the accessors. Stage 3's `myfirst_reg_write` becomes:
+在访问器中记录条目。第 3 阶段的 `myfirst_reg_write` 变为：
 
 ```c
 static __inline void
@@ -2034,11 +2036,11 @@ myfirst_reg_write(struct myfirst_softc *sc, bus_size_t offset, uint32_t value)
 }
 ```
 
-(`nanouptime_ns()` is a small helper that wraps `nanouptime()` and returns a `uint64_t`. `myfirst_current_context_tag()` returns a small code like `'S'` for syscall, `'T'` for task, `'C'` for sysctl; its implementation is a few-line switch on the current thread's identity.)
+（`nanouptime_ns()` 是一个包装 `nanouptime()` 并返回 `uint64_t` 的小辅助函数。`myfirst_current_context_tag()` 返回一个小代码，如 `'S'` 表示系统调用、`'T'` 表示任务、`'C'` 表示 sysctl；其实现是基于当前线程身份的几行 switch。）
 
-The read accessor records the read (value is the value read). Access recording happens under the driver mutex (Stage 3 requires the mutex for every register access), so the ring itself needs no additional locking.
+读取访问器记录读取（值是读取到的值）。访问记录在驱动程序互斥锁下发生（第 3 阶段要求每次寄存器访问都有互斥锁），所以环本身不需要额外的加锁。
 
-Enable with a sysctl:
+通过 sysctl 启用：
 
 ```c
 SYSCTL_ADD_BOOL(&sc->sysctl_ctx,
@@ -2047,7 +2049,7 @@ SYSCTL_ADD_BOOL(&sc->sysctl_ctx,
     "Record every register access in a ring buffer");
 ```
 
-Expose the log through a special sysctl handler that dumps the ring:
+通过一个特殊的 sysctl 处理程序暴露日志，该处理程序转储环：
 
 ```c
 static int
@@ -2082,7 +2084,7 @@ myfirst_sysctl_access_log(SYSCTL_HANDLER_ARGS)
 }
 ```
 
-The handler walks the ring from the oldest to the newest entry, skipping empty slots, and formats each as a line. The output looks like:
+处理程序从最旧到最新遍历环，跳过空槽，将每条格式化为一行。输出看起来像：
 
 ```text
   123456789 ns  W4  off=0x00  val=0x00000001  ctx=C
@@ -2091,15 +2093,15 @@ The handler walks the ring from the oldest to the newest entry, skipping empty s
   124001567 ns  W4  off=0x04  val=0x00000009  ctx=S
 ```
 
-Four entries: a writeable-sysctl write to `CTRL`, then its immediate readback (both `ctx=C`), then a syscall write that set `DATA_IN` to `0x41` ('A') and updated `STATUS` to `0x9` (READY | DATA_AV). The context tag makes the source obvious.
+四条记录：一次可写 sysctl 对 `CTRL` 的写入，然后是它的立即回读（都是 `ctx=C`），然后是一次系统调用写入将 `DATA_IN` 设为 `0x41`（'A'）并将 `STATUS` 更新为 `0x9`（READY | DATA_AV）。上下文标签使来源一目了然。
 
-For debugging, this log is priceless. You see exactly what the driver did, in order, with timestamps.
+对于调试来说，这个日志是无价的。你可以准确看到驱动程序做了什么，按顺序，带时间戳。
 
-### Kernel Printf: A Controlled Flood
+### 内核 Printf：受控的洪水
 
-Sometimes the log is not enough and you want a printed message per register access, perhaps during a specific failing test. The driver should support a knob for that.
+有时日志不够，你想为每次寄存器访问打印一条消息，可能是在特定的失败测试期间。驱动程序应该为此提供一个旋钮。
 
-Add a debug-level sysctl (if one does not already exist from Chapter 12's `debug_level`) and use it in the accessors:
+添加一个 debug-level sysctl（如果第 12 章的 `debug_level` 还没有的话）并在访问器中使用它：
 
 ```c
 #define MYFIRST_DBG_REGS  0x10u
@@ -2120,15 +2122,15 @@ myfirst_reg_write(struct myfirst_softc *sc, bus_size_t offset, uint32_t value)
 }
 ```
 
-When `debug_level` has the `MYFIRST_DBG_REGS` bit set, every register write is printed to the console. Setting it during a test and clearing it immediately afterwards gives a focused log without flooding the system for the duration of the driver's life.
+当 `debug_level` 设置了 `MYFIRST_DBG_REGS` 位时，每次寄存器写入都会打印到控制台。在测试期间设置它并在之后立即清除，可以获得聚焦的日志，不会在驱动程序生命期内淹没系统。
 
-The debug-level bitfield is a common FreeBSD pattern. Many real drivers use a sysctl of `debug` or `verbose` with bits for different subsystems: `DBG_PROBE`, `DBG_ATTACH`, `DBG_INTR`, `DBG_REGS`, and so on. The user enables only the subset they need.
+debug-level 位字段是一个常见的 FreeBSD 模式。许多真实驱动程序使用 `debug` 或 `verbose` sysctl，其位对应不同子系统：`DBG_PROBE`、`DBG_ATTACH`、`DBG_INTR`、`DBG_REGS` 等等。用户只启用他们需要的子集。
 
-### DTrace Probes
+### DTrace 探针
 
-DTrace is the right tool when you want to observe register access patterns without modifying the driver. FreeBSD's `fbt` (function boundary tracing) provider automatically instruments every non-inlined function in the kernel. If `myfirst_reg_read` and `myfirst_reg_write` are compiled as out-of-line functions (not inlined), DTrace can hook them.
+当你想在不修改驱动程序的情况下观察寄存器访问模式时，DTrace 是正确的工具。FreeBSD 的 `fbt`（函数边界跟踪）提供程序自动为内核中每个非内联函数插入仪器。如果 `myfirst_reg_read` 和 `myfirst_reg_write` 被编译为非内联函数（而非内联的），DTrace 可以钩住它们。
 
-By default, `static __inline` functions are candidates for inlining, and inlined functions do not have fbt probes. To make the accessors DTrace-visible in debug builds, split the declarations:
+默认情况下，`static __inline` 函数是内联的候选者，内联函数没有 fbt 探针。为了在调试构建中使访问器对 DTrace 可见，拆分声明：
 
 ```c
 #ifdef MYFIRST_DEBUG_REG_TRACE
@@ -2143,21 +2145,21 @@ static __inline void     myfirst_reg_write(struct myfirst_softc *sc,
 #endif
 ```
 
-With `MYFIRST_DEBUG_REG_TRACE` set at compile time, the accessors are regular functions with function-boundary probes. DTrace can then show every call:
+设置了 `MYFIRST_DEBUG_REG_TRACE` 后在编译时，访问器变为带有函数边界探针的常规函数。DTrace 然后可以显示每次调用：
 
 ```text
 # dtrace -n 'fbt::myfirst_reg_write:entry { printf("off=%#x val=%#x", arg1, arg2); }'
 ```
 
-The output lists every register write with its offset and value, live, across the whole system. DTrace can aggregate, count, filter by stack, and join with process information in ways a hand-rolled log cannot match.
+输出列出每次寄存器写入及其偏移量和值，实时的，覆盖整个系统。DTrace 可以以手工日志无法匹配的方式聚合、计数、按栈过滤，并与进程信息关联。
 
-For a release build, leave `MYFIRST_DEBUG_REG_TRACE` unset; the accessors inline and pay no runtime cost. For a debugging build, set the macro and get full visibility.
+对于发布构建，保持 `MYFIRST_DEBUG_REG_TRACE` 未设置；访问器内联展开且不付出运行时代价。对于调试构建，设置该宏获得完全可见性。
 
-### Specialised DTrace Probes: `sdt(9)`
+### 专用 DTrace 探针：`sdt(9)`
 
-A more targeted alternative to fbt probes is to register Statically Defined Tracepoints (SDT) at specific points in the driver. FreeBSD's `sdt(9)` API lets you declare probes that DTrace can hook by name, without the overhead of a full function-boundary trace.
+fbt 探针的一个更有针对性的替代方案是在驱动程序的特定点注册静态定义跟踪点（SDT）。FreeBSD 的 `sdt(9)` API 让你声明 DTrace 可以按名称钩住的探针，无需完整函数边界跟踪的开销。
 
-A probe for every register write:
+为每次寄存器写入定义一个探针：
 
 ```c
 #include <sys/sdt.h>
@@ -2169,27 +2171,27 @@ SDT_PROBE_DEFINE2(myfirst, , , reg_read,
     "struct myfirst_softc *", "bus_size_t");
 ```
 
-And in the accessor:
+在访问器中：
 
 ```c
 SDT_PROBE3(myfirst, , , reg_write, sc, offset, value);
 ```
 
-DTrace picks up the probe by name:
+DTrace 按名称获取探针：
 
 ```text
 # dtrace -n 'sdt::myfirst:::reg_write { printf("off=%#x val=%#x", arg1, arg2); }'
 ```
 
-The probe is visible in DTrace regardless of inlining, because the kernel registers it statically. When DTrace is not running the probe, it is a no-op on modern x86 (a single NOP instruction in the inlined expansion).
+无论是否内联，探针在 DTrace 中都可见，因为内核静态注册了它。当 DTrace 没有运行该探针时，在现代 x86 上它是空操作（内联展开中的单条 NOP 指令）。
 
-SDT probes are appropriate for production code. They are permanent, named, documented parts of the driver interface. A driver's users might rely on specific SDT probe names for their own monitoring tools; removing them breaks those tools.
+SDT 探针适合生产代码。它们是驱动程序接口的永久、命名、有文档的部分。驱动程序的用户可能依赖特定的 SDT 探针名称来构建他们自己的监控工具；移除它们会破坏这些工具。
 
-Chapter 16 introduces SDT lightly. Later chapters (especially Chapter 23 on debugging and tracing) dig in.
+第 16 章简要介绍 SDT。后续章节（特别是关于调试和跟踪的第 23 章）将深入探讨。
 
-### The Heartbeat Log From Stage 1 Onwards
+### 从第 1 阶段开始的心跳日志
 
-One piece of instrumentation the driver already has is Chapter 13's heartbeat callout. With Chapter 16's register state added, the heartbeat becomes more informative if it prints a register snapshot:
+驱动程序已经拥有的一块仪器是第 13 章的心跳 callout。加上第 16 章的寄存器状态后，如果心跳打印一个寄存器快照，它就变得更信息丰富：
 
 ```c
 static void
@@ -2221,24 +2223,24 @@ myfirst_heartbeat_cb(void *arg)
 }
 ```
 
-With the heartbeat bit set and a 1-second interval, the driver logs its register state every second. During a failing test, the heartbeat output often shows exactly when the state went off the rails.
+设置了心跳位并以 1 秒间隔运行时，驱动程序每秒记录其寄存器状态。在失败的测试期间，心跳输出通常能准确显示状态何时出了问题。
 
-### Using `kgdb` on a Core Dump
+### 使用 `kgdb` 分析核心转储
 
-When a driver panics, the kernel produces a core dump. `kgdb` can read the dump and inspect the softc. With the register block inside the softc, a single command can print the current register values:
+当驱动程序 panic 时，内核产生核心转储。`kgdb` 可以读取转储并检查 softc。寄存器块在 softc 内部，一条命令就可以打印当前寄存器值：
 
 ```text
 (kgdb) print *(struct myfirst_softc *)0xfffff8000a123400
 (kgdb) x/16xw ((struct myfirst_softc *)0xfffff8000a123400)->regs_buf
 ```
 
-The `x/16xw` command dumps 16 words in hex at the register buffer's address. The output is literally the 64 bytes of register state at the moment of panic. A developer staring at those bytes can often spot the wrong value that led to the panic.
+`x/16xw` 命令以十六进制转储寄存器缓冲区地址处的 16 个字。输出就是 panic 时刻 64 字节寄存器状态的字面值。盯着这些字节的开发者通常能发现导致 panic 的错误值。
 
-The reason this works is the simulation: `regs_buf` is kernel memory, visible to kgdb. A real device's registers would not be visible in a core dump, because the core dump captures RAM only, not device state. For simulated devices and DMA descriptors, a core dump is a gold mine.
+这之所以有效是因为模拟：`regs_buf` 是内核内存，对 kgdb 可见。真实设备的寄存器在核心转储中不可见，因为核心转储只捕获 RAM，不捕获设备状态。对于模拟设备和 DMA 描述符，核心转储是一座金矿。
 
-### DDB Extensions
+### DDB 扩展
 
-For live debugging without a panic, `ddb` can be extended with driver-specific commands. The `DB_COMMAND` macro registers a new command that ddb recognises at the prompt:
+对于没有 panic 的实时调试，`ddb` 可以用驱动程序特定的命令扩展。`DB_COMMAND` 宏注册一个 ddb 在提示符下识别的新命令：
 
 ```c
 #include <ddb/ddb.h>
@@ -2260,7 +2262,7 @@ DB_COMMAND(myfirst_regs, myfirst_ddb_regs)
 }
 ```
 
-At the `db>` prompt during a break:
+在断点处的 `db>` 提示符下：
 
 ```text
 db> myfirst_regs
@@ -2270,47 +2272,47 @@ DATA_IN 0x0000006f
 ...
 ```
 
-ddb commands are a niche tool. Chapter 16 introduces them to show that they exist. Later chapters (especially Chapter 23) use them more. For now, the access log and DTrace cover most day-to-day debugging.
+ddb 命令是一个小众工具。第 16 章引入它们以展示它们的存在。后续章节（特别是第 23 章）会更多使用它们。目前，访问日志和 DTrace 覆盖了大部分日常调试。
 
-### What to Do When a Register Read Returns Garbage
+### 当寄存器读取返回垃圾数据时该怎么办
 
-A short field guide to the most common mistakes that produce a "garbage" register value, with the diagnostic to try for each.
+一份关于产生"垃圾"寄存器值的最常见错误的简短指南，附带每种情况的诊断方法。
 
-**Wrong offset.** The offset in the code does not match the offset in the datasheet. Diagnostic: cross-check the offset against the datasheet, and audit the header for transcription errors.
+**错误偏移量。** 代码中的偏移量与数据手册中的偏移量不匹配。诊断：将偏移量与数据手册交叉核对，审计头文件中的转录错误。
 
-**Wrong width.** The code reads 32 bits of a 16-bit register, or reads 8 bits of a 32-bit register. Diagnostic: verify the width in the datasheet, and adjust the call.
+**错误宽度。** 代码读取了 16 位寄存器的 32 位，或读取了 32 位寄存器的 8 位。诊断：验证数据手册中的宽度，调整调用。
 
-**Missing virtual mapping.** The resource was allocated without `RF_ACTIVE`, or the driver is reading from a saved pointer that points to freed memory. Diagnostic: confirm `bus_alloc_resource_any` was called with `RF_ACTIVE`; assert `sc->regs_buf != NULL` before reading in the simulation path.
+**缺少虚拟映射。** 资源在没有 `RF_ACTIVE` 的情况下分配，或驱动程序从指向已释放内存的保存指针读取。诊断：确认 `bus_alloc_resource_any` 是用 `RF_ACTIVE` 调用的；在模拟路径中读取前断言 `sc->regs_buf != NULL`。
 
-**Race with another writer.** Another context wrote a different value between the read and the expected observation. Diagnostic: enable the access log, reproduce the issue, inspect the log.
+**与另一个写入者的竞争。** 另一个上下文在读取和预期观察之间写入了不同的值。诊断：启用访问日志，重现问题，检查日志。
 
-**Read-to-clear side effect the code did not expect.** The previous read cleared the bits you now expect to see. Diagnostic: check the datasheet for read side effects; consider whether the reading code should cache the value.
+**代码未预期的读即清除副作用。** 前一次读取清除了你现在期望看到的位。诊断：检查数据手册的读副作用；考虑读取代码是否应该缓存该值。
 
-**Cache attribute mismatch.** On platforms where it matters, the virtual mapping was set up with wrong cache attributes. Diagnostic: not usually a problem on x86 with `bus_alloc_resource_any`; on other platforms, check `pmap_mapdev_attr` and the bus provider. Rare in practice if you are using the standard bus allocation path.
+**缓存属性不匹配。** 在缓存属性重要的平台上，虚拟映射使用了错误的缓存属性设置。诊断：在使用 `bus_alloc_resource_any` 的 x86 上通常不是问题；在其他平台上，检查 `pmap_mapdev_attr` 和总线提供者。如果使用标准总线分配路径，这在实践中很少见。
 
-**Endianness mismatch.** On a big-endian device accessed from a little-endian CPU without the right tag or stream accessor, the bytes come back in the wrong order. Diagnostic: compare the value byte-swapped; if it now makes sense, you need the `_stream_` accessors or a swap-aware tag.
+**字节序不匹配。** 在没有正确标签或流式访问器的情况下，从小端 CPU 访问大端设备，字节以错误顺序返回。诊断：比较字节交换后的值；如果现在有意义，你需要 `_stream_` 访问器或交换感知的标签。
 
-Each diagnosis points to a different fix. Keeping them in mind saves hours.
+每种诊断指向不同的修复方法。把它们记在心可以节省数小时。
 
-### What to Do When a Register Write Has No Effect
+### 当寄存器写入没有效果时该怎么办
 
-Sister field guide for writes.
+写入的对应指南。
 
-**The register is read-only or write-once.** The datasheet defines the register as readable only, or writable only until the first successful write. Diagnostic: check the datasheet's direction column.
+**寄存器是只读或一次可写的。** 数据手册将寄存器定义为仅可读，或仅在第一次成功写入前可写。诊断：检查数据手册的方向列。
 
-**The write was masked out.** The register has bits that are writable only under specific conditions (device disabled, chip in test mode, a specific field set). Diagnostic: enable debug_level printing; confirm the write happened; then check the device's state.
+**写入被屏蔽。** 寄存器有些位仅在特定条件下可写（设备禁用、芯片处于测试模式、设置了特定字段）。诊断：启用 debug_level 打印；确认写入发生了；然后检查设备的状态。
 
-**The write was reordered.** A barrier-needed sequence was issued without barriers, and the device saw the writes in a different order than the code intended. Diagnostic: add explicit `bus_space_barrier` calls and retest.
+**写入被重排序。** 需要屏障的序列在没有屏障的情况下发出，设备以与代码意图不同的顺序看到写入。诊断：添加显式 `bus_space_barrier` 调用并重新测试。
 
-**The write was lost to a concurrent read-modify-write.** Another context clobbered the new value. Diagnostic: access log; locking audit.
+**写入因并发读-改-写而丢失。** 另一个上下文覆盖了新值。诊断：访问日志；加锁审计。
 
-**The write went to the wrong offset.** A transcription error or an arithmetic mistake aimed the write at a different register. Diagnostic: access log; comparison with the datasheet.
+**写入到了错误的偏移量。** 转录错误或算术错误将写入对准了不同的寄存器。诊断：访问日志；与数据手册比较。
 
-The overlap with the read diagnostic is high: most issues boil down to "the code is not doing what you think it is", and the access log is the most direct way to see what the code is doing.
+与读取诊断的重叠很高：大多数问题归结为"代码没有做你以为它在做的事"，而访问日志是看到代码实际在做什么的最直接方式。
 
-### A Lab: The Access Log Does Its Job
+### 实验：访问日志发挥作用
 
-A small exercise that shows the access log paying off. Enable it, exercise the driver, dump the log.
+一个展示访问日志价值的小练习。启用它，运行驱动程序，转储日志。
 
 ```text
 # sysctl dev.myfirst.0.access_log_enabled=1
@@ -2322,29 +2324,29 @@ A small exercise that shows the access log paying off. Enable it, exercise the d
 # sysctl dev.myfirst.0.access_log
 ```
 
-The last sysctl emits several dozen lines: the ticker's `SCRATCH_A` increments, the write's `DATA_IN` update and `STATUS` ORing, the read's `DATA_OUT` update and `STATUS` AND-ing, and every sysctl-driven read of a register along the way. The log reads like a transcript of the driver's conversation with itself.
+最后一个 sysctl 发出几十行：ticker 的 `SCRATCH_A` 递增、写入的 `DATA_IN` 更新和 `STATUS` 或操作、读取的 `DATA_OUT` 更新和 `STATUS` 与操作，以及沿途中每个 sysctl 驱动的寄存器读取。日志读起来就像驱动程序与自己对话的记录。
 
-A beginner who sees this transcript for the first time usually has a moment of recognition: "oh, *that* is what the driver is doing under the covers". The moment is the whole point of the exercise.
+初学者第一次看到这个记录时通常会有一个顿悟时刻："哦，*原来*驱动程序在底层是这样做的"。这个时刻就是这个练习的全部意义。
 
-### Wrapping Up Section 7
+### 总结第 7 节
 
-The register access path is invisible by default. A small observability layer makes it visible: a ring buffer of recent accesses, a debug bitfield that controls per-access printf, DTrace probes through fbt or sdt, an enhanced heartbeat that logs register snapshots, and ddb or kgdb access to the softc for post-mortem inspection. Each tool fits a different use case, and together they cover almost every register-level bug a driver can have.
+寄存器访问路径默认是不可见的。一个小型可观测性层使其可见：最近访问的环缓冲区、控制每次访问 printf 的调试位字段、通过 fbt 或 sdt 的 DTrace 探针、记录寄存器快照的增强心跳，以及用于事后检查 softc 的 ddb 或 kgdb 访问。每种工具适合不同的用例，它们一起覆盖了驱动程序可能拥有的几乎所有寄存器级 bug。
 
-Section 8 consolidates everything Chapter 16 has added into a refactored, documented, versioned driver. The final stage.
+第 8 节将第 16 章添加的所有内容整合到一个重构的、有文档的、版本化的驱动程序中。最终阶段。
 
 
 
-## Section 8: Refactoring and Versioning Your MMIO-Ready Driver
+## 第 8 节：重构和版本化你的 MMIO 就绪驱动程序
 
-Stage 3 produced a correct driver. Section 8 produces a maintainable one. The changes Stage 4 makes are organisational: split the hardware-access code out of `myfirst.c` into its own file, wrap the remaining register accesses in macros that mirror the `CSR_*` idiom real drivers use, update `HARDWARE.md` to its final form, bump the version to `0.9-mmio`, and run the full regression pass.
+第 3 阶段产生了正确的驱动程序。第 8 节产生可维护的驱动程序。第 4 阶段所做的更改是组织性的：将硬件访问代码从 `myfirst.c` 拆分到自己的文件中，将剩余的寄存器访问包装在镜像真实驱动程序使用的 `CSR_*` 惯用法的宏中，将 `HARDWARE.md` 更新到最终形式，将版本提升到 `0.9-mmio`，并运行完整的回归测试。
 
-A driver that works is valuable. A driver that works *and* reads cleanly to the next person who opens it is far more valuable. Section 8 is about that second step.
+一个能工作的驱动程序是有价值的。一个能工作*并且*下一个打开它的人能轻松阅读的驱动程序则更有价值得多。第 8 节就是关于这第二步的。
 
-### The File Split
+### 文件拆分
 
-Through Chapter 15, the `myfirst` driver lived in one C file plus a header. Chapter 16 adds about 200 to 300 lines of hardware-access code, which is enough that a reader opening `myfirst.c` is now greeted by a mix of "driver business logic" and "hardware register mechanics" that compete for attention.
+到第 15 章为止，`myfirst` 驱动程序存在于一个 C 文件加一个头文件中。第 16 章添加了大约 200 到 300 行硬件访问代码，这足以让打开 `myfirst.c` 的读者现在被"驱动程序业务逻辑"和"硬件寄存器机制"的混合体争夺注意力。
 
-Stage 4 separates them. Create a new file `myfirst_hw.c` alongside `myfirst.c`. Move into it:
+第 4 阶段将它们分离。在 `myfirst.c` 旁边创建一个新文件 `myfirst_hw.c`。将以下内容移入其中：
 
 - The accessor implementations (`myfirst_reg_read`, `myfirst_reg_write`, `myfirst_reg_update`, `myfirst_reg_write_barrier`).
 - The register-driven side-effect helpers (`myfirst_ctrl_update`).
@@ -2352,14 +2354,14 @@ Stage 4 separates them. Create a new file `myfirst_hw.c` alongside `myfirst.c`. 
 - The access log rotation helpers.
 - The sysctl handlers for register views (`myfirst_sysctl_reg`, `myfirst_sysctl_reg_write`, `myfirst_sysctl_access_log`).
 
-Move into `myfirst_hw.h`:
+将以下内容移入 `myfirst_hw.h`：
 
-- Register offsets and bit masks (already there).
-- Fixed-value constants (already there).
-- Function prototypes for the hardware-access API (`myfirst_hw_attach`, `myfirst_hw_detach`, `myfirst_hw_set_ctrl`, `myfirst_hw_add_sysctls`, etc.).
-- A small struct defining the hardware state (fewer softc fields, more grouping).
+- 寄存器偏移量和位掩码（已在那里）。
+- 固定值常量（已在那里）。
+- 硬件访问 API 的函数原型（`myfirst_hw_attach`、`myfirst_hw_detach`、`myfirst_hw_set_ctrl`、`myfirst_hw_add_sysctls` 等）。
+- 定义硬件状态的小结构（更少的 softc 字段，更多的分组）。
 
-The remaining `myfirst.c` keeps:
+剩余的 `myfirst.c` 保留：
 
 - The softc declaration (including a `struct myfirst_hw *hw` pointer to a sub-struct for hardware state).
 - The driver lifecycle (attach, detach, module init).
@@ -2368,11 +2370,11 @@ The remaining `myfirst.c` keeps:
 - The non-hardware tasks (selwake, bulk_writer, reset_delayed, recovery).
 - The non-hardware sysctls.
 
-This split mirrors how real drivers with multiple subsystems organise themselves. A network driver might have `foo.c` for the main lifecycle, `foo_hw.c` for hardware access, `foo_rx.c` for the receive path, `foo_tx.c` for the transmit path. The principle is that each file holds code of one kind, and cross-file calls go through a named API.
+这种拆分镜像了具有多个子系统的真实驱动程序如何组织自己。一个网络驱动程序可能有 `foo.c` 用于主生命周期、`foo_hw.c` 用于硬件访问、`foo_rx.c` 用于接收路径、`foo_tx.c` 用于发送路径。原则是每个文件持有一种类型的代码，跨文件调用通过命名 API 进行。
 
-### The Hardware State Structure
+### 硬件状态结构
 
-Inside `myfirst_hw.h`, group the hardware-related fields into their own structure:
+在 `myfirst_hw.h` 内部，将硬件相关字段分组到它们自己的结构中：
 
 ```c
 struct myfirst_hw {
@@ -2390,7 +2392,7 @@ struct myfirst_hw {
 };
 ```
 
-Add a pointer to it in the softc:
+在 softc 中添加指向它的指针：
 
 ```c
 struct myfirst_softc {
@@ -2399,7 +2401,7 @@ struct myfirst_softc {
 };
 ```
 
-Allocate the hw struct in `myfirst_hw_attach`:
+在 `myfirst_hw_attach` 中分配 hw 结构：
 
 ```c
 int
@@ -2433,7 +2435,7 @@ myfirst_hw_attach(struct myfirst_softc *sc)
 }
 ```
 
-Free it in `myfirst_hw_detach`:
+在 `myfirst_hw_detach` 中释放它：
 
 ```c
 void
@@ -2455,11 +2457,11 @@ myfirst_hw_detach(struct myfirst_softc *sc)
 }
 ```
 
-The `myfirst_attach` and `myfirst_detach` functions now call `myfirst_hw_attach(sc)` and `myfirst_hw_detach(sc)` at the appropriate points in their ordering. The hardware sub-attach fits between "softc locks initialised" and "cdev registered"; the hardware sub-detach fits between "tasks drained" and "sysctl context released".
+`myfirst_attach` 和 `myfirst_detach` 函数现在在其排序的适当点调用 `myfirst_hw_attach(sc)` 和 `myfirst_hw_detach(sc)`。硬件子 attach 适合放在"softc 锁初始化"和"cdev 注册"之间；硬件子 detach 适合放在"任务排空"和"sysctl 上下文释放"之间。
 
-### The CSR Macros
+### CSR 宏
 
-Wrap the register accesses in macros that match the real-driver idiom:
+将寄存器访问包装在匹配真实驱动程序惯用法的宏中：
 
 ```c
 #define CSR_READ_4(sc, off) \
@@ -2470,26 +2472,26 @@ Wrap the register accesses in macros that match the real-driver idiom:
         myfirst_reg_update((sc), (off), (clear), (set))
 ```
 
-The driver body now reads:
+驱动程序体现在读作：
 
 ```c
-/* In myfirst_write: */
+/* 在 myfirst_write 中： */
 CSR_WRITE_4(sc, MYFIRST_REG_DATA_IN, (uint32_t)last_byte);
 CSR_UPDATE_4(sc, MYFIRST_REG_STATUS, 0, MYFIRST_STATUS_DATA_AV);
 
-/* In the ticker: */
+/* 在 ticker 中： */
 uint32_t v = CSR_READ_4(sc, MYFIRST_REG_SCRATCH_A);
 CSR_WRITE_4(sc, MYFIRST_REG_SCRATCH_A, v + 1);
 
-/* In the heartbeat: */
+/* 在心跳中： */
 uint32_t status = CSR_READ_4(sc, MYFIRST_REG_STATUS);
 ```
 
-The call sites read like they are talking to hardware, because that is exactly what the abstraction represents. A newcomer opening the driver and reading any of these lines immediately understands what is happening: the driver is reading or writing a register named by a constant from the hardware header.
+调用点读起来就像在与硬件对话，因为这正是抽象所代表的。一个打开驱动程序阅读这些行中任何一行的新来者会立即理解正在发生什么：驱动程序正在读取或写入由硬件头文件中常量命名的寄存器。
 
-### Moving Sysctls
+### 移动 Sysctl
 
-The register-view sysctls move to `myfirst_hw_add_sysctls`:
+寄存器视图 sysctl 移到 `myfirst_hw_add_sysctls`：
 
 ```c
 void
@@ -2501,11 +2503,11 @@ myfirst_hw_add_sysctls(struct myfirst_softc *sc)
 }
 ```
 
-The function is called from `myfirst_attach` at the usual point where sysctls are registered. The main file no longer needs to care about which sysctls exist for hardware; it delegates.
+该函数从 `myfirst_attach` 在通常注册 sysctl 的位置调用。主文件不再需要关心硬件有哪些 sysctl；它委托出去。
 
-### Final `HARDWARE.md`
+### 最终 `HARDWARE.md`
 
-With the file split and API stable, `HARDWARE.md` finalises:
+随着文件拆分和 API 稳定，`HARDWARE.md` 定稿：
 
 ```text
 # myfirst Hardware Interface
@@ -2560,19 +2562,19 @@ Chapter 18 drivers use rman_get_bustag and rman_get_bushandle on a
 resource from bus_alloc_resource_any, which is portable by design.
 ```
 
-The document is now a single source of truth for how the driver accesses hardware. A future contributor reads it once to understand the interface and never again needs to reverse-engineer it from code.
+该文档现在是驱动程序如何访问硬件的唯一事实来源。未来的贡献者读一次就能理解接口，再也不需要从代码逆向工程。
 
-### The Version Bump
+### 版本提升
 
-In `myfirst.c`:
+在 `myfirst.c` 中：
 
 ```c
 #define MYFIRST_VERSION "0.9-mmio"
 ```
 
-The string appears in `kldstat -v` output (through `MODULE_VERSION`) and in the `device_printf` at attach time. Bumping it is a small change with a big signalling value: anyone looking at the running driver knows exactly which chapter's features it has.
+该字符串出现在 `kldstat -v` 输出中（通过 `MODULE_VERSION`）和 attach 时的 `device_printf` 中。提升它是一个小改动但具有大的信号价值：任何查看运行中驱动程序的人都能准确知道它拥有哪个章节的功能。
 
-Update the top-of-file comment to note the additions:
+更新文件顶部注释以记录新增内容：
 
 ```c
 /*
@@ -2587,13 +2589,13 @@ Update the top-of-file comment to note the additions:
  */
 ```
 
-The top-of-file comment is the shortest path for a newcomer to understand the driver's history. Keeping it current is a small discipline with a big payoff.
+文件顶部注释是新来者理解驱动程序历史的最短路径。保持它最新是一个小规范但回报很大。
 
-### The Final Regression Pass
+### 最终回归测试
 
-Chapter 15 established the regression discipline: after every version bump, run the full stress suite from every previous chapter, confirm WITNESS is silent, confirm INVARIANTS is silent, confirm `kldunload` completes cleanly.
+第 15 章建立了回归规范：每次版本提升后，运行以前每个章节的完整压力测试套件，确认 WITNESS 无声、确认 INVARIANTS 无声、确认 `kldunload` 干净完成。
 
-For Stage 4 that means:
+对于第 4 阶段，这意味着：
 
 - The Chapter 11 concurrency tests (multiple writers, multiple readers) pass.
 - The Chapter 12 blocking tests (reader waits for data, writer waits for room) pass.
@@ -2603,9 +2605,9 @@ For Stage 4 that means:
 - The Chapter 16 register tests (see the Hands-On Labs below) pass.
 - `kldunload myfirst` returns cleanly after the full suite.
 
-No test is skipped. A regression in any previous chapter's test is a bug, not a deferred issue. The discipline is the same as it has been throughout Part 3.
+不跳过任何测试。之前任何章节测试中的回归都是 bug，不是推迟的问题。这个规范与第 3 部分中的一样。
 
-### Running the Final Stage
+### 运行最终阶段
 
 ```text
 # cd examples/part-04/ch16-accessing-hardware/stage4-final
@@ -2617,52 +2619,52 @@ No test is skipped. A regression in any previous chapter's test is a bug, not a 
 # sysctl dev.myfirst.0 | head -40
 ```
 
-The `kldstat -v` output should show `myfirst` at version `0.9-mmio`. The `dmesg` tail should show the device probe and attach with no errors. The `sysctl` output should list every Chapter 11 through Chapter 16 sysctl, including the register sysctls.
+`kldstat -v` 输出应该显示 `myfirst` 版本为 `0.9-mmio`。`dmesg` 尾部应该显示设备探测和 attach 无错误。`sysctl` 输出应该列出第 11 到 16 章的每个 sysctl，包括寄存器 sysctl。
 
-Run the stress suite:
+运行压力测试套件：
 
 ```text
 # ../labs/full_regression.sh
 ```
 
-If every test passes, Chapter 16 is complete.
+如果每个测试都通过，第 16 章完成。
 
-### A Small Rule for Chapter 16's Refactor
+### 第 16 章重构的一个小规则
 
-A rule of thumb that Stage 4 embodies: when a module acquires a new responsibility, give it its own file before the responsibility grows big enough to require one. Chapter 16 adds register access as a new responsibility. The responsibility is currently small: 200 to 300 lines across all the code. Splitting it into `myfirst_hw.c` now, while it is still small, is cheap. Splitting it later, when Chapter 18 adds PCI attach logic and Chapter 19 adds an interrupt handler and Chapter 20 adds DMA, would require disentangling three intertwined subsystems at once, which is expensive.
+第 4 阶段体现的经验法则：当一个模块获得新职责时，在职责增长到需要自己的文件之前给它一个。
 
-The same rule applied to Chapter 10's cbuf: the ring buffer got its own `cbuf.c` as soon as it had any logic beyond "declare a struct", which paid off when concurrency and state machines entered the picture. It applies to every future subsystem this driver grows.
+同样的规则也适用于第 10 章的 cbuf：环缓冲区在拥有超出"声明结构体"的任何逻辑时就获得了自己的 `cbuf.c`，这在并发和状态机进入画面时得到了回报。它适用于该驱动程序未来增长的每个子系统。
 
-### What Stage 4 Accomplished
+### 第 4 阶段完成了什么
 
-The driver is now at `0.9-mmio`. Compared to `0.9-coordination`, it has:
+驱动程序现在处于 `0.9-mmio`。与 `0.9-coordination` 相比，它拥有：
 
-- A separate hardware-access layer in `myfirst_hw.c` and `myfirst_hw.h`.
-- A full register map, documented in `myfirst_hw.h` and `HARDWARE.md`.
-- `bus_space(9)`-based register accessors wrapped in `CSR_*` macros.
-- Lock-protected, barrier-aware register access.
-- An access log for post-hoc debugging.
-- Per-register context ownership documented in `HARDWARE.md`.
-- A ticker task that demonstrates autonomous register behaviour.
-- An end-to-end path from user-space write to register update to user-space read.
+- `myfirst_hw.c` 和 `myfirst_hw.h` 中独立的硬件访问层。
+- 完整的寄存器映射，记录在 `myfirst_hw.h` 和 `HARDWARE.md` 中。
+- 包装在 `CSR_*` 宏中的基于 `bus_space(9)` 的寄存器访问器。
+- 受锁保护、带屏障的寄存器访问。
+- 用于事后调试的访问日志。
+- 记录在 `HARDWARE.md` 中的每寄存器上下文所有权。
+- 演示自主寄存器行为的 ticker 任务。
+- 从用户空间写入到寄存器更新到用户空间读取的端到端路径。
 
-The driver's code is recognisably FreeBSD. The layout is the layout real drivers use. The vocabulary is the vocabulary real drivers share. A reader opening the driver for the first time finds a familiar structure, reads the headers to understand the registers, and can navigate the code by subsystem.
+驱动程序的代码是可辨识的 FreeBSD 风格。布局是真实驱动程序使用的布局。词汇是真实驱动程序共享的词汇。首次打开驱动程序的读者会找到熟悉的结构，阅读头文件理解寄存器，并可以按子系统导航代码。
 
-### Wrapping Up Section 8
+### 总结第 8 节
 
-The refactor is small in code but large in organisation. A file split, a structure grouping, a macro layer, a documented interface, a version bump, and a regression pass. Each is a few minutes of work. Together they turn a correct driver into a maintainable one.
+重构在代码上很小但在组织上很大。一次文件拆分、一次结构分组、一层宏、一个有文档的接口、一次版本提升和一次回归测试。每项都是几分钟的工作。它们一起将正确的驱动程序变成了可维护的驱动程序。
 
-The Chapter 16 driver is done. The chapter closes with labs, challenges, troubleshooting, and a bridge to Chapter 17, where the simulated device acquires dynamic behaviour.
+第 16 章驱动程序完成。本章以实验、挑战、故障排除和通往第 17 章的桥梁结束，在那里模拟设备将获得动态行为。
 
 
 
-## Hands-On Labs
+## 动手实验
 
-Labs in Chapter 16 focus on two things: observing register access while exercising the driver, and breaking the register contract to see how the driver reacts. Each lab takes 15 to 45 minutes.
+第 16 章的实验集中在两件事上：在运行驱动程序时观察寄存器访问，以及破坏寄存器约定以查看驱动程序如何反应。每个实验需要 15 到 45 分钟。
 
-### Lab 1: Observe the Register Dance
+### 实验 1：观察寄存器舞蹈
 
-Enable the access log. Exercise the driver across its full interface. Dump the log. Read the transcript.
+启用访问日志。通过驱动程序的完整接口运行它。转储日志。阅读记录。
 
 ```text
 # kldload ./myfirst.ko
@@ -2678,36 +2680,36 @@ Enable the access log. Exercise the driver across its full interface. Dump the l
 # sysctl dev.myfirst.0.access_log
 ```
 
-You should see, in order:
+你应该看到，按顺序：
 
-- Five writes to `DATA_IN` (one per byte of "hello").
-- Updates to `STATUS` setting the `DATA_AV` bit.
-- Five writes to `DATA_OUT` (one per byte read).
-- Updates to `STATUS` clearing the `DATA_AV` bit as the buffer drains.
-- The sysctl-driven `CTRL` write to enable, plus the read-back.
-- Two increments of `SCRATCH_A` from the ticker.
+- 五次对 `DATA_IN` 的写入（"hello" 的每个字节一次）。
+- 对 `STATUS` 设置 `DATA_AV` 位的更新。
+- 五次对 `DATA_OUT` 的写入（每个读取字节一次）。
+- 对 `STATUS` 清除 `DATA_AV` 位的更新，随缓冲区排空。
+- sysctl 驱动的 `CTRL` 写入以启用，加上回读。
+- 来自 ticker 的两次 `SCRATCH_A` 递增。
 
-Read each line. Every value should make sense. If a value does not make sense, the driver has a bug, the test has a typo, or your understanding of the register protocol has a gap.
+阅读每一行。每个值都应该合理。如果某个值不合理，驱动程序有 bug、测试有拼写错误，或者你对寄存器协议的理解有差距。
 
-### Lab 2: Trigger a Lock Violation (Debug Kernel)
+### 实验 2：触发锁违规（调试内核）
 
-This lab only works on a kernel built with `WITNESS` enabled. If you are not running one, skip this lab.
+本实验仅在启用了 `WITNESS` 的内核上有效。如果你没有运行这样的内核，跳过本实验。
 
-Temporarily remove the `MYFIRST_LOCK(sc)` from the sysctl read handler. Rebuild and reload the driver. Run:
+临时从 sysctl 读取处理程序中移除 `MYFIRST_LOCK(sc)`。重新构建并重新加载驱动程序。运行：
 
 ```text
 # sysctl dev.myfirst.0.reg_ctrl
 ```
 
-The console should emit a `WITNESS` warning about an unprotected register access (via the `MYFIRST_ASSERT` in `myfirst_reg_read`). The sysctl output may still return a plausible value, because the lack of locking does not always produce incorrect results, but the assertion makes the violation visible.
+控制台应该发出一条关于未受保护寄存器访问的 `WITNESS` 警告（通过 `myfirst_reg_read` 中的 `MYFIRST_ASSERT`）。sysctl 输出可能仍然返回一个合理的值，因为缺少加锁并不总是产生不正确的结果，但断言使违规可见。
 
-Restore the lock. Rebuild. Verify the warning is gone.
+恢复锁。重新构建。验证警告消失了。
 
-This lab demonstrates the value of `MYFIRST_ASSERT` as a safety net. A production driver without the assertion would carry the bug silently until something went wrong.
+本实验展示了 `MYFIRST_ASSERT` 作为安全网的价值。没有断言的生产驱动程序会静默地携带 bug，直到出了问题。
 
-### Lab 3: Simulate a Concurrent Writer Race
+### 实验 3：模拟并发写入者竞争
 
-Two processes writing simultaneously to `/dev/myfirst0` exercise the register update code path twice over. Run:
+两个进程同时写入 `/dev/myfirst0` 会两次运行寄存器更新代码路径。运行：
 
 ```text
 # for i in 1 2 3 4; do
@@ -2719,13 +2721,13 @@ done
 # sysctl dev.myfirst.0.reg_status
 ```
 
-The `DATA_IN` register should hold the ASCII code of whichever writer ran last (`'1'` = 49, `'2'` = 50, `'3'` = 51, `'4'` = 52). The result is non-deterministic, which is the point: register state from concurrent writers reflects the last winner.
+`DATA_IN` 寄存器应该持有最后运行的写入者的 ASCII 码（`'1'` = 49、`'2'` = 50、`'3'` = 51、`'4'` = 52）。结果是不确定的，这就是重点：来自并发写入者的寄存器状态反映了最后的赢家。
 
-With Stage 3 locking, the driver is correct (no lost updates, no torn reads). Without Stage 3 locking (try reverting to Stage 2 and re-running), you may observe inconsistencies or WITNESS warnings.
+有了第 3 阶段的加锁，驱动程序是正确的（没有丢失的更新、没有撕裂读取）。没有第 3 阶段的加锁（尝试回退到第 2 阶段并重新运行），你可能会观察到不一致或 WITNESS 警告。
 
-### Lab 4: Watch the Heartbeat Register Log
+### 实验 4：观察心跳寄存器日志
 
-Enable the heartbeat debug bit, increase the interval, and let it run.
+启用心跳调试位，增加间隔，让它运行。
 
 ```text
 # sysctl dev.myfirst.0.debug_level=0x8     # MYFIRST_DBG_HEARTBEAT
@@ -2739,31 +2741,31 @@ Enable the heartbeat debug bit, increase the interval, and let it run.
 # sysctl dev.myfirst.0.heartbeat_interval_ms=0
 ```
 
-The dmesg tail should contain five lines, one per heartbeat, each showing the current register values. `SCRATCH_A` should climb by one per heartbeat because the ticker is firing in parallel.
+dmesg 尾部应该包含五行，每次心跳一行，每行显示当前寄存器值。`SCRATCH_A` 应该每个心跳递增一，因为 ticker 在并行运行。
 
-This lab demonstrates how a production driver might use a debug log to observe live behaviour without interrupting the driver's normal operation.
+本实验展示了生产驱动程序可能如何使用调试日志来观察实时行为，而不中断驱动程序的正常运行。
 
-### Lab 5: Add a New Register
+### 实验 5：添加新寄存器
 
-A practical exercise. Add a new register `SCRATCH_C` at offset `0x28`. Extend the header, extend the sysctl list, extend `HARDWARE.md`. Rebuild, reload, and verify the new register is readable and writable via sysctl.
+一个实践练习。在偏移量 `0x28` 处添加一个新寄存器 `SCRATCH_C`。扩展头文件、扩展 sysctl 列表、扩展 `HARDWARE.md`。重新构建、重新加载，并验证新寄存器可通过 sysctl 读写。
 
-This exercises the full workflow of adding a register: header change, sysctl addition, documentation update, test. A driver that makes all four steps easy is a well-organised driver.
+这个练习锻炼了添加寄存器的完整工作流：头文件更改、sysctl 添加、文档更新、测试。一个使所有四个步骤都容易的驱动程序是一个组织良好的驱动程序。
 
-### Lab 6: Inject a Bogus Access (Debug Kernel)
+### 实验 6：注入伪造访问（调试内核）
 
-A deliberate break-and-observe exercise.
+一个故意破坏并观察的练习。
 
-Modify the ticker callback to read from an out-of-bounds offset: `MYFIRST_REG_READ(sc, 0x80)`. Rebuild. Enable the ticker. On a debug kernel with INVARIANTS, the KASSERT in `myfirst_reg_read` should panic the kernel within a few seconds, with the panic string naming the offset.
+修改 ticker 回调以从越界偏移量读取：`MYFIRST_REG_READ(sc, 0x80)`。重新构建。启用 ticker。在启用 INVARIANTS 的调试内核上，`myfirst_reg_read` 中的 KASSERT 应该在几秒钟内使内核 panic，panic 字符串会命名该偏移量。
 
-Restore the callback. Rebuild. Verify the driver runs cleanly again.
+恢复回调。重新构建。验证驱动程序再次干净运行。
 
-This lab shows the value of bounds assertions: an out-of-bounds access fires immediately instead of silently corrupting nearby memory. Production code should never remove these assertions; they pay their cost many times over the life of the driver.
+本实验展示了边界断言的价值：越界访问立即触发，而不是静默地损坏邻近内存。生产代码永远不应移除这些断言；它们在驱动程序生命周期中多次回本。
 
-### Lab 7: Trace With DTrace
+### 实验 7：使用 DTrace 跟踪
 
-Compile the driver with `CFLAGS+=-DMYFIRST_DEBUG_REG_TRACE` to make the accessors out-of-line. Rebuild and reload.
+编译驱动程序时使用 `CFLAGS+=-DMYFIRST_DEBUG_REG_TRACE` 使访问器变为非内联。重新构建并重新加载。
 
-Run DTrace:
+运行 DTrace：
 
 ```text
 # dtrace -n 'fbt::myfirst_reg_write:entry {
@@ -2771,27 +2773,27 @@ Run DTrace:
 }'
 ```
 
-In another terminal:
+在另一个终端中：
 
 ```text
 # echo hi > /dev/myfirst0
 ```
 
-DTrace should print two lines, one per register write (`DATA_IN` and the `STATUS` update).
+DTrace 应该打印两行，每个寄存器写入一行（`DATA_IN` 和 `STATUS` 更新）。
 
-Try more advanced queries:
+尝试更高级的查询：
 
 ```text
 # dtrace -n 'fbt::myfirst_reg_write:entry /arg1 == 0/ { @ = count(); }'
 ```
 
-Counts writes to `CTRL` (offset 0) for the duration of the run. Leave it running while triggering various operations, then Ctrl-C to see the total.
+统计在运行期间对 `CTRL`（偏移量 0）的写入次数。在触发各种操作时让它运行，然后 Ctrl-C 查看总数。
 
-DTrace's power comes from the combination of low overhead, flexible filtering, and rich aggregation. A beginner who grows comfortable with it early will save hours on every later debugging session.
+DTrace 的强大来自于低开销、灵活过滤和丰富聚合的组合。一个早早熟悉它的初学者将在每次后续调试会话中节省数小时。
 
-### Lab 8: The Watchdog-Meets-Register Scenario
+### 实验 8：看门狗遇上寄存器场景
 
-The Chapter 13 watchdog callout was introduced to catch stalls in the ring buffer. Chapter 16's register integration adds a second failure mode: the watchdog could detect a register in an impossible state. Extend the watchdog callback to complain if `STATUS.ERROR` is set:
+第 13 章的看门狗 callout 是为了捕获环缓冲区中的停滞而引入的。第 16 章的寄存器集成添加了第二种故障模式：看门狗可以检测到处于不可能状态的寄存器。扩展看门狗回调以在 `STATUS.ERROR` 被设置时发出警报：
 
 ```c
 if (MYFIRST_REG_READ(sc, MYFIRST_REG_STATUS) & MYFIRST_STATUS_ERROR) {
@@ -2799,298 +2801,298 @@ if (MYFIRST_REG_READ(sc, MYFIRST_REG_STATUS) & MYFIRST_STATUS_ERROR) {
 }
 ```
 
-Set the error bit from a sysctl handler:
+从 sysctl 处理程序设置错误位：
 
 ```text
-# sysctl dev.myfirst.0.reg_ctrl_set=??  # use your writeable-register sysctl
+# sysctl dev.myfirst.0.reg_ctrl_set=??  # 使用你的可写寄存器 sysctl
 ```
 
-(You can similarly make a writeable sysctl for `STATUS` to trigger the watchdog check.)
+（你可以类似地为 `STATUS` 创建一个可写 sysctl 来触发看门狗检查。）
 
-On the next watchdog tick (default 5 seconds), the message should appear. Clear the bit; the message should stop.
+在下一个看门狗 tick（默认 5 秒）时，消息应该出现。清除该位；消息应该停止。
 
-This lab integrates the register path with the callout-driven monitoring path, showing how the two subsystems compose.
+本实验将寄存器路径与 callout 驱动的监控路径集成，展示两个子系统如何组合。
 
 
 
-## Challenge Exercises
+## 挑战练习
 
-Challenges go further than labs. Each should take one to four hours and exercises judgment, not just keystrokes.
+挑战比实验更进一步。每个应该花费一到四个小时，锻炼的是判断力而不仅仅是按键。
 
-### Challenge 1: Per-File-Handle Register Snapshot
+### 挑战 1：每文件句柄寄存器快照
 
-Each open file descriptor gets its own snapshot of the register block, captured at open time and accessible via a custom ioctl. Modify `myfirst_open` to snapshot the registers into a per-fd structure; implement an ioctl that returns the snapshot; write a user-space program that opens `/dev/myfirst0`, fetches the snapshot, and prints it.
+每个打开的文件描述符获得自己的寄存器块快照，在打开时捕获，并可通过自定义 ioctl 访问。修改 `myfirst_open` 将寄存器快照到一个每文件描述符结构中；实现一个返回快照的 ioctl；编写一个用户空间程序，打开 `/dev/myfirst0`，获取快照并打印它。
 
-Think about: how much memory does the snapshot cost per open? When should the snapshot be refreshed? Should a second ioctl be added to refresh?
+思考：快照每次打开花费多少内存？快照应该何时刷新？是否应该添加第二个 ioctl 来刷新？
 
-### Challenge 2: Register Diff Logging
+### 挑战 2：寄存器差异日志
 
-Extend the access log to record only *changes* to registers (where the new value differs from the previous value at the same offset). Writes that do not change the value are not logged. This compresses the log significantly and focuses it on meaningful state transitions.
+扩展访问日志，仅记录寄存器的*变化*（新值与同一偏移量的前一个值不同）。不改变值的写入不被记录。这显著压缩了日志，使其聚焦于有意义的状态转换。
 
-Think about: how do you track the "previous value"? Is it per-offset, or do you store it alongside each log entry?
+思考：你如何跟踪"前一个值"？是每偏移量存储，还是与每个日志条目一起存储？
 
-### Challenge 3: Loopback Mode
+### 挑战 3：环回模式
 
-Add a `CTRL.LOOPBACK` bit (already defined in `myfirst_hw.h`). When the bit is set, writes to `DATA_IN` are also copied to `DATA_OUT`, making the driver "loop back" user-space writes without needing a read. Implement the logic, add a lab test, and confirm user-space reads return the bytes just written.
+添加一个 `CTRL.LOOPBACK` 位（已在 `myfirst_hw.h` 中定义）。当该位被设置时，对 `DATA_IN` 的写入也复制到 `DATA_OUT`，使驱动程序"环回"用户空间写入而无需读取。实现逻辑，添加一个实验测试，并确认用户空间读取返回刚写入的字节。
 
-Think about: where in the write path does the copy belong? Is it still correct if multiple bytes are written in one call? Do you set `DATA_AV` differently in loopback mode?
+思考：复制属于写入路径的哪个位置？如果一次调用中写入多个字节是否仍然正确？环回模式下 `DATA_AV` 的设置是否不同？
 
-### Challenge 4: Read-to-Clear on `INTR_STATUS`
+### 挑战 4：`INTR_STATUS` 的读即清除
 
-The Chapter 16 simulation has `INTR_STATUS` as a plain register. Real hardware often uses read-to-clear semantics. Implement them: make the sysctl read of `reg_intr_status` return the current value and then clear it, so the next read returns zero. Add a way to set pending bits (a writeable sysctl that ORs into the register).
+第 16 章模拟中 `INTR_STATUS` 是一个普通寄存器。真实硬件通常使用读即清除语义。实现它们：使 `reg_intr_status` 的 sysctl 读取返回当前值然后清除它，使下一次读取返回零。添加一种设置挂起位的方式（一个或入寄存器的可写 sysctl）。
 
-Think about: is the read-to-clear behaviour safe for the debug sysctl? How do you handle the case where the sysctl is used to observe the value?
+思考：读即清除行为对调试 sysctl 是否安全？你如何处理使用 sysctl 观察值的情况？
 
-### Challenge 5: A Barrier Correctness Stress Test
+### 挑战 5：屏障正确性压力测试
 
-Write a stress harness that exercises a specific pattern: write to `CTRL`, issue a barrier, read `STATUS`, verify the read reflects the write. Run it thousands of times, measure how often the verification fails. On x86 with correct barriers, failures should be zero.
+编写一个压力测试工具，运行特定模式：写入 `CTRL`、发出屏障、读取 `STATUS`、验证读取反映了写入。运行数千次，测量验证失败的频率。在 x86 上使用正确的屏障时，失败应该为零。
 
-Then remove the barrier and run again. On x86, failures might still be zero (strong memory model). On arm64 (if you have access), removing the barrier may produce failures.
+然后移除屏障再运行。在 x86 上，失败可能仍然为零（强内存模型）。在 arm64 上（如果你有访问权限），移除屏障可能产生失败。
 
-Think about: what does this exercise tell you about the cost and value of barriers on different architectures? Should a driver always include them?
+思考：这个练习告诉你关于屏障在不同架构上的成本和价值什么？驱动程序是否应该总是包含它们？
 
-### Challenge 6: A Register-Aware Lockstat Run
+### 挑战 6：寄存器感知的 Lockstat 运行
 
-Use `lockstat` to profile your Stage 3 driver under load. Identify the hottest locks. Is the driver mutex (`sc->mtx`) saturated by register access, or by the ring buffer path, or by neither? Generate a report and interpret the numbers.
+使用 `lockstat` 对你的第 3 阶段驱动程序进行负载下的性能分析。识别最热的锁。驱动程序互斥锁（`sc->mtx`）是被寄存器访问饱和、被环缓冲区路径饱和，还是两者都不是？生成一份报告并解释这些数字。
 
-Think about: does the result change if you split out a dedicated `sc->reg_mtx` for register access? Do WITNESS warnings appear? Is the driver faster or slower?
+思考：如果你为寄存器访问拆出一个专用 `sc->reg_mtx`，结果是否会改变？是否出现 WITNESS 警告？驱动程序是更快还是更慢？
 
-### Challenge 7: Read a Real Driver's Register Interface
+### 挑战 7：阅读真实驱动程序的寄存器接口
 
-Pick a real driver in `/usr/src/sys/dev/` and read its register header. Candidates include `/usr/src/sys/dev/ale/if_alereg.h`, `/usr/src/sys/dev/e1000/e1000_regs.h`, and `/usr/src/sys/dev/uart/uart_dev_ns8250.h`. Answer:
+在 `/usr/src/sys/dev/` 中选择一个真实驱动程序并阅读其寄存器头文件。候选包括 `/usr/src/sys/dev/ale/if_alereg.h`、`/usr/src/sys/dev/e1000/e1000_regs.h` 和 `/usr/src/sys/dev/uart/uart_dev_ns8250.h`。回答：
 
-- How many registers does the driver define?
-- What width are they (8, 16, 32, 64 bits)?
-- Which registers have bit-field macros? Are there any bit-field macros that correspond to fields spanning multiple bytes?
-- How does the driver wrap `bus_read_*` and `bus_write_*` (if at all)?
-- How are the register offsets documented (comments, external spec references)?
+- 驱动程序定义了多少个寄存器？
+- 它们的宽度是多少（8、16、32、64 位）？
+- 哪些寄存器有位字段宏？是否有跨越多个字节的位字段宏？
+- 驱动程序如何包装 `bus_read_*` 和 `bus_write_*`（如果有）？
+- 寄存器偏移量如何被记录（注释、外部规范引用）？
 
-Writing up the answers as a one-page analysis is a great way to consolidate Chapter 16's material. You will likely also find patterns you want to apply to your own driver.
+将答案写成一份一页分析是巩固第 16 章内容的好方法。你可能还会发现想应用到自己驱动程序的模式。
 
 
 
-## Troubleshooting Reference
+## 故障排除参考
 
-A quick reference for the problems Chapter 16's code is most likely to surface.
+快速参考。
 
-### Driver fails to load
+### 驱动程序加载失败
 
-- **"resolve_symbol failed"**: Missing include or a typo in a function name. Check `/var/log/messages` for the exact symbol; add the include; retry.
-- **"undefined reference to bus_space_read_4"**: Missing `#include <machine/bus.h>`. This pulls in the per-architecture bus header.
-- **"invalid KMOD Makefile"**: A typo in the Makefile. Compare against the stage's known-good Makefile.
+- **"resolve_symbol failed"**：缺少 include 或函数名拼写错误。检查 `/var/log/messages` 中的确切符号；添加 include；重试。
+- **"undefined reference to bus_space_read_4"**：缺少 `#include <machine/bus.h>`。这会引入每架构的总线头文件。
+- **"invalid KMOD Makefile"**：Makefile 中有拼写错误。与该阶段的已知良好 Makefile 比较。
 
-### Driver loads but `dmesg` shows `myfirst: cannot allocate register block`
+### 驱动程序加载但 `dmesg` 显示 `myfirst: cannot allocate register block`
 
-`malloc(9)` returned NULL at attach. Usually means `M_WAITOK` was passed but the system was under memory pressure; rare for a 64-byte allocation. Check the kernel's malloc statistics (`vmstat -m`) for `myfirst`. Try a reboot.
+`malloc(9)` 在 attach 时返回 NULL。通常意味着传了 `M_WAITOK` 但系统内存紧张；64 字节分配很少出现这种情况。检查内核的 malloc 统计（`vmstat -m`）中的 `myfirst`。尝试重启。
 
-### `sysctl dev.myfirst.0.reg_ctrl` returns ENOENT
+### `sysctl dev.myfirst.0.reg_ctrl` 返回 ENOENT
 
-The sysctl was not registered. Confirm `myfirst_hw_add_sysctls` is called in attach. Confirm the sysctl context and tree are the same as the rest of the driver's sysctls. Look for a typo in `OID_AUTO` or the leaf name.
+sysctl 未注册。确认 `myfirst_hw_add_sysctls` 在 attach 中被调用。确认 sysctl 上下文和树与驱动程序其余 sysctl 相同。检查 `OID_AUTO` 或叶名称中的拼写错误。
 
-### `sysctl dev.myfirst.0.reg_ctrl` returns a plausible value, but changes never happen
+### `sysctl dev.myfirst.0.reg_ctrl` 返回合理值，但更改从不发生
 
-The writeable sysctl `reg_ctrl_set` might be missing `CTLFLAG_RW`. Without `_RW`, the sysctl is read-only. Also check the handler is not short-circuiting because of an early ENODEV return.
+可写 sysctl `reg_ctrl_set` 可能缺少 `CTLFLAG_RW`。没有 `_RW`，sysctl 是只读的。还要检查处理程序是否因为早期 ENODEV 返回而短路。
 
-### Kernel panic on first register write: "page fault in kernel mode"
+### 首次寄存器写入时内核 panic："page fault in kernel mode"
 
-`sc->regs_buf` is NULL or dangling. Confirm `myfirst_hw_attach` ran successfully and set `sc->hw->regs_buf`. Confirm nothing freed the buffer prematurely (detach running in parallel, or a `free` in an error path).
+`sc->regs_buf` 是 NULL 或悬垂指针。确认 `myfirst_hw_attach` 成功运行并设置了 `sc->hw->regs_buf`。确认没有东西过早释放了缓冲区（detach 并行运行，或错误路径中的 `free`）。
 
-### Kernel panic: "myfirst: register read past end of register block"
+### 内核 panic："myfirst: register read past end of register block"
 
-The `KASSERT` fired. A bug in the driver is passing an out-of-range offset. Use the crash stack to find the call site. Common cause: an arithmetic expression for the offset that exceeds `MYFIRST_REG_SIZE`.
+`KASSERT` 触发了。驱动程序中的 bug 传递了越界偏移量。使用崩溃栈找到调用点。常见原因：偏移量的算术表达式超过了 `MYFIRST_REG_SIZE`。
 
-### `WITNESS` warning: "acquiring duplicate lock"
+### `WITNESS` 警告："acquiring duplicate lock"
 
-Usually a sign that a call chain is acquiring `sc->mtx` recursively. The Chapter 11 mutex is a sleep mutex without the `MTX_RECURSE` flag, which is correct. Trace the stack; one of the callers is re-entering.
+通常是调用链递归获取 `sc->mtx` 的信号。第 11 章的互斥锁是没有 `MTX_RECURSE` 标志的睡眠互斥锁，这是正确的。跟踪栈；其中一个调用者在重入。
 
-### `WITNESS` warning: "lock order reversal"
+### `WITNESS` 警告："lock order reversal"
 
-The driver is holding `sc->mtx` while acquiring another lock (or vice versa) in an order that violates the documented order. Check `LOCKING.md` against the stack trace and fix the call site.
+驱动程序在持有 `sc->mtx` 时获取另一个锁（或反之），顺序违反了记录的顺序。根据栈跟踪检查 `LOCKING.md` 并修复调用点。
 
-### Ticker does not fire
+### Ticker 不触发
 
-The tick source callout's interval is zero (disabled). Confirm `dev.myfirst.0.tick_source_interval_ms` is positive. Confirm `reg_ticker_enabled` is 1. Look at the access log for SCRATCH_A writes; if there are none, the callout is the problem. If there are, the sysctl may be stale (re-read it).
+tick source callout 的间隔为零（禁用）。确认 `dev.myfirst.0.tick_source_interval_ms` 为正。确认 `reg_ticker_enabled` 为 1。查看访问日志中是否有 SCRATCH_A 写入；如果没有，callout 是问题所在。如果有，sysctl 可能是过期的（重新读取它）。
 
-### Access log returns empty
+### 访问日志返回空
 
-Confirm `access_log_enabled` is 1. Confirm the driver mutex is being acquired in access paths (the log update happens under the lock). If the log is genuinely empty but registers should have been accessed, check the access paths for missing accessor calls.
+确认 `access_log_enabled` 为 1。确认驱动程序互斥锁在访问路径中被获取（日志更新在锁下发生）。如果日志确实为空但寄存器应该已被访问，检查访问路径是否缺少访问器调用。
 
-### `dmesg` shows no output from `myfirst_ctrl_update`
+### `dmesg` 中没有来自 `myfirst_ctrl_update` 的输出
 
-The debug_level is 0, or the specific bit is not set. Set `debug_level` to include the right bits and retry.
+debug_level 为 0，或特定位未设置。将 `debug_level` 设置为包含正确的位并重试。
 
-### `kldunload myfirst` returns EBUSY
+### `kldunload myfirst` 返回 EBUSY
 
-Open file descriptors still exist on the device. Close them (or use `fstat -f /dev/myfirst0` to find who holds them) and retry.
+设备上仍有打开的文件描述符。关闭它们（或使用 `fstat -f /dev/myfirst0` 找到持有者）并重试。
 
-### `kldunload myfirst` hangs
+### `kldunload myfirst` 挂起
 
-Detach is stuck draining a primitive. Use `procstat -kk <pid-of-kldunload>` to see where. Usually the stuck drain is a task or callout that is not cancelling. Check the detach ordering against `LOCKING.md`.
+Detach 卡在排空某个原语上。使用 `procstat -kk <kldunload的pid>` 查看卡在哪里。通常卡住的排空是一个未取消的任务或 callout。根据 `LOCKING.md` 检查 detach 排序。
 
-### The stress test complains about WITNESS warnings
+### 压力测试抱怨 WITNESS 警告
 
-Each warning is a real bug. Fix one, retest, continue. Do not mass-disable WITNESS and call the issue resolved; the warnings are pointing at the problem.
+每个警告都是一个真实的 bug。修复一个，重新测试，继续。不要批量禁用 WITNESS 就认为问题解决了；警告正指向问题所在。
 
 
 
-## Wrapping Up
+## 总结
 
-Chapter 16 opened Part 4 by giving the `myfirst` driver its first hardware story. The driver now has a register block, even if that block is simulated. It uses `bus_space(9)` the way a real driver does. It protects register access with the Chapter 11 mutex, inserts barriers where ordering matters, and documents every register and every access path. It has an access log for post-hoc debugging, DTrace probes for live observation, and a ddb command for live inspection. It is organised across two files: the main driver lifecycle and the hardware-access layer.
+第 16 章通过给 `myfirst` 驱动程序第一个硬件故事来开启第四部分。驱动程序现在有一个寄存器块，即使该块是模拟的。它像真实驱动程序一样使用 `bus_space(9)`。它用第 11 章的互斥锁保护寄存器访问，在排序重要的地方插入屏障，并拥有一个可观测性层。
 
-What Chapter 16 deliberately did not do: real PCI (Chapter 18), real interrupts (Chapter 19), real DMA (Chapters 20 and 21), full hardware simulation with dynamic behaviour (Chapter 17). Each of those topics deserves its own chapter; each builds on Chapter 16's vocabulary.
+第 16 章刻意没有做的：真实 PCI（第 18 章）、真实中断（第 19 章）、真实 DMA（第 20 和 21 章）、带动态行为的完整硬件模拟（第 17 章）。这些主题每一个都值得单独成章；每一个都建立在第 16 章的词汇之上。
 
-The version is `0.9-mmio`. The file layout is `myfirst.c` plus `myfirst_hw.c` plus `myfirst_hw.h` plus `myfirst_sync.h` plus `cbuf.c` plus `cbuf.h`. The documentation is `LOCKING.md` plus the new `HARDWARE.md`. The test suite has grown by the Chapter 16 labs. Every earlier Part 3 test still passes.
+版本是 `0.9-mmio`。文件布局是 `myfirst.c` 加 `myfirst_hw.c` 加 `myfirst_hw.h` 加 `myfirst_sync.h` 加 `cbuf.c` 加 `cbuf.h`。文档是 `LOCKING.md` 加新的 `HARDWARE.md`。测试套件已通过第 16 章实验增长。每个更早的第 3 部分测试仍然通过。
 
-### A Reflection Before Chapter 17
+### 第 17 章前的反思
 
-A pause before the next chapter. Chapter 16 was a careful introduction to a set of ideas that will recur for the rest of Part 4 and beyond. The register read and write, the barrier, the bus tag and handle, the locking discipline around MMIO: these are the pieces every later hardware-facing chapter uses without re-teaching them. You have met them all once, in a setting where you could observe, experiment, and make mistakes safely.
+在下一章之前稍作停顿。第 16 章是对一组将在第四部分余下章节及以后反复出现的想法的仔细介绍。寄存器读写、屏障、总线标签和句柄、MMIO 周围的加锁规范：这些是每个后续面向硬件的章节都会使用而不重新教授的片段。你已经在可以观察、实验和安全的犯错环境中与它们全部见过一次面。
 
-The same pattern that defined Part 3 defines Part 4: introduce a primitive, apply it to the driver in a small refactor, document it, test it, move on. The difference is that Part 4's primitives face outward. The driver is no longer a self-contained world; it is a participant in a conversation with hardware. That conversation has rules the driver must respect, and the rules have consequences when they are broken.
+定义第 3 部分的相同模式定义了第 4 部分：引入一个原语，以小重构的形式将其应用到驱动程序中，记录它，测试它，继续。区别在于第 4 部分的原语面向外部。驱动程序不再是一个自包含的世界；它是与硬件对话的参与者。这场对话有驱动程序必须遵守的规则，规则被违反时有后果。
 
-Chapter 17 makes the hardware side of the conversation more interesting. The simulated device will grow a callout that changes `STATUS` bits over time. It will signal "data available" after a write by flipping a bit on a delay. It will fail occasionally to teach error-handling paths. The register vocabulary stays the same; the device behaviour becomes richer.
+第 17 章使对话的硬件侧更有趣。模拟设备将获得一个随时间改变 `STATUS` 位的 callout。它将在写入后通过延迟翻转一个位来发出"数据可用"信号。它将偶尔失败以教授错误处理路径。寄存器词汇保持不变；设备行为变得更丰富。
 
-### What to Do If You Are Stuck
+### 如果你卡住了该怎么办
 
-If the Chapter 16 material feels overwhelming on first pass, a few suggestions.
+如果第 16 章的内容在第一次阅读时感觉压倒性的，有几条建议。
 
-First, re-read Section 3. The `bus_space` vocabulary is the foundation; if it is shaky, everything else is shaky.
+第一，重新阅读第 3 节。`bus_space` 词汇是基础；如果它不稳固，其他一切都不稳固。
 
-Second, type Stage 1 by hand, end to end, and run it. Muscle memory produces understanding in a way that reading does not.
+第二，亲手从头到尾输入第 1 阶段并运行它。肌肉记忆以一种阅读无法做到的方式产生理解。
 
-Third, open `/usr/src/sys/dev/ale/if_alevar.h` and find the `CSR_*` macros. The real driver's idiom is the same as your Stage 4's. Seeing the pattern in a production driver makes the abstraction feel less arbitrary.
+第三，打开 `/usr/src/sys/dev/ale/if_alevar.h` 并找到 `CSR_*` 宏。真实驱动程序的惯用法与你第 4 阶段的一样。在生产驱动程序中看到这个模式使抽象感觉不那么随意。
 
-Fourth, skip the challenges on first pass. The labs are calibrated for Chapter 16; the challenges assume the chapter's material is already solid. Come back to them after Chapter 17 if they feel out of reach now.
+第四，第一次阅读时跳过挑战。实验是为第 16 章校准的；挑战假设章节的内容已经扎实。如果它们现在感觉够不到，在第 17 章之后再回来。
 
-Chapter 16's goal was clarity of vocabulary. If you have that, the rest of Part 4 will feel navigable.
+第 16 章的目标是词汇的清晰。如果你有了这个，第四部分的其余部分将感觉可导航。
 
 
 
-## Bridge to Chapter 17
+## 通往第 17 章的桥梁
 
-Chapter 17 is titled *Simulating Hardware*. Its scope is the deeper simulation that Chapter 16 deliberately stepped around: a register block whose contents change over time, whose protocol has side effects, and whose failures can be injected deliberately for testing. The driver at `0.9-mmio` has a register block that behaves statically; Chapter 17 makes it breathe.
+第 17 章标题为*模拟硬件*。其范围是第 16 章刻意回避的更深层模拟：一个内容随时间变化的寄存器块，其协议有副作用，其故障可以被故意注入以进行测试。处于 `0.9-mmio` 的驱动程序拥有一个静态行为的寄存器块；第 17 章使它呼吸起来。
 
-Chapter 16 prepared the ground in four specific ways.
+第 16 章在四个具体方面做好了准备。
 
-First, **you have a register map**. The offsets, bit masks, and register semantics are documented in `myfirst_hw.h` and `HARDWARE.md`. Chapter 17 extends the map with a few new registers and enriches the protocol of the existing ones; the structure is established.
+第一，**你有一个寄存器映射**。偏移量、位掩码和寄存器语义记录在 `myfirst_hw.h` 和 `HARDWARE.md` 中。第 17 章用几个新寄存器扩展映射并丰富现有寄存器的协议；结构已经建立。
 
-Second, **you have lock-protected, barrier-aware accessors**. Chapter 17 introduces a callout that updates registers periodically from its own context. Without Chapter 16's locking discipline, the callout would race with the syscall path. With it, the callout slots into the existing mutex without additional work.
+第二，**你有受锁保护的、带屏障的访问器**。第 17 章引入一个从自己的上下文定期更新寄存器的 callout。没有第 16 章的加锁规范，callout 会与系统调用路径竞争。有了它，callout 无需额外工作就能插入现有互斥锁。
 
-Third, **you have an access log**. Chapter 17 uses more elaborate register updates (read-to-clear `INTR_STATUS`, write-triggered delayed `DATA_AV`, simulated errors). The access log is how you will see those updates in action, and Chapter 17 leans on it heavily.
+第三，**你有一个访问日志**。第 17 章使用更精细的寄存器更新（读即清除 `INTR_STATUS`、写入触发的延迟 `DATA_AV`、模拟错误）。访问日志是你将看到这些更新的方式，第 17 章严重依赖它。
 
-Fourth, **you have a split file layout**. Chapter 17's simulation logic lands in `myfirst_hw.c`, alongside the Chapter 16 accessors. The main driver file stays focused on the driver lifecycle. The split keeps the simulation code contained.
+第四，**你有拆分的文件布局**。第 17 章的模拟逻辑落在 `myfirst_hw.c` 中，与第 16 章的访问器并列。主驱动程序文件保持聚焦在驱动程序生命周期上。拆分使模拟代码保持独立。
 
-Specific topics Chapter 17 will cover:
+第 17 章将涵盖的具体主题：
 
-- A callout that updates `STATUS` bits on a schedule, simulating autonomous device activity.
-- A write-to-trigger-delayed-event pattern: writing `CTRL.GO` schedules a callout that, after a delay, flips `STATUS.DATA_AV`.
-- Read-to-clear semantics on `INTR_STATUS`, with the driver's sysctl being careful not to inadvertently clear bits.
-- Simulated error injection: a sysctl that causes the next operation to "fail" with a fault bit set in `STATUS`.
-- Timeouts: the driver reacts correctly when the simulated device fails to become ready.
-- A latency simulation path with `DELAY(9)` and `callout_reset_sbt` for different granularities.
+- 一个按计划更新 `STATUS` 位的 callout，模拟自主设备活动。
+- 一个写入触发延迟事件模式：写入 `CTRL.GO` 安排一个 callout，在延迟后翻转 `STATUS.DATA_AV`。
+- `INTR_STATUS` 上的读即清除语义，驱动程序的 sysctl 小心不无意中清除位。
+- 模拟错误注入：一个导致下一个操作"失败"并在 `STATUS` 中设置故障位的 sysctl。
+- 超时：当模拟设备未能变为就绪时驱动程序正确反应。
+- 一个使用 `DELAY(9)` 和 `callout_reset_sbt` 进行不同粒度的延迟模拟路径。
 
-You do not need to read ahead. Chapter 16 is sufficient preparation. Bring your `myfirst` driver at `0.9-mmio`, your `LOCKING.md`, your `HARDWARE.md`, your `WITNESS`-enabled kernel, and your test kit. Chapter 17 starts where Chapter 16 ended.
+你不需要提前阅读。第 16 章已足够准备。带上你的 `myfirst` 驱动程序（版本 `0.9-mmio`）、你的 `LOCKING.md`、你的 `HARDWARE.md`、你启用 WITNESS 的内核和你的测试工具包。第 17 章从第 16 章结束的地方开始。
 
-A small closing reflection. Part 3 taught you the synchronisation vocabulary and a driver that coordinated itself. Chapter 16 added a register vocabulary and a driver that now has a hardware surface. Chapter 17 will give that surface dynamic behaviour; Chapter 18 will replace the simulation with real PCI hardware; Chapter 19 will add interrupts; Chapter 20 and Chapter 21 will add DMA. Each of those chapters is narrower than its topic suggests because Chapter 16 did the vocabulary work first.
+一个简短的结束反思。第 3 部分教你同步词汇和一个能协调自身的驱动程序。第 16 章添加了寄存器词汇和一个现在拥有硬件表面的驱动程序。第 17 章将给那个表面动态行为；第 18 章将用真实 PCI 硬件替换模拟；第 19 章将添加中断；第 20 章和第 21 章将添加 DMA。这些章节中的每一个都比其标题暗示的范围更窄，因为第 16 章先做了词汇工作。
 
-The hardware conversation is now beginning. The vocabulary is yours. Chapter 17 opens the next round.
+硬件对话现在正在开始。词汇是你的。第 17 章开启下一轮。
 
 
 
-## Reference: `bus_space(9)` Cheat Sheet
+## 参考：`bus_space(9)` 速查表
 
-A one-page summary of the `bus_space(9)` API, for quick reference while coding.
+`bus_space(9)` API 的一页摘要，供编码时快速参考。
 
-### Types
+### 类型
 
-| Type                 | Meaning                                           |
+| 类型                 | 含义                                           |
 |----------------------|---------------------------------------------------|
-| `bus_space_tag_t`    | Identifies the address space (memory or I/O).     |
-| `bus_space_handle_t` | Identifies a specific region in the address space.|
-| `bus_size_t`         | Unsigned integer for offsets inside a region.     |
+| `bus_space_tag_t`    | 标识地址空间（内存或 I/O）。     |
+| `bus_space_handle_t` | 标识地址空间内的特定区域。|
+| `bus_size_t`         | 区域内偏移量的无符号整数。     |
 
-### Reads
+### 读取
 
-| Function                        | Width | Notes                        |
+| 函数                        | 宽度 | 说明                        |
 |---------------------------------|-------|------------------------------|
-| `bus_space_read_1(t, h, o)`     | 8     | Returns `u_int8_t`           |
-| `bus_space_read_2(t, h, o)`     | 16    | Returns `u_int16_t`          |
-| `bus_space_read_4(t, h, o)`     | 32    | Returns `u_int32_t`          |
-| `bus_space_read_8(t, h, o)`     | 64    | amd64 memory only            |
+| `bus_space_read_1(t, h, o)`     | 8     | 返回 `u_int8_t`           |
+| `bus_space_read_2(t, h, o)`     | 16    | 返回 `u_int16_t`          |
+| `bus_space_read_4(t, h, o)`     | 32    | 返回 `u_int32_t`          |
+| `bus_space_read_8(t, h, o)`     | 64    | 仅 amd64 内存空间            |
 
-### Writes
+### 写入
 
-| Function                           | Width | Notes                        |
+| 函数                           | 宽度 | 说明                        |
 |------------------------------------|-------|------------------------------|
-| `bus_space_write_1(t, h, o, v)`    | 8     | `v` is `u_int8_t`            |
-| `bus_space_write_2(t, h, o, v)`    | 16    | `v` is `u_int16_t`           |
-| `bus_space_write_4(t, h, o, v)`    | 32    | `v` is `u_int32_t`           |
-| `bus_space_write_8(t, h, o, v)`    | 64    | amd64 memory only            |
+| `bus_space_write_1(t, h, o, v)`    | 8     | `v` 为 `u_int8_t`            |
+| `bus_space_write_2(t, h, o, v)`    | 16    | `v` 为 `u_int16_t`           |
+| `bus_space_write_4(t, h, o, v)`    | 32    | `v` 为 `u_int32_t`           |
+| `bus_space_write_8(t, h, o, v)`    | 64    | 仅 amd64 内存空间            |
 
-### Multi Accesses (same offset, different buffer positions)
+### 多访问（相同偏移量，不同缓冲区位置）
 
-| Function                                         | Purpose                                  |
+| 函数                                         | 用途                                  |
 |--------------------------------------------------|------------------------------------------|
-| `bus_space_read_multi_1(t, h, o, buf, count)`    | Read `count` bytes from `o`.             |
-| `bus_space_read_multi_4(t, h, o, buf, count)`    | Read `count` 32-bit values from `o`.     |
-| `bus_space_write_multi_4(t, h, o, buf, count)`   | Write `count` 32-bit values to `o`.      |
+| `bus_space_read_multi_1(t, h, o, buf, count)`    | 从 `o` 读取 `count` 个字节。             |
+| `bus_space_read_multi_4(t, h, o, buf, count)`    | 从 `o` 读取 `count` 个 32 位值。     |
+| `bus_space_write_multi_4(t, h, o, buf, count)`   | 向 `o` 写入 `count` 个 32 位值。      |
 
-### Region Accesses (advancing offset and buffer)
+### 区域访问（前进偏移量和缓冲区）
 
-| Function                                          | Purpose                                    |
+| 函数                                          | 用途                                    |
 |---------------------------------------------------|--------------------------------------------|
-| `bus_space_read_region_4(t, h, o, buf, count)`    | Read `count` 32-bit values from `o..`      |
-| `bus_space_write_region_4(t, h, o, buf, count)`   | Write `count` 32-bit values to `o..`       |
+| `bus_space_read_region_4(t, h, o, buf, count)`    | 从 `o..` 读取 `count` 个 32 位值      |
+| `bus_space_write_region_4(t, h, o, buf, count)`   | 向 `o..` 写入 `count` 个 32 位值       |
 
-### Barrier
+### 屏障
 
-| Function                                     | Purpose                                         |
+| 函数                                     | 用途                                         |
 |----------------------------------------------|-------------------------------------------------|
-| `bus_space_barrier(t, h, o, len, flags)`     | Enforce read/write ordering over offset range.  |
+| `bus_space_barrier(t, h, o, len, flags)`     | 在偏移量范围内强制读/写排序。  |
 
-Flags:
+标志：
 
-| Flag                          | Meaning                                   |
+| 标志                          | 含义                                   |
 |-------------------------------|-------------------------------------------|
-| `BUS_SPACE_BARRIER_READ`      | Prior reads complete before later reads.  |
-| `BUS_SPACE_BARRIER_WRITE`     | Prior writes complete before later writes.|
+| `BUS_SPACE_BARRIER_READ`      | 先前的读取在后续读取之前完成。  |
+| `BUS_SPACE_BARRIER_WRITE`     | 先前的写入在后续写入之前完成。|
 
-### Resource Shorthand (`/usr/src/sys/sys/bus.h`)
+### 资源简写（`/usr/src/sys/sys/bus.h`）
 
-| Function                          | Equivalent                                      |
+| 函数                          | 等价形式                                      |
 |-----------------------------------|-------------------------------------------------|
 | `bus_read_4(r, o)`                | `bus_space_read_4(r->r_bustag, r->r_bushandle, o)` |
 | `bus_write_4(r, o, v)`            | `bus_space_write_4(r->r_bustag, r->r_bushandle, o, v)` |
 | `bus_barrier(r, o, l, f)`         | `bus_space_barrier(r->r_bustag, r->r_bushandle, o, l, f)` |
 
-### Allocation
+### 分配
 
-| Function                                                             | Purpose                     |
+| 函数                                                             | 用途                     |
 |---------------------------------------------------------------------|-----------------------------|
-| `bus_alloc_resource_any(dev, type, &rid, flags)`                    | Allocate a resource.        |
-| `bus_release_resource(dev, type, rid, res)`                         | Release a resource.         |
-| `rman_get_bustag(res)`                                              | Extract the tag.            |
-| `rman_get_bushandle(res)`                                           | Extract the handle.         |
+| `bus_alloc_resource_any(dev, type, &rid, flags)`                    | 分配资源。        |
+| `bus_release_resource(dev, type, rid, res)`                         | 释放资源。         |
+| `rman_get_bustag(res)`                                              | 提取标签。            |
+| `rman_get_bushandle(res)`                                           | 提取句柄。         |
 
-### Types of Resource
+### 资源类型
 
-| Constant           | Meaning                        |
+| 常量           | 含义                        |
 |--------------------|--------------------------------|
-| `SYS_RES_MEMORY`   | Memory-mapped I/O region.      |
-| `SYS_RES_IOPORT`   | I/O port range.                |
-| `SYS_RES_IRQ`      | Interrupt line.                |
+| `SYS_RES_MEMORY`   | 内存映射 I/O 区域。      |
+| `SYS_RES_IOPORT`   | I/O 端口范围。                |
+| `SYS_RES_IRQ`      | 中断线。                |
 
-### Flags
+### 标志
 
-| Constant       | Meaning                                       |
+| 常量       | 含义                                       |
 |----------------|-----------------------------------------------|
-| `RF_ACTIVE`    | Activate the resource (establish mapping).    |
-| `RF_SHAREABLE` | The resource may be shared with other drivers.|
+| `RF_ACTIVE`    | 激活资源（建立映射）。    |
+| `RF_SHAREABLE` | 资源可以与其他驱动程序共享。|
 
 
 
-## Reference: Further Reading
+## 参考：延伸阅读
 
-### Manual Pages
+### 手册页
 
 - `bus_space(9)`: the full API reference.
 - `bus_dma(9)`: DMA API (Chapter 20 reference).
@@ -3100,7 +3102,7 @@ Flags:
 - `device(9)`: the device identity API.
 - `memguard(9)`: kernel memory debugging.
 
-### Source Files
+### 源文件
 
 - `/usr/src/sys/sys/bus.h`: the bus shorthand macros and the resource API.
 - `/usr/src/sys/x86/include/bus.h`: the x86 bus_space implementation.
@@ -3110,173 +3112,172 @@ Flags:
 - `/usr/src/sys/dev/uart/uart_dev_ns8250.c`: a register-heavy driver for a classic device.
 - `/usr/src/sys/dev/led/led.c`: a pseudo-device driver with no hardware.
 
-### Reading Order
+### 阅读顺序
 
-If you want to go deeper before Chapter 17, read in this order:
+如果你想在第 17 章之前深入阅读，按以下顺序：
 
-1. `/usr/src/sys/sys/bus.h`, the `bus_read_*` / `bus_write_*` shorthand-macro block (search for `#define bus_read_1`).
-2. `/usr/src/sys/x86/include/bus.h` in full (the implementation).
-3. `/usr/src/sys/dev/ale/if_alevar.h` in full (the softc, macros, constants).
-4. `/usr/src/sys/dev/ale/if_ale.c` attach path (search for `bus_alloc_resource`).
-5. `/usr/src/sys/dev/e1000/if_em.c` attach path (same search).
+1. `/usr/src/sys/sys/bus.h`，`bus_read_*` / `bus_write_*` 简写宏块（搜索 `#define bus_read_1`）。
+2. `/usr/src/sys/x86/include/bus.h` 完整文件（实现）。
+3. `/usr/src/sys/dev/ale/if_alevar.h` 完整文件（softc、宏、常量）。
+4. `/usr/src/sys/dev/ale/if_ale.c` attach 路径（搜索 `bus_alloc_resource`）。
+5. `/usr/src/sys/dev/e1000/if_em.c` attach 路径（相同搜索）。
 
-Each reading is 15 to 45 minutes. The cumulative effect is a strong grasp of the idioms Chapter 16 introduced.
+每次阅读需要 15 到 45 分钟。累积效果是对第 16 章引入的惯用法有扎实的掌握。
 
 
 
-## Reference: A Glossary of Chapter 16 Terms
+## 参考：第 16 章术语词汇表
 
-### Terms Introduced in This Chapter
+### 本章引入的术语
 
-**access log**: A ring buffer of recent register accesses, kept in the softc for debugging.
+**access log（访问日志）**：softc 中保存的最近寄存器访问的环缓冲区，用于调试。
 
-**alignment**: The requirement that a register access's offset be a multiple of the access width.
+**alignment（对齐）**：寄存器访问的偏移量必须是访问宽度倍数的要求。
 
-**barrier**: A function or instruction that enforces ordering between prior and subsequent memory accesses.
+**barrier（屏障）**：强制先前和后续内存访问之间排序的函数或指令。
 
-**BAR (Base Address Register)**: On PCI, a device's register that advertises the physical address of its MMIO region. Chapter 18 treats BARs directly.
+**BAR (Base Address Register，基址寄存器)**：PCI 上通告其 MMIO 区域物理地址的设备寄存器。第 18 章直接处理 BAR。
 
-**bus_space_handle_t**: An opaque identifier of a specific region within a bus address space.
+**bus_space_handle_t**：总线地址空间内特定区域的不透明标识符。
 
-**bus_space_tag_t**: An opaque identifier of a bus address space (typically memory or I/O port).
+**bus_space_tag_t**：总线地址空间（通常是内存或 I/O 端口）的不透明标识符。
 
-**CSR macro**: A driver-specific wrapper macro (e.g., `CSR_READ_4`) that abstracts register access behind a short name.
+**CSR macro（CSR 宏）**：驱动程序特定的包装宏（如 `CSR_READ_4`），将寄存器访问抽象在短名称后面。
 
-**endianness**: The byte order in which a multi-byte register is laid out. Little-endian puts the low byte first; big-endian puts the high byte first.
+**endianness（字节序）**：多字节寄存器的字节排列顺序。小端序将低字节放在前面；大端序将高字节放在前面。
 
-**field**: A sub-bit-range of a register, with its own name and meaning.
+**field（字段）**：寄存器的子位范围，有自己的名称和含义。
 
-**firmware revision register**: A read-only register that reports the device's firmware version.
+**firmware revision register（固件修订寄存器）**：报告设备固件版本的只读寄存器。
 
-**I/O port**: An x86-specific address space, accessed with `in` and `out` instructions. Contrasts with MMIO.
+**I/O port（I/O 端口）**：x86 特定的地址空间，通过 `in` 和 `out` 指令访问。与 MMIO 相对。
 
-**MMIO (memory-mapped I/O)**: The mechanism where device registers are exposed as a range of physical addresses, reachable through ordinary load and store instructions.
+**MMIO (memory-mapped I/O，内存映射 I/O)**：设备寄存器作为物理地址范围暴露、通过普通加载和存储指令到达的机制。
 
-**offset**: The distance, in bytes, from the start of a device region to a specific register.
+**offset（偏移量）**：从设备区域起始处到特定寄存器的距离，以字节为单位。
 
-**PIO (port-mapped I/O)**: On x86, the alternative to MMIO, using separate I/O port instructions.
+**PIO (port-mapped I/O，端口映射 I/O)**：x86 上 MMIO 的替代方案，使用独立的 I/O 端口指令。
 
-**region**: A contiguous range of device address space, or the API family that walks across offsets.
+**region（区域）**：设备地址空间的连续范围，或跨偏移量步进的 API 系列。
 
-**register**: A named, offset-located, width-specific unit of communication between the driver and a device.
+**register（寄存器）**：驱动程序与设备之间的命名的、按偏移量定位的、宽度特定的通信单元。
 
-**register map**: A table describing every register in a device's interface: offset, width, direction, meaning.
+**register map（寄存器映射）**：描述设备接口中每个寄存器的表格：偏移量、宽度、方向、含义。
 
-**resource (FreeBSD)**: A named allocation from the bus subsystem, encapsulating a tag, handle, and ownership of a specific range.
+**resource (FreeBSD)（资源）**：总线子系统的命名分配，封装标签、句柄和对特定范围的所有权。
 
-**sbuf**: The sbuf(9) kernel API for building variable-length strings, used by the access-log sysctl handler.
+**sbuf**：用于构建可变长度字符串的 `sbuf(9)` 内核 API，被访问日志 sysctl 处理程序使用。
 
-**side effect (register)**: A change in device state that a read or write causes as part of its semantics, beyond returning or storing the value.
+**side effect (register)（副作用）**：读写作为其语义的一部分导致的设备状态变化，超出返回或存储值的范围。
 
-**simulation**: In Chapter 16, the use of kernel memory allocated with `malloc(9)` to stand in for a device's MMIO region.
+**simulation（模拟）**：在第 16 章中，用 `malloc(9)` 分配的内核内存替代设备的 MMIO 区域。
 
-**stream accessor**: A `bus_space_*_stream_*` variant that does not apply endian swaps.
+**stream accessor（流式访问器）**：不应用字节序交换的 `bus_space_*_stream_*` 变体。
 
-**virtual mapping**: The MMU's translation from a virtual address to a physical address, with specific cache and access attributes.
+**virtual mapping（虚拟映射）**：MMU 从虚拟地址到物理地址的转换，带有特定的缓存和访问属性。
 
-**width**: The bit count of a register or an access function's operand (8, 16, 32, 64).
+**width（宽度）**：寄存器或访问函数操作数的位数（8、16、32、64）。
 
-### Terms Previously Introduced (Reminders)
+### 之前引入的术语（提醒）
 
-- **softc**: The per-instance driver state structure (Chapter 6).
-- **device_t**: The kernel's identity for a device instance (Chapter 6).
-- **malloc(9)**: The kernel allocator (Chapter 5).
-- **WITNESS**: The kernel's lock-order checker (Chapter 11).
-- **INVARIANTS**: The kernel's defensive assertion framework (Chapter 11).
-- **callout**: A timer primitive that invokes a callback after a delay (Chapter 13).
-- **taskqueue**: A deferred-work primitive (Chapter 14).
-- **cv_wait / cv_timedwait_sig**: Condition-variable waits (Chapter 12, Chapter 15).
+- **softc**：每实例驱动程序状态结构（第 6 章）。
+- **device_t**：内核对设备实例的标识（第 6 章）。
+- **malloc(9)**：内核分配器（第 5 章）。
+- **WITNESS**：内核的锁序检查器（第 11 章）。
+- **INVARIANTS**：内核的防御性断言框架（第 11 章）。
+- **callout**：延迟后调用回调的计时器原语（第 13 章）。
+- **taskqueue**：延迟工作原语（第 14 章）。
+- **cv_wait / cv_timedwait_sig**：条件变量等待（第 12 章、第 15 章）。
 
 
 
-## Reference: The Chapter 16 Driver Diff Summary
+## 参考：第 16 章驱动程序差异摘要
 
-A compact view of what Chapter 16 added to the `myfirst` driver, stage by stage, for readers who want to see the whole arc on one page.
+第 16 章逐阶段给 `myfirst` 驱动程序添加内容的紧凑视图，适合想在一页上看到全貌的读者。
 
-### Stage 1 (Section 4)
+### 第 1 阶段（第 4 节）
 
-- New file: `myfirst_hw.h` with register offsets, masks, fixed values.
-- `regs_buf` and `regs_size` in softc; allocated and freed in attach/detach.
-- Accessor helpers: `myfirst_reg_read`, `myfirst_reg_write`, `myfirst_reg_update`.
-- Macros: `MYFIRST_REG_READ`, `MYFIRST_REG_WRITE`.
-- Sysctls: `reg_ctrl`, `reg_status`, `reg_device_id`, `reg_firmware_rev` (read), `reg_ctrl_set` (write).
-- Coupling: `myfirst_ctrl_update` on CTRL writes.
-- Version tag: `0.9-mmio-stage1`.
+- 新文件：`myfirst_hw.h`，包含寄存器偏移量、掩码和固定值。
+- softc 中的 `regs_buf` 和 `regs_size`；在 attach/detach 中分配和释放。
+- 访问器辅助函数和宏：`MYFIRST_REG_READ`、`MYFIRST_REG_WRITE`。
+- Sysctl：`reg_ctrl`、`reg_status`、`reg_device_id`、`reg_firmware_rev`（读取）、`reg_ctrl_set`（写入）。
+- 耦合：`myfirst_ctrl_update` 在 CTRL 写入时触发。
+- 版本标签：`0.9-mmio-stage1`。
 
-### Stage 2 (Section 5)
+### 第 2 阶段（第 5 节）
 
-- Added `regs_tag`, `regs_handle` in softc.
-- Accessor bodies rewritten to use `bus_space_read_4` and `bus_space_write_4`.
-- Write path updates `DATA_IN` and `STATUS.DATA_AV`.
-- Read path updates `DATA_OUT` and clears `STATUS.DATA_AV` when the buffer drains.
-- `reg_ticker_task` added; increments `SCRATCH_A` per tick.
-- New sysctls: `reg_data_in`, `reg_data_out`, `reg_intr_mask`, `reg_intr_status`, `reg_scratch_a`, `reg_scratch_b`, `reg_ticker_enabled`.
-- New document: `HARDWARE.md`.
-- Version tag: `0.9-mmio-stage2`.
+- softc 中添加 `regs_tag`、`regs_handle`。
+- 访问器主体重写为使用 `bus_space_read_4` 和 `bus_space_write_4`。
+- 写入路径更新 `DATA_IN` 和 `STATUS.DATA_AV`。
+- 读取路径更新 `DATA_OUT` 并在缓冲区排空时清除 `STATUS.DATA_AV`。
+- 添加 `reg_ticker_task`；每次 tick 递增 `SCRATCH_A`。
+- 新 sysctl：`reg_data_in`、`reg_data_out`、`reg_intr_mask`、`reg_intr_status`、`reg_scratch_a`、`reg_scratch_b`、`reg_ticker_enabled`。
+- 新文档：`HARDWARE.md`。
+- 版本标签：`0.9-mmio-stage2`。
 
-### Stage 3 (Section 6)
+### 第 3 阶段（第 6 节）
 
-- `MYFIRST_ASSERT` added to accessors.
-- All register access paths acquire `sc->mtx`.
-- Access log and its sysctls added (`access_log_enabled`, `access_log`).
-- `myfirst_reg_write_barrier` helper for barrier-aware writes.
-- `HARDWARE.md` extended with per-register ownership.
-- Version tag: `0.9-mmio-stage3`.
+- 访问器添加 `MYFIRST_ASSERT`。
+- 所有寄存器访问路径获取 `sc->mtx`。
+- 添加访问日志及其 sysctl（`access_log_enabled`、`access_log`）。
+- `myfirst_reg_write_barrier` 辅助函数用于带屏障的写入。
+- `HARDWARE.md` 扩展了每寄存器所有权。
+- 版本标签：`0.9-mmio-stage3`。
 
-### Stage 4 (Section 8)
+### 第 4 阶段（第 8 节）
 
-- File split: `myfirst_hw.c`, `myfirst_hw.h`, `myfirst.c`.
-- `struct myfirst_hw` grouping of hardware state.
-- `myfirst_hw_attach`, `myfirst_hw_detach`, `myfirst_hw_add_sysctls` APIs.
-- `CSR_READ_4`, `CSR_WRITE_4`, `CSR_UPDATE_4` macros.
-- `HARDWARE.md` finalised.
-- Full regression pass.
-- Version tag: `0.9-mmio`.
+- 文件拆分：`myfirst_hw.c`、`myfirst_hw.h`、`myfirst.c`。
+- `struct myfirst_hw` 分组硬件状态。
+- `myfirst_hw_attach`、`myfirst_hw_detach`、`myfirst_hw_add_sysctls` API。
+- `CSR_READ_4`、`CSR_WRITE_4`、`CSR_UPDATE_4` 宏。
+- `HARDWARE.md` 定稿。
+- 完整回归测试。
+- 版本标签：`0.9-mmio`。
 
-### Lines of Code
+### 代码行数
 
-- Stage 1 adds about 80 lines (header, accessor helpers, sysctls).
-- Stage 2 adds about 90 lines (accessor rewrite, data-path coupling, ticker task).
-- Stage 3 adds about 70 lines (locking, access log, barrier helper).
-- Stage 4 is a net reorganisation: lines move between files but the total is roughly unchanged.
+- 第 1 阶段添加约 80 行（头文件、访问器辅助函数、sysctl）。
+- 第 2 阶段添加约 90 行（访问器重写、数据路径耦合、ticker 任务）。
+- 第 3 阶段添加约 70 行（加锁、访问日志、屏障辅助函数）。
+- 第 4 阶段是净重组：行在文件之间移动，但总数大致不变。
 
-Total additions, Chapter 16: roughly 240 to 280 lines across four small stages.
+第 16 章总计添加：约 240 到 280 行，分布在四个小阶段中。
 
 
 
-## Reference: A Comparison with Linux Device Register Access
+## 参考：与 Linux 设备寄存器访问的比较
 
-Because many readers come to FreeBSD from Linux, a short comparison of the register-access vocabulary clarifies what translates and what does not.
+因为许多读者从 Linux 转向 FreeBSD，简短比较寄存器访问词汇可以澄清哪些可以对应、哪些不能。
 
-### Linux: `ioremap` + `readl` / `writel`
+### Linux：`ioremap` + `readl` / `writel`
 
-Linux uses a different shape. A driver obtains a virtual address through `ioremap` (for MMIO) or uses the raw I/O port number directly (for PIO). Register access is performed through `readl(addr)` and `writel(value, addr)`, with variants for different widths (`readb`, `readw`, `readl`, `readq`). The `addr` is a kernel virtual pointer cast to a specific marker type.
+Linux 使用不同的形式。驱动程序通过 `ioremap`（用于 MMIO）获取虚拟地址，或直接使用原始 I/O 端口号（用于 PIO）。寄存器访问通过 `readl(addr)` 和 `writel(value, addr)` 执行，有不同宽度的变体（`readb`、`readw`、`readl`、`readq`）。`addr` 是一个转换为特定标记类型的内核虚拟指针。
 
-### FreeBSD: `bus_alloc_resource` + `bus_read_*` / `bus_write_*`
+### FreeBSD：`bus_alloc_resource` + `bus_read_*` / `bus_write_*`
 
-FreeBSD uses the tag-and-handle abstraction. A driver obtains a `struct resource *` through `bus_alloc_resource_any`, then uses `bus_read_4` and `bus_write_4` on it. The tag and handle are extracted by the macro from the resource; the driver does not see them directly in most code.
+FreeBSD 使用标签和句柄抽象。驱动程序通过 `bus_alloc_resource_any` 获取 `struct resource *`，然后对其使用 `bus_read_4` 和 `bus_write_4`。标签和句柄由宏从资源中提取；驱动程序在大多数代码中不直接看到它们。
 
-### What Translates
+### 可对应的内容
 
-- The mental model: registers at fixed offsets, accessed by width, with barriers for ordering.
-- The idea of defining a header of register offsets and bit masks.
-- The idea of wrapping access in driver-specific macros (Linux's `read_reg32`, FreeBSD's `CSR_READ_4`).
-- The discipline of lock-protected access for shared state.
+- 心智模型：固定偏移量处的寄存器，按宽度访问，用屏障保证排序。
+- 定义寄存器偏移量和位掩码头文件的想法。
+- 用驱动程序特定宏包装访问的想法（Linux 的 `read_reg32`，FreeBSD 的 `CSR_READ_4`）。
+- 共享状态受锁保护访问的规范。
 
-### What Differs
+### 不同的内容
 
-- FreeBSD carries an explicit tag that encodes the address-space type. Linux does not; the function variants choose the address space implicitly.
-- FreeBSD's resource abstraction is more explicit about ownership and lifecycle. Linux's `ioremap` is a thinner wrapper.
-- FreeBSD's barrier function takes offset and length arguments that bus bridges can use for narrow barriers. Linux's `mb`, `rmb`, `wmb`, and `mmiowb` are CPU-wide.
-- FreeBSD's `bus_space` is usable for simulation (as in this chapter); Linux's equivalent path is less friendly for that use.
+- FreeBSD 携带编码地址空间类型的显式标签。Linux 没有；函数变体隐式选择地址空间。
+- FreeBSD 的资源抽象在所有权和生命周期方面更明确。Linux 的 `ioremap` 是更薄的包装。
+- FreeBSD 的屏障函数接受偏移量和长度参数，总线桥可以使用它们进行窄屏障。Linux 的 `mb`、`rmb`、`wmb` 和 `mmiowb` 是 CPU 范围的。
+- FreeBSD 的 `bus_space` 可用于模拟（如本章所示）；Linux 的等效路径对该用途不太友好。
 
-Porting a driver from Linux to FreeBSD or vice versa involves rewriting the register-access layer but not the register map, because the map is defined by the device, not the OS. A well-organised driver that keeps its register access behind CSR-style macros can have its CSR macros replaced with minimal other code changes.
+将驱动程序从 Linux 移植到 FreeBSD 或反之涉及重写寄存器访问层，但不涉及寄存器映射，因为映射由设备定义而非操作系统定义。一个将寄存器访问保持在 CSR 风格宏后面的组织良好的驱动程序，可以仅替换 CSR 宏，而其他代码几乎不需要更改。
 
 
 
-## Reference: A Worked Example: The Full `myfirst_hw.h`
+## 参考：完整示例：`myfirst_hw.h`
 
-For reference, the complete Stage 4 header. This is what lives at `examples/part-04/ch16-accessing-hardware/stage4-final/myfirst_hw.h`.
+供参考，完整的第 4 阶段头文件。它位于 `examples/part-04/ch16-accessing-hardware/stage4-final/myfirst_hw.h`。
 
 ```c
 /* myfirst_hw.h -- Chapter 16 Stage 4 simulated hardware interface. */
@@ -3376,13 +3377,13 @@ void     myfirst_reg_write_barrier(struct myfirst_softc *sc, bus_size_t offset,
 #endif /* _MYFIRST_HW_H_ */
 ```
 
-This single header is what the rest of the driver includes to gain access to the hardware interface. A newcomer reads it once and understands what registers exist, how they are accessed, and which macros the driver body uses.
+这个头文件就是驱动程序其余部分包含以获取硬件接口访问权限的全部内容。新来者读一遍就能理解存在哪些寄存器、如何访问它们以及驱动程序主体使用哪些宏。
 
 
 
-## Reference: A Worked Example: The `myfirst_hw.c` Accessor Functions
+## 参考：完整示例：`myfirst_hw.c` 访问器函数
 
-Complementing the header, the implementations. For reference and as a template.
+作为头文件的补充，这里是实现。供参考和作为模板。
 
 ```c
 /* myfirst_hw.c -- Chapter 16 Stage 4 hardware access layer. */
@@ -3485,13 +3486,13 @@ myfirst_reg_write_barrier(struct myfirst_softc *sc, bus_size_t offset,
 }
 ```
 
-This is a complete, working file. The `myfirst_hw_attach`, `myfirst_hw_detach`, and `myfirst_hw_add_sysctls` functions follow in the same file; they are longer but follow the same patterns as Section 4's worked text.
+这是一个完整的、可工作的文件。`myfirst_hw_attach`、`myfirst_hw_detach` 和 `myfirst_hw_add_sysctls` 函数在同一文件中紧随其后；它们更长但遵循与第 4 节文字说明中相同的模式。
 
 
 
-## Reference: A Minimal Stand-Alone Test Module
+## 参考：最小独立测试模块
 
-For readers who want to practise `bus_space(9)` in isolation from the `myfirst` driver, here is a minimal stand-alone kernel module that allocates a kernel-memory "device", exposes it through sysctls, and lets the reader experiment. Save as `hwsim.c`:
+对于想独立于 `myfirst` 驱动程序练习 `bus_space(9)` 的读者，这里有一个最小的独立内核模块，它分配一个内核内存"设备"，通过 sysctl 暴露它，让读者可以实验。保存为 `hwsim.c`：
 
 ```c
 /* hwsim.c -- Chapter 16 stand-alone bus_space(9) practice module. */
@@ -3588,7 +3589,7 @@ SRCS=  hwsim.c
 .include <bsd.kmod.mk>
 ```
 
-Build, load, and play:
+构建、加载并体验：
 
 ```text
 # make clean && make
@@ -3601,117 +3602,117 @@ Build, load, and play:
 # kldunload hwsim
 ```
 
-The module demonstrates `bus_space(9)` in its simplest possible form: a memory buffer, a tag, a handle, two register slots, a pair of sysctls. A reader who types this in and runs it has the whole vocabulary of Section 3 in about 80 lines of C.
+该模块以最简单的可能形式演示了 `bus_space(9)`：一个内存缓冲区、一个标签、一个句柄、两个寄存器槽位、一对 sysctl。亲手输入并运行的读者在大约 80 行 C 代码中就获得了第 3 节的全部词汇。
 
 
 
-## Reference: Why `volatile` Matters in `bus_space`
+## 参考：为什么 `volatile` 在 `bus_space` 中很重要
 
-A note on a subtle detail the chapter touched on but did not expand.
+关于本章提及但未展开的一个微妙细节的说明。
 
-When `bus_space_read_4` on x86 expands to `*(volatile u_int32_t *)(handle + offset)`, the `volatile` qualifier is not decorative. It is load-bearing.
+当 x86 上的 `bus_space_read_4` 展开为 `*(volatile u_int32_t *)(handle + offset)` 时，`volatile` 限定符不是装饰性的。它是承重的。
 
-Without `volatile`, the compiler assumes that reading a memory location twice in sequence, with no intervening store to that location, must return the same value. It is free to reorder, coalesce, or elide reads based on that assumption. For ordinary memory, the assumption holds: RAM does not change underneath you. For device memory, the assumption is wrong. A read might consume an event; a write might have immediate and visible effects that a subsequent read sees.
+没有 `volatile`，编译器假设连续两次读取同一内存位置（中间没有对该位置的存储）必须返回相同的值。它可以基于该假设自由地重排序、合并或省略读取。对于普通内存，该假设成立：RAM 不会在你下面改变。对于设备内存，该假设是错误的。一次读取可能消费一个事件；一次写入可能有后续读取能看到的即时且可见的效果。
 
-The `volatile` qualifier tells the compiler: treat this access as having observable side effects. Do not reorder it with other volatile accesses. Do not elide it. Do not cache its result. Emit a load (or store) every time, exactly as written.
+`volatile` 限定符告诉编译器：将此访问视为具有可观察的副作用。不要与其他 volatile 访问重排序。不要省略它。不要缓存其结果。每次都按书写的方式发出加载（或存储）。
 
-On x86, this is enough. The CPU's memory model is strong enough that once the load is emitted in program order, it executes in program order. On arm64, additional barriers are needed to enforce program order across CPU-level reordering, which is why `bus_space_barrier` on arm64 emits DMB or DSB instructions and on x86 emits only a compiler fence.
+在 x86 上，这就够了。CPU 的内存模型足够强，一旦加载按程序顺序发出，它就按程序顺序执行。在 arm64 上，需要额外的屏障来跨 CPU 级重排序强制程序顺序，这就是为什么 arm64 上的 `bus_space_barrier` 发出 DMB 或 DSB 指令，而 x86 上只发出编译器围栏。
 
-The short rule: every time you write a hand-rolled accessor for device memory, use `volatile`. Every time you use `bus_space_*` directly, the `volatile` is already there. Every time you cast a pointer to device memory through a non-volatile type, you have a bug waiting to happen.
-
-
-
-## Reference: A Short Comparison of Access Patterns in Real FreeBSD Drivers
-
-An informal survey of patterns used in real drivers. Each example cites the file and the characteristic pattern; read the files themselves to see the pattern in context.
-
-**`/usr/src/sys/dev/ale/if_ale.c`**: Uses `CSR_READ_4(sc, reg)` and `CSR_WRITE_4(sc, reg, val)` macros defined in `if_alevar.h` over `bus_read_4` and `bus_write_4`. Softc holds `ale_res[]`, an array of resources. The pattern is clean and scales well.
-
-**`/usr/src/sys/dev/e1000/if_em.c`**: Uses `E1000_READ_REG(hw, reg)` and `E1000_WRITE_REG(hw, reg, val)` that wrap `bus_space_read_4` and `bus_space_write_4` on the `osdep` struct's tag and handle. More indirection than `ale`, justified by Intel's cross-OS shared-code model.
-
-**`/usr/src/sys/dev/uart/uart_bus_pci.c`**: A glue driver that allocates resources and hands them to the generic UART subsystem. The register access happens in subsystem code (`uart_dev_ns8250.c`), not in the PCI glue.
-
-**`/usr/src/sys/dev/uart/uart_dev_ns8250.c`**: Direct `bus_read_1` and `bus_write_1` on a `struct uart_bas *` that holds tag and handle. Legacy 8-bit register layout.
-
-**`/usr/src/sys/dev/virtio/pci/virtio_pci_modern.c`**: Uses `bus_read_4` and `bus_write_4` through `struct resource *` fields in the softc. Chapter 18 uses virtio as a test target for real-PCI exercises.
-
-**`/usr/src/sys/dev/random/ivy.c`** (Intel Ivy Bridge RDRAND): Uses CPU instructions directly (`rdrand`) rather than `bus_space`; this is an unusual case because the "device" is the CPU itself, accessible through inline assembly.
-
-Across all of these, the pattern is "wrap `bus_*` or `bus_space_*` in driver-specific macros, keep register offsets in a header, access registers through the macros in the body". Chapter 16's Stage 4 matches this convention.
+简短规则：每次你为设备内存编写手工访问器时，使用 `volatile`。每次你直接使用 `bus_space_*` 时，`volatile` 已经在那里了。每次你通过非 volatile 类型将指向设备内存的指针进行类型转换时，你都有一个等待发生的 bug。
 
 
 
-## Reference: The Road Ahead in Part 4
+## 参考：真实 FreeBSD 驱动程序中访问模式的简短比较
 
-A preview of how Chapter 16's material feeds into later chapters, for readers who like a single-page map.
+对真实驱动程序所用模式的非正式调查。每个示例引用文件和特征模式；阅读文件本身以在上下文中看到模式。
 
-**Chapter 17 (Simulating Hardware)**: Extends the simulation with dynamic behaviour. Timers change `STATUS` bits. Writing `CTRL.GO` triggers a delayed update. Errors can be injected. The register vocabulary stays the same; the simulation becomes richer.
+**`/usr/src/sys/dev/ale/if_ale.c`**：使用 `if_alevar.h` 中定义在 `bus_read_4` 和 `bus_write_4` 之上的 `CSR_READ_4(sc, reg)` 和 `CSR_WRITE_4(sc, reg, val)` 宏。softc 持有 `ale_res[]` 资源数组。该模式干净且可扩展。
 
-**Chapter 18 (Writing a PCI Driver)**: Replaces the simulation with real PCI. `bus_alloc_resource_any` enters in earnest. Vendor and device IDs, BAR mapping, `pci_enable_busmaster`, `pciconf`. The simulation path remains available behind a compile-time flag for continued testing.
+**`/usr/src/sys/dev/e1000/if_em.c`**：使用 `E1000_READ_REG(hw, reg)` 和 `E1000_WRITE_REG(hw, reg, val)`，它们包装了 `osdep` 结构标签和句柄上的 `bus_space_read_4` 和 `bus_space_write_4`。比 `ale` 更多间接层，由 Intel 的跨操作系统共享代码模型证明其合理性。
 
-**Chapter 19 (Handling Interrupts)**: Adds `bus_setup_intr`, filter vs ithread, interrupt acknowledgement, the `INTR_STATUS` register's read-to-clear semantics in a real context. The Chapter 16 access log becomes invaluable for debugging interrupt sequences.
+**`/usr/src/sys/dev/uart/uart_bus_pci.c`**：一个分配资源并将其交给通用 UART 子系统的粘合驱动程序。寄存器访问发生在子系统代码（`uart_dev_ns8250.c`）中，而非 PCI 粘合层中。
 
-**Chapter 20 and Chapter 21 (DMA)**: Add `bus_dma(9)`. Register accesses become the control surface for DMA operations: set up a descriptor, write a doorbell register, wait for completion. The `bus_space_barrier` story becomes essential.
+**`/usr/src/sys/dev/uart/uart_dev_ns8250.c`**：直接在持有标签和句柄的 `struct uart_bas *` 上使用 `bus_read_1` 和 `bus_write_1`。传统 8 位寄存器布局。
 
-**Chapter 22 (Power Management)**: Suspend, resume, dynamic power states. Registers that save and restore device state. Most of the Part 4 vocabulary applies; power management adds a few more idioms.
+**`/usr/src/sys/dev/virtio/pci/virtio_pci_modern.c`**：通过 softc 中的 `struct resource *` 字段使用 `bus_read_4` 和 `bus_write_4`。第 18 章使用 virtio 作为真实 PCI 练习的测试目标。
 
-Each chapter introduces a new layer; Chapter 16's layer (the register) is the foundation for all of them. A reader who leaves Chapter 16 comfortable with `bus_space(9)` will find each subsequent chapter adds a new vocabulary on top of familiar ground.
+**`/usr/src/sys/dev/random/ivy.c`**（Intel Ivy Bridge RDRAND）：直接使用 CPU 指令（`rdrand`）而非 `bus_space`；这是一个不寻常的情况，因为"设备"是 CPU 本身，通过内联汇编访问。
+
+在所有这些中，模式都是"将 `bus_*` 或 `bus_space_*` 包装在驱动程序特定的宏中，将寄存器偏移量保留在头文件中，通过宏在主体中访问寄存器"。第 16 章的第 4 阶段匹配这一惯例。
 
 
 
-## Reference: How to Read a Datasheet
+## 参考：第四部分的路线图
 
-Every real driver starts with a datasheet: the document the device's manufacturer publishes describing the register interface, the programming model, and the operational behaviour. Chapter 16 works with a simulated device, so there is no datasheet to consult. Later chapters point at real devices, and a driver author who is comfortable with datasheets will learn faster.
+第 16 章材料如何汇入后续章节的预览，适合喜欢单页地图的读者。
 
-A brief primer follows. The reader can skip this on first pass and return when Chapter 18 or a later chapter points at a real device's specification.
+**第 17 章（模拟硬件）**：用动态行为扩展模拟。计时器改变 `STATUS` 位。写入 `CTRL.GO` 触发延迟更新。错误可以被注入。寄存器词汇保持不变；模拟变得更丰富。
 
-### The Shape of a Datasheet
+**第 18 章（编写 PCI 驱动程序）**：用真实 PCI 替换模拟。`bus_alloc_resource_any` 正式登场。供应商和设备 ID、BAR 映射、`pci_enable_busmaster`、`pciconf`。模拟路径在编译时标志后保持可用以继续测试。
 
-A datasheet is usually a PDF of fifty to fifteen hundred pages. It covers:
+**第 19 章（处理中断）**：添加 `bus_setup_intr`、过滤器与 ithread、中断确认、`INTR_STATUS` 寄存器在真实上下文中的读即清除语义。第 16 章的访问日志对于调试中断序列变得无价。
 
-- A functional overview (what the device does, at a high level).
-- Pinout or physical interface description (what signals the device has, what they mean).
-- Register reference (the mapping Chapter 16 has been teaching you to read).
-- Programming model (the sequence of operations a driver must perform for each high-level action).
-- Electrical characteristics (voltages, timings, environmental ratings).
-- Package dimensions (mechanical data for the circuit board designer).
+**第 20 章和第 21 章（DMA）**：添加 `bus_dma(9)`。寄存器访问成为 DMA 操作的控制面：设置描述符、写入门铃寄存器、等待完成。`bus_space_barrier` 的故事变得不可或缺。
 
-Driver authors care primarily about the register reference and the programming model. Everything else is for hardware designers.
+**第 22 章（电源管理）**：挂起、恢复、动态电源状态。保存和恢复设备状态的寄存器。第 4 部分的大部分词汇适用；电源管理添加了更多一些惯用法。
 
-### Reading the Register Reference
+每一章引入一个新层；第 16 章的层（寄存器）是所有这些层的基础。一个带着对 `bus_space(9)` 的舒适感离开第 16 章的读者会发现每个后续章节都在熟悉的地面上添加新词汇。
 
-The register reference is usually a series of tables, one per register, with the following columns:
 
-- Offset.
-- Width.
-- Reset value (the value the register has after power-on or reset).
-- Access type (R, W, RW, R/W1C for read with write-one-to-clear, and so on).
-- Field names and bit ranges.
-- Field descriptions.
 
-A seasoned driver author reads this table first, notes any unusual access types, and translates the register map into a C header with named offsets and bit masks. The translation is mechanical; the care is in getting every bit right.
+## 参考：如何阅读数据手册
 
-A particular note on **reset values**. The reset value tells you what the register reads immediately after the device has been powered on or reset. If the driver writes a field and later reads it back, the read should return the value written (not the reset value). But if the driver has not written the register, the read returns the reset value. Getting this wrong produces surprising bugs: the driver "sees" a register it did not initialise and misinterprets the reset value as a state change.
+每个真实驱动程序都从数据手册开始：设备制造商发布的描述寄存器接口、编程模型和操作行为的文档。第 16 章使用模拟设备，所以没有数据手册可查阅。后续章节指向真实设备，熟悉数据手册的驱动程序作者会学得更快。
 
-### Reading the Programming Model
+以下是简要入门。读者可以在第一次阅读时跳过，在第 18 章或后续章节指向真实设备规格时再回来。
 
-The programming model section describes the sequences of register operations required to drive the device. A typical entry looks like:
+### 数据手册的形状
 
-> **Transmit one packet.**
-> 1. Confirm `STATUS.TX_READY` is set.
-> 2. Write the packet data to `TX_BUF[0..n-1]` in order.
-> 3. Write the packet length to `TX_LEN`.
-> 4. Write `CTRL.TX_START`.
-> 5. Wait for `STATUS.TX_DONE` to assert (may take up to 100us).
-> 6. Clear `STATUS.TX_DONE` by writing 1 to the same bit.
+数据手册通常是 50 到 1500 页的 PDF。它涵盖：
 
-This sequence is what a driver's transmit path implements. The order of steps is fixed; reordering can leave the device in an inconsistent state. The driver's job is to translate each step into a `bus_space_write_*` or `bus_space_read_*` call, with the proper barriers and locking.
+- 功能概述（设备做什么，高层级描述）。
+- 引脚或物理接口描述（设备有哪些信号，它们意味着什么）。
+- 寄存器参考（第 16 章一直在教你阅读的映射）。
+- 编程模型（驱动程序必须为每个高层级操作执行的操作序列）。
+- 电气特性（电压、时序、环境评级）。
+- 封装尺寸（电路板设计者的机械数据）。
 
-Most datasheets have several such sequences. A network device might have receive, transmit, link initialisation, error recovery, and shutdown sequences. Each is documented independently.
+驱动程序作者主要关心寄存器参考和编程模型。其他一切都是给硬件设计者的。
 
-### Extracting the C Header
+### 阅读寄存器参考
 
-A skilled driver author reads the register reference once and produces a C header something like:
+寄存器参考通常是一系列表格，每个寄存器一个，包含以下列：
+
+- 偏移量。
+- 宽度。
+- 复位值（加电或复位后寄存器的值）。
+- 访问类型（R、W、RW、R/W1C 表示读并写一清除等）。
+- 字段名称和位范围。
+- 字段描述。
+
+经验丰富的驱动程序作者首先阅读这个表格，记录任何不寻常的访问类型，然后将寄存器映射翻译为包含命名偏移量和位掩码的 C 头文件。翻译是机械的；关键在于让每个位都正确。
+
+关于**复位值**的特别说明。复位值告诉你设备加电或复位后寄存器立即读取的值。如果驱动程序写了一个字段然后回读，读取应返回写入的值（而非复位值）。但如果驱动程序没有写过该寄存器，读取返回复位值。搞错这个会产生令人惊讶的 bug：驱动程序"看到"一个它没有初始化的寄存器，并将复位值误解释为状态变化。
+
+### 阅读编程模型
+
+编程模型部分描述了驱动设备所需的寄存器操作序列。一个典型条目看起来像：
+
+> **发送一个数据包。**
+> 1. 确认 `STATUS.TX_READY` 已设置。
+> 2. 将数据包数据按顺序写入 `TX_BUF[0..n-1]`。
+> 3. 将数据包长度写入 `TX_LEN`。
+> 4. 写入 `CTRL.TX_START`。
+> 5. 等待 `STATUS.TX_DONE` 置位（可能需要最多 100us）。
+> 6. 通过向同一位写 1 来清除 `STATUS.TX_DONE`。
+
+这个序列就是驱动程序发送路径要实现的。步骤顺序是固定的；重排序可能使设备进入不一致状态。驱动程序的工作是将每个步骤翻译为 `bus_space_write_*` 或 `bus_space_read_*` 调用，带适当的屏障和加锁。
+
+大多数数据手册有几个这样的序列。一个网络设备可能有接收、发送、链路初始化、错误恢复和关闭序列。每个都被独立记录。
+
+### 提取 C 头文件
+
+熟练的驱动程序作者阅读寄存器参考一次后，会生成一个类似这样的 C 头文件：
 
 ```c
 /* foo_regs.h -- derived from Foo Corp. Foo-9000 datasheet, rev 3.2. */
@@ -3730,37 +3731,37 @@ A skilled driver author reads the register reference once and produces a C heade
 /* ... and so on ... */
 ```
 
-The header is where the driver's knowledge of the device's register interface lives. Keep it up to date with the datasheet; reference the datasheet revision in the header so future contributors know which version the offsets match.
+头文件是驱动程序对设备寄存器接口知识的存放处。保持它与数据手册同步；在头文件中引用数据手册修订版本，以便未来贡献者知道偏移量匹配哪个版本。
 
-### A Pattern for Each Type of Register
+### 每种类型寄存器的模式
 
-Different access types imply different coding patterns.
+不同的访问类型意味着不同的编码模式。
 
-**Read-only, no side effect.** Read whenever. Cache if convenient. No locking needed beyond "do not read a register from a region that has been freed".
+**只读，无副作用。** 随时读取。如果方便可以缓存。除了"不要读取已释放区域中的寄存器"之外不需要加锁。
 
-**Read-only, with side effect (read-to-clear).** Read exactly as often as the protocol requires. Do not add debug reads that clear state. Do not re-read to "confirm" a value.
+**只读，有副作用（读即清除）。** 只按协议要求的频率读取。不要添加会清除状态的调试读取。不要重新读取来"确认"一个值。
 
-**Write-only.** Write with whatever value the protocol requires. Do not read it back; the read returns garbage.
+**只写。** 用协议要求的任何值写入。不要回读；读取返回垃圾。
 
-**Read/write, no side effect.** Safe read-modify-write sequences under lock.
+**读/写，无副作用。** 在锁下安全的读-改-写序列。
 
-**Read/write, with side effect on write.** Be careful with read-modify-write: the write of an unchanged bit may still trigger the side effect. Sometimes a datasheet documents this by saying "writes of 0 to bit X have no effect"; sometimes it does not, and the driver must be conservative.
+**读/写，写入时有副作用。** 小心读-改-写：未改变的位的写入仍可能触发副作用。有时数据手册会说"向位 X 写入 0 无效果"；有时不会，驱动程序必须保守。
 
-**Write-one-to-clear (W1C).** Common for interrupt status registers. Writing 1 to a bit clears it; writing 0 has no effect. Use `CSR_WRITE_4(sc, REG, mask_of_bits_to_clear)`, not a read-modify-write.
+**写一清除（W1C）。** 中断状态寄存器常见。向某位写 1 清除它；写 0 无效果。使用 `CSR_WRITE_4(sc, REG, mask_of_bits_to_clear)`，而非读-改-写。
 
-### An Exercise: Pretend the Chapter 16 Device Has a Datasheet
+### 练习：假装第 16 章的设备有一份数据手册
 
-To close this reference, practise extracting a register header from a "datasheet" for the Chapter 16 simulated device. Write a fake datasheet in prose describing each register, its reset value, its access type, and its field layout. Then produce the corresponding `myfirst_hw.h`. Compare your version with the one Chapter 16 provided.
+为结束这个参考章节，练习从第 16 章模拟设备的"数据手册"中提取寄存器头文件。用散文写一份假数据手册，描述每个寄存器、其复位值、访问类型和字段布局。然后生成对应的 `myfirst_hw.h`。将你的版本与第 16 章提供的版本进行比较。
 
-The exercise builds the muscle you will need for every real device later in the book.
+这个练习建立你后续在书中处理每个真实设备时将需要的肌肉记忆。
 
 
 
-## Reference: A Case Study in Missing Barriers
+## 参考：缺失屏障的案例研究
 
-A short cautionary tale to make the barrier story concrete, using only the MMIO vocabulary Chapter 16 has already introduced.
+一个简短的警示故事，用第 16 章已经引入的 MMIO 词汇使屏障故事具体化。
 
-Imagine a real device whose datasheet says: "To send a command, write the 32-bit command word into `CMD_DATA`, then write the 32-bit command code into `CMD_GO`. The device picks up the command word when `CMD_GO` is written." The driver expresses this sequence naively:
+想象一个真实设备，其数据手册说："要发送命令，先将 32 位命令字写入 `CMD_DATA`，然后将 32 位命令码写入 `CMD_GO`。设备在 `CMD_GO` 被写入时拾取命令字。"驱动程序天真地表达这个序列：
 
 ```c
 /* Step 1: write the command payload. */
@@ -3770,11 +3771,11 @@ CSR_WRITE_4(sc, MYFIRST_REG_CMD_DATA, payload);
 CSR_WRITE_4(sc, MYFIRST_REG_CMD_GO, opcode);
 ```
 
-On x86 this works. The x86 memory model guarantees that stores retire in program order from the CPU's point of view, and the compiler's `volatile`-annotated write inside `bus_space_write_4` prevents it from reordering the two statements. By the time `CMD_GO` reaches the device, `CMD_DATA` has already been written.
+在 x86 上这可以工作。x86 内存模型保证存储从 CPU 的角度按程序顺序完成，`bus_space_write_4` 内部 `volatile` 注解的写入阻止编译器重排序两条语句。到 `CMD_GO` 到达设备时，`CMD_DATA` 已经被写入。
 
-On arm64 the same code can fail. The CPU is free to reorder the two stores at the memory subsystem level. The device can observe `CMD_GO` first, grab whatever stale value still sits in `CMD_DATA`, and execute a command the driver did not intend. The symptom is intermittent, load-dependent, and only appears on arm64 hardware. A driver tested only on x86 would ship with this bug undetected.
+在 arm64 上相同代码可能失败。CPU 可以在内存子系统层面重排序两次存储。设备可能先观察到 `CMD_GO`，获取 `CMD_DATA` 中仍然留存的陈旧值，并执行驱动程序不打算发送的命令。症状是间歇性的、依赖负载的，且只在 arm64 硬件上出现。只在 x86 上测试的驱动程序会带着这个 bug 发布而不被发现。
 
-The fix is a one-line change:
+修复是一行更改：
 
 ```c
 CSR_WRITE_4(sc, MYFIRST_REG_CMD_DATA, payload);
@@ -3786,29 +3787,29 @@ bus_space_barrier(sc->hw->regs_tag, sc->hw->regs_handle, 0, sc->hw->regs_size,
 CSR_WRITE_4(sc, MYFIRST_REG_CMD_GO, opcode);
 ```
 
-On x86, `bus_space_barrier` with `BUS_SPACE_BARRIER_WRITE` emits only a compiler fence, which is free in instruction terms and preserves the program order the x86 CPU was already going to preserve. On arm64, it emits a `dmb` or `dsb` that forces the CPU to drain its store buffer before the next store is issued. The same source code does the right thing on both.
+在 x86 上，带 `BUS_SPACE_BARRIER_WRITE` 的 `bus_space_barrier` 只发出编译器围栏，在指令方面是免费的，并保留了 x86 CPU 本来就会保留的程序顺序。在 arm64 上，它发出 `dmb` 或 `dsb`，强制 CPU 在下一条存储发出之前排空其存储缓冲区。相同的源代码在两个平台上都做了正确的事情。
 
-The tale makes three points.
+这个故事说明了三个要点。
 
-**First, x86 gives driver authors a false sense of security.** Code tested only on x86 may pass every test yet be broken on arm64 in ways that manifest only under specific load patterns.
+**第一，x86 给驱动程序作者虚假的安全感。** 只在 x86 上测试的代码可能通过每个测试，但在 arm64 上以只在特定负载模式下才出现的方式损坏。
 
-**Second, portability costs are tiny if you build them in early.** Adding a `bus_space_barrier` at the right spot is a one-line change. Diagnosing the bug a year later on an arm64 deployment is a week of work.
+**第二，如果及早构建，可移植性代价微乎其微。** 在正确的位置添加 `bus_space_barrier` 是一行更改。一年后在 arm64 部署上诊断 bug 是一周的工作。
 
-**Third, the cost of barriers on x86 is negligible for typical drivers.** A compiler fence is free in instruction terms; it constrains the compiler's reordering, which for a driver's cold paths matters not at all.
+**第三，x86 上屏障的代价对典型驱动程序可以忽略。** 编译器围栏在指令方面是免费的；它约束编译器的重排序，对驱动程序的冷路径来说根本不重要。
 
-A related family of ordering bugs appears when the driver writes to memory the device reads through DMA (a descriptor ring, for example) and then rings a doorbell register. That pattern needs a `bus_dmamap_sync` call, not just a `bus_space_barrier`; Chapter 20 teaches the DMA path in depth. The vocabulary is different, but the intuition (writes must drain before the doorbell) is the same.
+一类相关的排序 bug 出现在驱动程序写入设备通过 DMA 读取的内存（例如描述符环），然后敲响门铃寄存器时。那个模式需要 `bus_dmamap_sync` 调用，而不仅是 `bus_space_barrier`；第 20 章深入教授 DMA 路径。词汇不同，但直觉（写入必须在门铃之前排空）是相同的。
 
-The discipline Chapter 16 encourages, even when the immediate benefit is invisible, pays off when the code runs on hardware the author never saw.
+第 16 章鼓励的规范，即使即时收益不可见，当代码运行在作者从未见过的硬件上时也会得到回报。
 
 
 
-## Reference: Reading `if_ale.c` Step By Step
+## 参考：逐步阅读 `if_ale.c`
 
-A guided walk through the attach path of a real driver so the vocabulary of Chapter 16 lands in production code. Open `/usr/src/sys/dev/ale/if_ale.c`, jump to `ale_attach`, and follow along.
+引导式浏览真实驱动程序。
 
-### Step 1: The Attach Entry Point
+### 第 1 步：Attach 入口点
 
-The `ale_attach` function begins:
+`ale_attach` 函数开始：
 
 ```c
 static int
@@ -3825,11 +3826,11 @@ ale_attach(device_t dev)
         sc->ale_dev = dev;
 ```
 
-`device_get_softc(dev)` is the same pattern Chapter 6 introduced. Nothing new here.
+`device_get_softc(dev)` 是第 6 章引入的相同模式。这里没有新东西。
 
-### Step 2: Early Locking Setup
+### 第 2 步：早期加锁设置
 
-The driver initialises its data-path mutex, its callout, and its first task:
+驱动程序初始化其数据路径互斥锁、callout 和第一个任务：
 
 ```c
 mtx_init(&sc->ale_mtx, device_get_nameunit(dev), MTX_NETWORK_LOCK,
@@ -3838,9 +3839,9 @@ callout_init_mtx(&sc->ale_tick_ch, &sc->ale_mtx, 0);
 NET_TASK_INIT(&sc->ale_int_task, 0, ale_int_task, sc);
 ```
 
-Every line here came straight out of Part 3. The mutex is the Chapter 11 primitive; the lock-aware callout is the Chapter 13 primitive; the task is the Chapter 14 primitive. A reader who has done Part 3 recognises all three immediately.
+这里的每一行都直接来自第 3 部分。互斥锁是第 11 章的原语；感知锁的 callout 是第 13 章的原语；任务是第 14 章的原语。完成第 3 部分的读者立刻认出这三者。
 
-### Step 3: PCI Bus-Mastering and Resource Allocation
+### 第 3 步：PCI 总线主控和资源分配
 
 ```c
 pci_enable_busmaster(dev);
@@ -3853,13 +3854,13 @@ if (error != 0) {
 }
 ```
 
-`pci_enable_busmaster` is PCI-specific; Chapter 18 covers it. The `ale_res_spec` is a `struct resource_spec` array (defined earlier in the file) that describes which resources the driver wants. `bus_alloc_resources` (plural) takes the spec and fills in the `sc->ale_res` array with the allocated resources. This is a slight convenience wrapper over calling `bus_alloc_resource_any` in a loop; either pattern is common, and the Chapter 18 discussion of PCI resource allocation covers both.
+`pci_enable_busmaster` 是 PCI 特有的；第 18 章涵盖它。`ale_res_spec` 是一个 `struct resource_spec` 数组（在文件前面定义），描述驱动程序想要哪些资源。`bus_alloc_resources`（复数）接受规格并填充 `sc->ale_res` 数组。这是循环调用 `bus_alloc_resource_any` 的轻微便利包装；两种模式都很常见，第 18 章对 PCI 资源分配的讨论涵盖两者。
 
-After this call, `sc->ale_res[0]` holds a `struct resource *` for the device's MMIO region, and the `CSR_READ_*` / `CSR_WRITE_*` macros (defined in `/usr/src/sys/dev/ale/if_alevar.h`, right after the softc structure) can be used to access registers through it.
+此调用之后，`sc->ale_res[0]` 持有设备 MMIO 区域的 `struct resource *`，`CSR_READ_*` / `CSR_WRITE_*` 宏（在 `/usr/src/sys/dev/ale/if_alevar.h` 中，紧接 softc 结构之后定义）可以通过它访问寄存器。
 
-### Step 4: Reading the First Register
+### 第 4 步：读取第一个寄存器
 
-The driver reads the `PHY_STATUS` register to decide which chip variant it is running on:
+驱动程序读取 `PHY_STATUS` 寄存器来决定它运行在哪种芯片变体上：
 
 ```c
 if ((CSR_READ_4(sc, ALE_PHY_STATUS) & PHY_STATUS_100M) != 0) {
@@ -3871,13 +3872,13 @@ if ((CSR_READ_4(sc, ALE_PHY_STATUS) & PHY_STATUS_100M) != 0) {
 }
 ```
 
-This is the first register access in `ale_attach`. It is a single `CSR_READ_4` call that returns a 32-bit value, masked against the `PHY_STATUS_100M` bit, and used to select a code path. The `ALE_PHY_STATUS` constant is a register offset defined in `/usr/src/sys/dev/ale/if_alereg.h`. The bit mask `PHY_STATUS_100M` is defined in the same header.
+这是 `ale_attach` 中的第一次寄存器访问。它是一个单次 `CSR_READ_4` 调用，返回 32 位值，与 `PHY_STATUS_100M` 位进行掩码，用于选择代码路径。`ALE_PHY_STATUS` 常量是在 `/usr/src/sys/dev/ale/if_alereg.h` 中定义的寄存器偏移量。位掩码 `PHY_STATUS_100M` 定义在同一个头文件中。
 
-Every element of that one line is Chapter 16 vocabulary. `CSR_READ_4` expands to `bus_read_4` over the first resource; `bus_read_4` expands to `bus_space_read_4` over the tag and handle inside the resource; on x86 memory space, `bus_space_read_4` compiles to a single `mov` instruction.
+那一行的每个元素都是第 16 章的词汇。`CSR_READ_4` 展开为第一个资源上的 `bus_read_4`；`bus_read_4` 展开为资源内部标签和句柄上的 `bus_space_read_4`；在 x86 内存空间上，`bus_space_read_4` 编译为单条 `mov` 指令。
 
-### Step 5: Reading More Registers
+### 第 5 步：读取更多寄存器
 
-A few lines later the driver reads three more registers to gather chip-identification data:
+几行之后，驱动程序读取另外三个寄存器来收集芯片识别数据：
 
 ```c
 sc->ale_chip_rev = CSR_READ_4(sc, ALE_MASTER_CFG) >>
@@ -3887,9 +3888,9 @@ txf_len = CSR_READ_4(sc, ALE_SRAM_TX_FIFO_LEN);
 rxf_len = CSR_READ_4(sc, ALE_SRAM_RX_FIFO_LEN);
 ```
 
-Same pattern, three more registers. Notice the uninitialised-hardware check a few lines down, guarded by `sc->ale_chip_rev == 0xFFFF`: if any of the returned values looks like `0xFFFFFFFF`, the driver assumes the hardware is not correctly initialised and bails out with `ENXIO`. This kind of sanity check is a common, quiet habit in production drivers: hardware that returns all-ones on every register typically means the mapping is wrong, the device is not responding, or the device was power-gated and never brought up.
+相同模式，再多三个寄存器。注意几行之后的未初始化硬件检查，由 `sc->ale_chip_rev == 0xFFFF` 保护：如果任何返回值看起来像 `0xFFFFFFFF`，驱动程序假设硬件未正确初始化并以 `ENXIO` 退出。这种健全性检查是生产驱动程序中常见、安静的习惯：在每个寄存器上返回全 1 的硬件通常意味着映射错误、设备未响应，或设备被电源门控且从未启动。
 
-### Step 6: IRQ Setup
+### 第 6 步：IRQ 设置
 
 Further down:
 
@@ -3897,176 +3898,176 @@ Further down:
 error = bus_alloc_resources(dev, sc->ale_irq_spec, sc->ale_irq);
 ```
 
-IRQ resources get their own allocation. Chapter 19 covers what happens next: `bus_setup_intr`, the filter-ithread split, and the interrupt handler.
+IRQ 资源有自己的分配。第 19 章涵盖接下来发生的事：`bus_setup_intr`、过滤器-ithread 拆分和中断处理程序。
 
-### Step 7: Reading the Whole File
+### 第 7 步：阅读整个文件
 
-After the IRQ allocation, `ale_attach` continues with DMA tag creation (Chapter 20), ifnet registration (Chapter 28 in Part 6), PHY attach, and so on. Each step uses patterns that will be introduced by later chapters in this book. What Chapter 16 gave you is the vocabulary to read every `CSR_*` macro call without stopping.
+IRQ 分配之后，`ale_attach` 继续 DMA 标签创建（第 20 章）、ifnet 注册（第 6 部分第 28 章）、PHY attach 等等。每一步都使用本书后续章节将引入的模式。第 16 章给你的是阅读每个 `CSR_*` 宏调用而不用停下来的词汇。
 
-The exercise that consolidates the walk: pick three `CSR_READ_4` or `CSR_WRITE_4` calls from anywhere in `/usr/src/sys/dev/ale/if_ale.c`, look up the register offset in `if_alereg.h`, decode the bit mask in the same header, and write one sentence explaining what the driver is doing at that call site. If you can do that for three arbitrary calls, you have internalised the vocabulary this chapter taught.
+巩固这次浏览的练习：从 `/usr/src/sys/dev/ale/if_ale.c` 的任意位置选择三个 `CSR_READ_4` 或 `CSR_WRITE_4` 调用，在 `if_alereg.h` 中查找寄存器偏移量，在同一个头文件中解码位掩码，写一句话解释驱动程序在那个调用点在做什么。如果你能为三个任意调用做到这一点，你就已经内化了本章教授的词汇。
 
 
 
-## Reference: An Honest Accounting of Chapter 16's Simplifications
+## 参考：第 16 章简化处理的诚实说明
 
-A chapter that teaches a small slice of a large topic inevitably simplifies. For honesty with the reader, a catalogue of what Chapter 16 simplified and what the full story looks like.
+教授大主题的一个小切片的章节不可避免地会简化。为了对读者诚实，这里列出第 16 章简化了什么以及完整故事是什么样的。
 
-### The Simulated Tag
+### 模拟标签
 
-Chapter 16's simulation uses `X86_BUS_SPACE_MEM` as the tag and a kernel virtual address as the handle. On x86 this works because the x86 `bus_space_read_*` functions reduce to a `volatile` dereference of `handle + offset` for memory space. On other architectures the trick fails because the tag is not an integer; it is a pointer to a structure, and manufacturing one by hand requires reproducing the structure the platform's `bus_space` expects.
+第 16 章的模拟使用 `X86_BUS_SPACE_MEM` 作为标签，使用内核虚拟地址作为句柄。在 x86 上这可以工作，因为 x86 的 `bus_space_read_*` 函数对于内存空间简化为 `handle + offset` 的 `volatile` 解引用。在其他架构上这个技巧失败，因为标签不是整数；它是指向结构的指针，手工构造一个需要复制平台 `bus_space` 期望的结构。
 
-The full story: real drivers never manufacture a tag; they receive one from the bus subsystem through `rman_get_bustag`. The Chapter 16 simulation shortcut is pedagogical, and the chapter explicitly marks it as x86-only. Chapter 17's richer simulation introduces a portable alternative, and Chapter 18's real PCI path retires the shortcut entirely.
+完整故事：真实驱动程序从不手工制造标签；它们通过 `rman_get_bustag` 从总线子系统接收。第 16 章的模拟快捷方式是教学性的，本章明确将其标记为仅限 x86。第 17 章更丰富的模拟引入可移植的替代方案，第 18 章的真实 PCI 路径完全淘汰了这个快捷方式。
 
-### The Register Protocol
+### 寄存器协议
 
-The simulated device's registers have no side effects on read or write. `STATUS` is set by the driver; it does not change autonomously. `DATA_IN` is written by the driver; it does not forward the write to an imaginary downstream consumer. `INTR_STATUS` is a plain register, not read-to-clear.
+模拟设备的寄存器在读写时没有副作用。`STATUS` 由驱动程序设置；它不会自主改变。`DATA_IN` 由驱动程序写入；它不会将写入转发给想象的下游消费者。`INTR_STATUS` 是普通寄存器，不是读即清除的。
 
-The full story: real devices have protocols. Reading a status register may consume an event. Writing a command register may trigger a multi-cycle operation inside the device. The driver's job is to follow the protocol exactly; a single missed step produces a misbehaving device. Chapter 17 introduces some of this complexity by adding a callout-driven protocol: a write triggers a delayed status change.
+完整故事：真实设备有协议。读取状态寄存器可能消费一个事件。写入命令寄存器可能触发设备内部的多周期操作。驱动程序的工作是精确遵循协议；单个遗漏的步骤产生行为不当的设备。第 17 章通过添加 callout 驱动的协议引入部分这种复杂性：一次写入触发延迟的状态改变。
 
-### Locking Granularity
+### 加锁粒度
 
-Chapter 16 uses a single driver mutex (`sc->mtx`) for all register access. In practice, real drivers sometimes split locks: a fast-path lock for per-packet register writes (in a network driver) and a slower lock for configuration changes. Splitting increases concurrency at the cost of more locking discipline.
+第 16 章对所有寄存器访问使用单个驱动程序互斥锁（`sc->mtx`）。在实践中，真实驱动程序有时拆分锁：网络驱动程序中用于每包寄存器写入的快速路径锁和用于配置更改的较慢锁。拆分以更多加锁规范为代价增加并发性。
 
-The full story: lock splitting is a performance tuning decision that belongs to later chapters on scaling and profiling. Chapter 16 uses a single lock because it is the simplest correct design, and because the driver's throughput requirements are nowhere near where lock contention matters.
+完整故事：锁拆分是属于后续关于扩展和性能分析章节的性能调优决策。第 16 章使用单个锁是因为它是最简单的正确设计，而且驱动程序的吞吐量需求远未达到锁竞争有影响的地步。
 
-### Endianness
+### 字节序
 
-Chapter 16 assumes host byte order for all register values. Real devices sometimes use a different byte order than the host CPU. The `_stream_` variants of `bus_space` handle this; Chapter 16 does not use them.
+第 16 章假设所有寄存器值使用主机字节序。真实设备有时使用与主机 CPU 不同的字节序。`bus_space` 的 `_stream_` 变体处理这个；第 16 章不使用它们。
 
-The full story: FreeBSD's `bus_space` API supports per-tag byte-swap semantics. A driver whose device is big-endian on a little-endian CPU uses either a swap-aware tag or the `_stream_` variants plus explicit `htobe32`/`be32toh` conversions. Chapter 16's simulation is host-endian, so the issue does not arise; real drivers for big-endian devices handle it explicitly.
+完整故事：FreeBSD 的 `bus_space` API 支持每标签字节交换语义。设备为大端序而 CPU 为小端序的驱动程序使用交换感知标签或 `_stream_` 变体加显式 `htobe32`/`be32toh` 转换。第 16 章的模拟是主机字节序的，所以问题不出现；大端序设备的真实驱动程序显式处理它。
 
-### Cache Attributes
+### 缓存属性
 
-Chapter 16's `malloc(9)` allocation produces ordinary cacheable kernel memory. Real device memory is mapped with different cache attributes (uncached, write-combining, device-strongly-ordered) depending on the platform and the device's requirements.
+第 16 章的 `malloc(9)` 分配产生普通可缓存内核内存。真实设备内存根据平台和设备要求使用不同的缓存属性（不可缓存、写合并、设备强序）映射。
 
-The full story: `bus_alloc_resource_any` with `RF_ACTIVE` on a real PCI BAR produces a mapping with the right cache attributes. The simulation does not go through this path; it uses plain cacheable memory. Under Chapter 16's patterns (serialised access, volatile accesses), the cache attribute difference does not manifest. In Chapter 18's real-PCI path, the allocation flow takes care of it.
+完整故事：真实 PCI BAR 上带 `RF_ACTIVE` 的 `bus_alloc_resource_any` 产生具有正确缓存属性的映射。模拟不经过这个路径；它使用普通可缓存内存。在第 16 章的模式下（串行化访问、volatile 访问），缓存属性差异不会显现。在第 18 章的真实 PCI 路径中，分配流程负责处理它。
 
-### Error Handling
+### 错误处理
 
-Chapter 16's simulated device never returns an error from a register access. Real hardware sometimes does: a read may time out, a write may be rejected, a bus may hang. The driver must handle these.
+第 16 章的模拟设备从不在寄存器访问中返回错误。真实硬件有时会：读取可能超时、写入可能被拒绝、总线可能挂起。驱动程序必须处理这些。
 
-The full story: FreeBSD provides `bus_peek_*` and `bus_poke_*` variants (since FreeBSD 13) that return an error if the access faults. Chapter 16 does not use them because the simulation cannot fault. Chapter 19 introduces them in the context of interrupt handlers that may touch a device in an uncertain state.
+完整故事：FreeBSD 提供 `bus_peek_*` 和 `bus_poke_*` 变体（自 FreeBSD 13 起），在访问出错时返回错误。第 16 章不使用它们因为模拟不会出错。第 19 章在中断处理程序可能触摸处于不确定状态设备的上下文中引入它们。
 
-### Interrupts
+### 中断
 
-Chapter 16's driver polls registers through callouts and syscall paths. Real drivers typically use interrupts to know when to read a register.
+第 16 章的驱动程序通过 callout 和系统调用路径轮询寄存器。真实驱动程序通常使用中断来知道何时读取寄存器。
 
-The full story: interrupts are Chapter 19's topic. Chapter 16's polling pattern is a stepping stone; after Chapter 19 the driver will have an interrupt handler that replaces much of the polling logic.
+完整故事：中断是第 19 章的主题。第 16 章的轮询模式是垫脚石；第 19 章之后驱动程序将拥有替换大部分轮询逻辑的中断处理程序。
 
 ### DMA
 
-Chapter 16's driver does not use DMA. Every byte flowing through the driver is copied by the CPU, register by register.
+第 16 章的驱动程序不使用 DMA。流经驱动程序的每个字节由 CPU 逐寄存器复制。
 
-The full story: real high-throughput devices use DMA for bulk data. The driver programs the device's DMA engine through registers, then the device reads or writes system RAM directly. Chapter 20 and Chapter 21 cover the DMA API.
+完整故事：真实高吞吐量设备使用 DMA 进行批量数据传输。驱动程序通过寄存器编程设备的 DMA 引擎，然后设备直接读取或写入系统 RAM。第 20 章和第 21 章涵盖 DMA API。
 
-### Summary
+### 总结
 
-Chapter 16 is an on-ramp. Every simplification it makes is deliberate, named, and picked up by a later chapter. The vocabulary Chapter 16 teaches is the vocabulary every later chapter extends; the discipline Chapter 16 builds is the discipline every later chapter relies on. The chapter is short of the full hardware story on purpose. Subsequent chapters fill in the rest.
+第 16 章是一条入口匝道。它所做的每一个简化都是刻意的、有命名的，并由后续章节承接。第 16 章教授的词汇是每个后续章节扩展的词汇；第 16 章建立的规范是每个后续章节依赖的规范。本章故意没有讲述完整的硬件故事。后续章节填补其余部分。
 
 
 
-## Reference: A Quick Reference for Common MMIO Bugs
+## 参考：常见 MMIO Bug 速查
 
-When a driver misbehaves, the bug is often in a small set of recurring categories. A quick reference to recognise each.
+当驱动程序行为异常时，bug 通常在一小组反复出现的类别中。快速参考以识别每一个。
 
-### 1. Off-by-One in the Register Map
+### 1. 寄存器映射中的差一错误
 
-**Symptom**: A read returns a plausible but wrong value, or a write has no effect.
+**症状**：读取返回一个合理但错误的值，或写入没有效果。
 
-**Cause**: An offset in the driver's header is one or two or four bytes off from the datasheet.
+**原因**：驱动程序头文件中的偏移量比数据手册差了一、两或四个字节。
 
-**Diagnosis**: Cross-check the header against the datasheet, register by register.
+**诊断**：将头文件与数据手册逐寄存器交叉核对。
 
-**Fix**: Correct the offset.
+**修复**：更正偏移量。
 
-### 2. Wrong Access Width
+### 2. 错误的访问宽度
 
-**Symptom**: A read returns a value that looks like only part of the register, or a write affects only part of the register.
+**症状**：读取返回的值看起来只是寄存器的一部分，或写入只影响寄存器的一部分。
 
-**Cause**: The driver uses `bus_read_4` on a 16-bit register or vice versa.
+**原因**：驱动程序在 16 位寄存器上使用 `bus_read_4` 或反之。
 
-**Diagnosis**: Check the datasheet's width column against the accessor suffix.
+**诊断**：将数据手册的宽度列与访问器后缀核对。
 
-**Fix**: Use the correct width.
+**修复**：使用正确的宽度。
 
-### 3. Missing Volatile Qualifier in a Hand-Rolled Accessor
+### 3. 手写访问器中缺少 Volatile 限定符
 
-**Symptom**: The compiler optimises away a register access, and the driver misses a state change.
+**症状**：编译器优化掉了寄存器访问，驱动程序错过了状态变化。
 
-**Cause**: A driver that wraps `bus_space_*` in a non-volatile intermediate loses the volatile annotation.
+**原因**：将 `bus_space_*` 包装在非 volatile 中间层的驱动程序丢失了 volatile 注解。
 
-**Diagnosis**: Audit any custom accessor that is not a direct `bus_space_*` call.
+**诊断**：审计任何非直接 `bus_space_*` 调用的自定义访问器。
 
-**Fix**: Keep accessors as simple wrappers around `bus_space_*`; do not introduce intermediate variables without `volatile`.
+**修复**：保持访问器为 `bus_space_*` 的简单包装；不要在没有 `volatile` 的情况下引入中间变量。
 
-### 4. Lost Update in Read-Modify-Write
+### 4. 读-改-写中的更新丢失
 
-**Symptom**: A bit set by the driver disappears; another bit set by a second context disappears.
+**症状**：驱动程序设置的位消失了；第二个上下文设置的另一个位也消失了。
 
-**Cause**: Two contexts do RMW on the same register without a lock; one clobbers the other.
+**原因**：两个上下文在没有锁的情况下对同一寄存器进行 RMW；一个覆盖另一个。
 
-**Diagnosis**: Use the access log or DTrace to observe two writes in rapid succession.
+**诊断**：使用访问日志或 DTrace 观察两次快速连续的写入。
 
-**Fix**: Protect RMW with the driver mutex, or use a write-one-to-clear idiom if the hardware supports it.
+**修复**：用驱动程序互斥锁保护 RMW，或在硬件支持时使用写一清除惯用法。
 
-### 5. Missing Barrier Before a Doorbell
+### 5. 门铃前缺少屏障
 
-**Symptom**: The device sometimes reads stale descriptor data or wrong command buffers.
+**症状**：设备有时读取陈旧的描述符数据或错误的命令缓冲区。
 
-**Cause**: The descriptor writes are reordered past the doorbell register write (on arm64 or other weakly-ordered platforms).
+**原因**：描述符写入被重排序到门铃寄存器写入之后（在 arm64 或其他弱序平台上）。
 
-**Diagnosis**: The symptom is often transient and load-dependent.
+**诊断**：症状通常是瞬时和依赖负载的。
 
-**Fix**: Insert `bus_barrier` with `BUS_SPACE_BARRIER_WRITE` between the descriptor writes and the doorbell.
+**修复**：在描述符写入和门铃之间插入带 `BUS_SPACE_BARRIER_WRITE` 的 `bus_barrier`。
 
-### 6. Reading a Write-Only Register
+### 6. 读取只写寄存器
 
-**Symptom**: The driver reads a register and gets zero or garbage; based on that value, it takes the wrong action.
+**症状**：驱动程序读取寄存器得到零或垃圾值；基于该值采取错误行动。
 
-**Cause**: The register is marked write-only in the datasheet; reads return a fixed value unrelated to state.
+**原因**：寄存器在数据手册中标记为只写；读取返回与状态无关的固定值。
 
-**Diagnosis**: Check the access type in the datasheet.
+**诊断**：检查数据手册中的访问类型。
 
-**Fix**: Do not read write-only registers. If you need to remember the last written value, cache it in the softc.
+**修复**：不要读取只写寄存器。如果需要记住最后写入的值，在 softc 中缓存它。
 
-### 7. Unexpected Side Effect on Read
+### 7. 读取时的意外副作用
 
-**Symptom**: A debug read changes driver behaviour.
+**症状**：调试读取改变了驱动程序行为。
 
-**Cause**: The register has read-to-clear semantics and the debug read consumes an event.
+**原因**：寄存器具有读即清除语义，调试读取消费了一个事件。
 
-**Diagnosis**: Disable the debug read; if the issue disappears, the read was the culprit.
+**诊断**：禁用调试读取；如果问题消失，读取就是罪魁祸首。
 
-**Fix**: Cache the value in the softc on the protocol-driven read; expose the cached value through the debug interface.
+**修复**：在协议驱动的读取中将值缓存在 softc 中；通过调试接口暴露缓存值。
 
-### 8. Dangling Tag or Handle
+### 8. 悬空的标签或句柄
 
-**Symptom**: Kernel panic on the first register access, with a fault at an address that does not look like the mapped region.
+**症状**：首次寄存器访问时内核 panic，故障地址看起来不像映射区域。
 
-**Cause**: The driver stored a tag and handle before allocation completed, or kept them after release.
+**原因**：驱动程序在分配完成前存储了标签和句柄，或在释放后保留了它们。
 
-**Diagnosis**: `MYFIRST_ASSERT` firing; `regs_buf == NULL` in the panic.
+**诊断**：`MYFIRST_ASSERT` 触发；panic 中 `regs_buf == NULL`。
 
-**Fix**: Set the tag and handle only after successful allocation; clear them (or null the `sc->hw` pointer) before release.
+**修复**：仅在成功分配后设置标签和句柄；在释放前清除它们（或置空 `sc->hw` 指针）。
 
-### 9. Sysctl Handler Without Lock
+### 9. 没有锁的 Sysctl 处理程序
 
-**Symptom**: WITNESS warning about an unprotected register access, or rare incorrect values observed from user space.
+**症状**：WITNESS 警告未受保护的寄存器访问，或从用户空间观察到罕见的不正确值。
 
-**Cause**: A sysctl handler reads or writes a register without acquiring the driver lock.
+**原因**：sysctl 处理程序在未获取驱动程序锁的情况下读取或写入寄存器。
 
-**Diagnosis**: The `MYFIRST_ASSERT` inside the accessor produces a WITNESS entry.
+**诊断**：访问器内的 `MYFIRST_ASSERT` 产生 WITNESS 条目。
 
-**Fix**: Wrap the register access in `MYFIRST_LOCK`/`MYFIRST_UNLOCK`.
+**修复**：将寄存器访问包装在 `MYFIRST_LOCK`/`MYFIRST_UNLOCK` 中。
 
-### 10. Detach Races
+### 10. Detach 竞争
 
-**Symptom**: Kernel panic during `kldunload` with a stack that includes a register access.
+**症状**：`kldunload` 期间内核 panic，栈中包含寄存器访问。
 
-**Cause**: A callout or task accesses registers after the register buffer has been freed.
+**原因**：callout 或任务在寄存器缓冲区释放后访问寄存器。
 
-**Diagnosis**: `regs_buf == NULL` in the panic; the caller is a task or callout that was not drained before the free.
+**诊断**：panic 中 `regs_buf == NULL`；调用者是释放前未排空的任务或 callout。
 
-**Fix**: Review detach ordering; drain all callouts and tasks before freeing `regs_buf`.
+**修复**：审查 detach 排序；在释放 `regs_buf` 之前排空所有 callout 和任务。
 
-Each of these bugs has a short diagnostic path and a well-defined fix. Keeping the list nearby during development catches most issues on first contact.
+这些 bug 中的每一个都有简短的诊断路径和明确定义的修复。在开发期间将此列表放在身边可以在首次接触时捕获大多数问题。

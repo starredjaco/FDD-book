@@ -17,188 +17,188 @@ language: "zh-CN"
 
 ## 引言
 
-第25章 closed 第5部分 with a 驱动程序 that the rest of the system could talk to. The `myfirst` 驱动程序 at version `1.8-maintenance` had a rate-limited logging macro, a careful errno vocabulary, loader tunables and writable sysctls, a three-way version split, a labelled-goto cleanup chain in 附加 and 分离, a clean modular source layout, `MODULE_DEPEND` and `MODULE_PNP_INFO` metadata, a `MAINTENANCE.md` document, a `shutdown_pre_sync` event handler, and a regression script that could load and unload the 驱动程序 a hundred times without leaking a single resource. What the 驱动程序 did not have was any contact with real hardware. The 字符设备 backed a 缓冲区 in 内核 memory. The sysctl counters tracked operations against that 缓冲区. The `MYFIRSTIOC_GETCAPS` ioctl announced capabilities that were implemented entirely in software. Everything the 驱动程序 did, it did without ever reading a byte off a wire.
+第25章以一个系统其余部分可以与之通信的驱动程序结束了第5部分。版本为 `1.8-maintenance` 的 `myfirst` 驱动程序具备了速率受限的日志宏、完善的 errno 词汇表、加载器可调参数和可写 sysctl、三路版本拆分、attach 和 detach 中的标签化 goto 清理链、整洁的模块化源代码布局、`MODULE_DEPEND` 和 `MODULE_PNP_INFO` 元数据、`MAINTENANCE.md` 文档、`shutdown_pre_sync` 事件处理器，以及一个能够连续加载和卸载驱动程序一百次而不泄漏任何资源的回归测试脚本。但这个驱动程序没有的是与真实硬件的任何接触。字符设备背后是内核内存中的缓冲区。sysctl 计数器追踪的是针对该缓冲区的操作。`MYFIRSTIOC_GETCAPS` ioctl 公布的能力完全由软件实现。驱动程序所做的一切，都没有从线缆上读取过哪怕一个字节。
 
-第26章 begins the step outward. Instead of serving a 缓冲区 in RAM, the 驱动程序 will 附加 to a real 总线 and service a real 设备. The 总线 will be the Universal Serial Bus, because USB is the most approachable transport in FreeBSD: it is ubiquitous, its subsystem is extremely well organised, the 内核 接口 is designed around a small handful of structures and macros, and every FreeBSD developer already has a dozen USB 设备 on their desk. After USB, the chapter pivots to the subject that historically preceded USB and still lives alongside it everywhere from debug consoles to GPS modules: the 串行端口, in its classical form as a UART-driven RS-232 接口 and in its modern form as a USB-to-serial bridge. By the end of the chapter, the `myfirst` 驱动程序 family has grown a new transport-specific sibling, `myfirst_usb`, at version `1.9-usb`. That sibling knows how to 附加 to a real USB 设备, how to set up a bulk-in and a bulk-out transfer, how to echo received bytes through a `/dev` node, and how to survive the 设备 being yanked out of the port while the 驱动程序 is in use.
+第26章开始向外迈出一步。驱动程序将不再服务于 RAM 中的缓冲区，而是附加到真实的总线上并服务于真实的设备。这条总线将是通用串行总线（USB），因为 USB 是 FreeBSD 中最易于上手的传输层：它无处不在，其子系统组织得极为完善，内核接口围绕少量结构和宏设计而成，每位 FreeBSD 开发者的桌面上都有十几个 USB 设备。在 USB 之后，本章转向历史上先于 USB 出现、至今仍与 USB 并存于从调试控制台到 GPS 模块等各处的主题：串行端口——其经典形式为 UART 驱动的 RS-232 接口，现代形式为 USB 转串行桥接器。到本章结束时，`myfirst` 驱动程序家族将增加一个新的特定传输层兄弟成员 `myfirst_usb`，版本为 `1.9-usb`。这个兄弟成员知道如何附加到真实的 USB 设备、如何设置批量输入和批量输出传输、如何通过 `/dev` 节点回显接收到的字节，以及如何在驱动程序仍在使用时应对设备被从端口拔出的情况。
 
-第26章 is the opening chapter of 第6部分. 第6部分 is organised around the observation that up to this point the book has been teaching the parts of FreeBSD 驱动程序 development that are *transport-neutral*: the New总线 model, the 字符设备 接口, synchronisation, interrupts, DMA, power management, debugging, integration, and maintenance. All of those disciplines apply to every 驱动程序 regardless of how the 设备 is 附加ed. 第6部分 shifts the focus. USB, storage, and networking each have their own 总线, their own lifecycle, their own data-flow pattern, and their own idiomatic way of integrating with the rest of the 内核. The disciplines you have built in Parts 1 through 5 carry over unchanged; what is new is the shape of the 接口 between your 驱动程序 and the specific subsystem it plugs into. 第26章 teaches that shape for USB and for serial 设备. 第27章 teaches it for storage 设备 and the VFS layer. 第28章 teaches it for 网络接口. Each of the three chapters is structurally parallel: the transport is introduced, the subsystem is mapped, a minimal 驱动程序 is built, and the reader is shown how to test without the specific hardware everyone happens not to have.
+第26章是第6部分的开篇章节。第6部分的编排基于这样一个观察：到目前为止，本书一直在教授FreeBSD驱动程序开发中*与传输层无关*的部分——Newbus模型、字符设备接口、同步、中断、DMA、电源管理、调试、集成和维护。所有这些规范适用于每一个驱动程序，无论设备以何种方式附加。第6部分转移了重点。USB、存储和网络各自拥有自己的总线、自己的生命周期、自己的数据流模式，以及与内核其余部分集成的惯用方式。你在第1到第5部分中建立的规范保持不变；新的东西是你的驱动程序与它所插入的特定子系统之间接口的形态。第26章为USB和串行设备教授这种形态。第27章为存储设备和VFS层教授这种形态。第28章为网络接口教授这种形态。这三个章节在结构上是平行的：引入传输层、映射子系统、构建最小驱动程序，并向读者展示如何在缺乏特定硬件的情况下进行测试。
 
-There is a deliberate pairing of USB and serial in this chapter. The two topics sit together because they are both first-class citizens of the same larger mental model: a transport is a *protocol plus a lifecycle*, and the 驱动程序 is the piece of code that carries data across the protocol boundary and keeps the lifecycle consistent with the 内核's view of the 设备. USB is a protocol with a rich four-transfer-type vocabulary and a 热插拔 lifecycle. A UART is a protocol with a much simpler byte-framing vocabulary and a statically-附加ed lifecycle. Studying them together makes the pattern visible. A student who has seen the USB 回调 state machine and the UART 中断处理程序 side by side understands that "FreeBSD's 驱动程序 model" is not a single shape but a family of shapes, each one adapted to the demands of its own transport.
+本章有意将USB和串行放在一起讨论。这两个主题并列是因为它们都是同一个更大思维模型的一等公民：传输层是一个*协议加生命周期*，而驱动程序是跨越协议边界传递数据并使生命周期与内核对设备的视图保持一致的代码。USB是一个拥有丰富四类传输类型词汇和热插拔生命周期的协议。UART是一个拥有简单得多的字节成帧词汇和静态附加生命周期的协议。将它们放在一起学习可以使模式变得清晰。一个同时看过USB回调状态机和UART中断处理程序的学生会理解，"FreeBSD的驱动程序模型"不是单一的形态，而是一个形态家族，每一种都适应其自身传输层的需求。
 
-The second reason to pair USB and serial is historical and practical. A very large number of what the operating system calls "USB 设备" are in fact 串行端口s in disguise. The FTDI FT232R chip, the Prolific PL2303, the Silicon Labs CP210x, and the WCH CH340 all expose a standard serial-port API to user space, but physically they sit on the USB 总线. FreeBSD handles that with the `ucom(4)` 框架: a USB驱动程序 寄存器 回调 with `ucom`, and `ucom` produces the user-visible `/dev/ttyU0` and `/dev/cuaU0` 设备 nodes and arranges for the termios-aware line discipline to operate correctly on top of a USB bulk-in and bulk-out pair. The reader who is about to write a USB驱动程序 is likely, sooner or later, to write a USB-to-串行驱动程序, and that 驱动程序 will be an intersection of the two worlds the chapter introduces. Putting the material into a single chapter makes the intersection visible.
+将USB和串行配对的第二个原因是历史和实践层面的。操作系统所称的"USB设备"中，有很大一部分实际上是伪装的串行端口。FTDI FT232R芯片、Prolific PL2303、Silicon Labs CP210x和WCH CH340都向用户空间暴露了标准的串行端口API，但在物理上它们连接在USB总线上。FreeBSD通过 `ucom(4)` 框架来处理这种情况：一个USB驱动程序向 `ucom` 注册回调，`ucom` 生成用户可见的 `/dev/ttyU0` 和 `/dev/cuaU0` 设备节点，并安排支持termios的线路规程在USB批量输入和批量输出对之上正确运行。即将编写USB驱动程序的读者，迟早会编写USB转串行驱动程序，而该驱动程序将是本章介绍的两个世界的交汇点。将这些材料放在同一章中使这种交汇变得可见。
 
-A third reason is pedagogical. The `myfirst` 驱动程序 so far has been a pseudo-设备. The transition to real hardware is a conceptual step, not just a coding step. Many readers will find their first attempt at a hardware-backed 驱动程序 unsettling: interrupts arrive without asking, transfers can stall or time out, the 设备 can be unplugged mid-operation, and the 内核 has opinions about how fast you are allowed to respond. USB is the friendliest possible 引言 to that world because the USB subsystem does an unusually large 挂载 of work on the 驱动程序's behalf. Setting up a 批量传输 in USB is not the same kind of problem as setting up a DMA ring on a PCI Express NIC. The USB core manages the low-level DMA bookkeeping; your 驱动程序 works at the level of "tell me when this transfer completes". Learning the USB pattern first makes the later hardware chapters (storage, networking, embedded 总线es in Part 7) less intimidating because by then the basic shape of a transport-specific 驱动程序 is familiar.
+第三个原因是教学方面的。到目前为止，`myfirst` 驱动程序一直是一个伪设备。向真实硬件的过渡是一个概念上的步骤，而不仅仅是编码步骤。许多读者会发现他们第一次尝试编写基于硬件的驱动程序时会感到不安：中断不请自来，传输可能停滞或超时，设备可能在操作中途被拔出，而内核对你允许以多快的速度响应有自己的要求。USB是对这个世界最友好的入门方式，因为USB子系统替驱动程序承担了异常大量的工作。在USB中设置批量传输与在PCI Express网卡上设置DMA环不是同一类问题。USB核心管理底层的DMA簿记工作；你的驱动程序工作在"告诉我这个传输什么时候完成"的层面。先学习USB模式使后面的硬件章节（存储、网络、第7部分中的嵌入式总线）不那么令人生畏，因为到那时，特定传输层驱动程序的基本形态已经为人所熟悉。
 
-The `myfirst` 驱动程序's path through this chapter is concrete. It picks up at version `1.8-maintenance` from the end of 第25章. It adds a new source file, `myfirst_usb.c`, compiled into a new 内核模块, `myfirst_usb.ko`. The new module declares itself dependent on `usb`, lists a single vendor and product identifier in its 匹配表, 探测 and 附加 on 热插拔, allocates one bulk-in and one bulk-out transfer, exposes a `/dev/myfirst_usb0` node, echoes incoming bytes to the 内核 log and copies them back out on a read, handles 分离 cleanly when the cable is pulled, and carries forward every 第25章 discipline without exception. The labs exercise each piece in turn. By the end of the chapter, there is a second 驱动程序 in the family, a new source layout to accommodate it, and a working example of a FreeBSD USB驱动程序 that the reader has typed themselves.
+`myfirst` 驱动程序在本章中的路径是具体的。它从第25章末尾的版本 `1.8-maintenance` 继续。它添加了一个新的源文件 `myfirst_usb.c`，编译为一个新的内核模块 `myfirst_usb.ko`。新模块声明自己依赖于 `usb`，在其匹配表中列出一个供应商和产品标识符，在热插拔时进行探测和附加，分配一个批量输入和一个批量输出传输，暴露一个 `/dev/myfirst_usb0` 节点，将传入的字节回显到内核日志并在读取时将其复制回去，在拔出线缆时干净地处理分离，并无一例外地继承了第25章的所有规范。实验环节依次练习每个部分。到本章结束时，家族中将拥有第二个驱动程序、一个新的源代码布局来容纳它，以及一个读者亲手编写的可工作的FreeBSD USB驱动程序示例。
 
-Because this is also a chapter about serial 设备, the chapter spends time on the serial half of its scope even though `myfirst_usb` itself is not a 串行驱动程序. The serial material teaches how `uart(4)` is laid out, how `ucom(4)` fits in, how termios carries 波特率 and 奇偶校验 and 流控制 from user space down to hardware, and how to test serial 接口 without physical hardware using `nmdm(4)`. The serial material does not build a new UART hardware 驱动程序 from scratch. Writing a UART hardware 驱动程序 is a specialised undertaking that is almost never the right choice in a modern environment: the existing `ns8250` 驱动程序 in the base system already handles every PC-compatible 串行端口, every common PCI serial card, and the ARM PL011 that most virtualised platforms present. The chapter teaches the serial subsystem at the level the reader actually needs: how it is organised, how to read existing 驱动程序, how termios reaches a 驱动程序's `param` method, how to use the subsystem from user space, and what to do when the goal is a USB-to-串行驱动程序 (the common case) rather than a new hardware 驱动程序 (the rare case).
+由于本章也是关于串行设备的章节，因此本章花时间在串行方面的内容上，尽管 `myfirst_usb` 本身不是串行驱动程序。串行部分教授 `uart(4)` 是如何布局的、`ucom(4)` 如何融入其中、termios如何将波特率、奇偶校验和流控制从用户空间传递到硬件，以及如何使用 `nmdm(4)` 在没有物理硬件的情况下测试串行接口。串行部分不会从头构建一个新的UART硬件驱动程序。编写UART硬件驱动程序是一项专门的工作，在现代环境中几乎从来不是正确的选择：基本系统中现有的 `ns8250` 驱动程序已经处理了所有PC兼容的串行端口、所有常见的PCI串行卡，以及大多数虚拟化平台所提供的ARM PL011。本章在读者实际需要的层面上教授串行子系统：它是如何组织的、如何阅读现有的驱动程序、termios如何到达驱动程序的 `param` 方法、如何从用户空间使用该子系统，以及当目标是USB转串行驱动程序（常见情况）而非新硬件驱动程序（罕见情况）时该怎么做。
 
-The rhythm of 第26章 is the rhythm of pattern recognition. The reader will leave the chapter knowing what a USB驱动程序 looks like, what a 串行驱动程序 looks like, where the two overlap, where they differ from the pseudo-驱动程序 of Parts 2 through 5, and how to test both without a lab full of adapters. Those are the foundations of transport-specific 驱动程序 development. 第27章 will then apply the same discipline to storage, and 第28章 will apply it to networking, each time taking the same general pattern and bending it to a new transport's rules.
+第26章的节奏是模式识别的节奏。读者离开本章时将知道USB驱动程序是什么样的，串行驱动程序是什么样的，两者在哪里重叠，它们与第2到第5部分的伪驱动程序有何不同，以及如何在没有满实验室适配器的情况下测试两者。这些是特定传输层驱动程序开发的基础。第27章随后将把同样的规范应用于存储，第28章将把它应用于网络，每次都采用相同的通用模式并将其弯曲到新传输层的规则中。
 
-### Where 第25章 Left the Driver
+### 第25章为驱动程序留下的起点
 
-A short checkpoint before the new work starts. 第26章 extends the 驱动程序 family produced at the end of 第25章, tagged as version `1.8-maintenance`. If any of the items below is uncertain, return to 第25章 and resolve it before starting this chapter, because the new material assumes every 第25章 primitive is working and every habit is in place.
+在开始新工作之前做一个简短的检查。第26章扩展了第25章末尾生成的驱动程序家族，标记为版本 `1.8-maintenance`。如果以下任何项目不确定，请在开始本章之前返回第25章并解决它，因为新材料假定第25章的每个原语都在工作，每个习惯都已养成。
 
-- Your 驱动程序 source matches 第25章 Stage 4. `myfirst.ko` compiles cleanly, identifies itself as `1.8-maintenance` in `kldstat -v`, and carries the full `MYFIRST_VERSION`, `MODULE_VERSION`, and `MYFIRST_IOCTL_VERSION` triple.
-- The source layout is split: `myfirst_总线.c`, `myfirst_cdev.c`, `myfirst_ioctl.c`, `myfirst_sysctl.c`, `myfirst_debug.c`, `myfirst_log.c`, with `myfirst.h` as the shared private header.
-- The rate-limited log macro `DLOG_RL` is in place and tied to a `struct myfirst_ratelimit` inside the softc.
-- The `goto fail;` cleanup chain in `myfirst_附加` is working and exercised by a deliberate failure lab.
-- The regression script passes a hundred consecutive `kldload`/`kldunload` cycles with no residual OIDs, no orphaned cdev nodes, and no leaked memory.
-- Your lab machine runs FreeBSD 14.3 with `/usr/src` on disk, a debug 内核 with `INVARIANTS`, `WITNESS`, `WITNESS_SKIPSPIN`, `DDB`, `KDB`, `KDB_UNATTENDED`, `KDTRACE_HOOKS`, and `DDB_CTF`, and a VM snapshot at the `1.8-maintenance` state you can revert to.
+- 你的驱动程序源代码与第25章第4阶段匹配。`myfirst.ko` 编译干净，在 `kldstat -v` 中标识为 `1.8-maintenance`，并携带完整的 `MYFIRST_VERSION`、`MODULE_VERSION` 和 `MYFIRST_IOCTL_VERSION` 三元组。
+- 源代码布局已拆分：`myfirst_bus.c`、`myfirst_cdev.c`、`myfirst_ioctl.c`、`myfirst_sysctl.c`、`myfirst_debug.c`、`myfirst_log.c`，以及作为共享私有头文件的 `myfirst.h`。
+- 速率受限的日志宏 `DLOG_RL` 已就位，并与softc中的 `struct myfirst_ratelimit` 绑定。
+- `myfirst_attach` 中的 `goto fail;` 清理链正常工作，并通过一个有意的失败实验进行了验证。
+- 回归测试脚本通过一百次连续的 `kldload`/`kldunload` 循环，没有残留的OID、没有孤立的cdev节点、没有内存泄漏。
+- 你的实验机器运行FreeBSD 14.3，磁盘上有 `/usr/src`，一个启用了 `INVARIANTS`、`WITNESS`、`WITNESS_SKIPSPIN`、`DDB`、`KDB`、`KDB_UNATTENDED`、`KDTRACE_HOOKS` 和 `DDB_CTF` 的调试内核，以及一个可以回退到的 `1.8-maintenance` 状态的VM快照。
 
-That 驱动程序, those files, and those habits are what 第26章 extends. The additions introduced in this chapter live almost entirely in a new file, `myfirst_usb.c`, which becomes a second 内核模块 sharing the same conceptual family as `myfirst.ko` but building a separate `myfirst_usb.ko`. The chapter's labs exercise each stage of the new module: 探测, 附加, transfer setup, 回调 handling, /dev exposure, and 分离. The chapter does not modify `myfirst.ko` itself; the existing 驱动程序 remains a reference implementation of Parts 2 through 5, and the new 驱动程序 is its USB-transport sibling.
+那个驱动程序、那些文件和那些习惯正是第26章要扩展的内容。本章引入的新增内容几乎全部位于一个新文件 `myfirst_usb.c` 中，它成为第二个内核模块，与 `myfirst.ko` 共享相同的概念家族，但构建一个独立的 `myfirst_usb.ko`。本章的实验练习新模块的每个阶段：探测、附加、传输设置、回调处理、/dev暴露和分离。本章不修改 `myfirst.ko` 本身；现有驱动程序仍然是第2到第5部分的参考实现，新驱动程序是其USB传输层的兄弟。
 
-### What You Will Learn
+### 你将学到什么
 
-By the end of this chapter you will be able to:
+到本章结束时，你将能够：
 
-- Explain what makes a transport-specific 驱动程序 different from the pseudo-驱动程序 built in Parts 2 through 5, and name the three broad categories of work a transport-specific 驱动程序 has to add to its New总线 foundation: matching rules, transfer mechanics, and lifecycle 热插拔 handling.
-- Describe the USB mental model at the level needed to write a 驱动程序: host versus 设备 roles, hubs and ports, 设备 classes (CDC, HID, Mass Storage, Vendor), the 描述符 hierarchy (设备, configuration, 接口, 端点), the four transfer types (control, bulk, interrupt, isochronous), and the 热插拔 lifecycle.
-- Read the output of `usbconfig` and `dmesg` for a USB 设备 and identify its vendor identifier, product identifier, 接口 class, 端点 addresses, 端点 types, and 数据包 sizes.
-- Describe the serial mental model at the level needed to write a 驱动程序: the UART as a shift 注册 with a baud generator, RS-232 framing, start and 停止位, 奇偶校验, hardware 流控制 via RTS and CTS, software 流控制 via XON and XOFF, and the relationship between `struct termios`, `tty(9)`, and the 驱动程序's `param` 回调.
-- Explain the difference between FreeBSD's `uart(4)` subsystem for real UART hardware and the `ucom(4)` 框架 for USB-to-serial bridges, and name the two worlds a serial-驱动程序 author must never confuse.
-- Write a USB 设备驱动程序 that 附加 to `uhub`, declares a `STRUCT_USB_HOST_ID` 匹配表, implements `探测` and `附加` and `分离` methods, uses `usbd_transfer_setup` to configure a bulk-in and a bulk-out transfer, and unwinds cleanly through a labelled-goto chain.
-- Write a USB 传输回调 that follows the `USB_GET_STATE` state machine, handles `USB_ST_SETUP` and `USB_ST_TRANSFERRED` correctly, distinguishes `USB_ERR_CANCELLED` from other errors, and responds to a stalled 端点 with `usbd_xfer_set_stall`.
-- Expose a USB 设备 to user space through the `usb_fifo` 框架 or through a custom `make_dev_s`-注册ed `cdevsw`, and know when each is the right choice.
-- Read an existing UART 驱动程序 in `/usr/src/sys/dev/uart/` with a pattern vocabulary that makes the code's intent clear on first pass, including the `uart_class`/`uart_ops` split, the method dispatch, the baud-divisor calculation, and the tty-side wakeup machinery.
-- Translate a `struct termios` into the four arguments of a UART `param` method (baud, databits, stopbits, 奇偶校验), and know which termios flags belong to the hardware layer and which belong to the line discipline.
-- Test a USB驱动程序 against a simulated 设备 using QEMU USB redirection or `usb_template(4)`, and test a 串行驱动程序 against a `nmdm(4)` null-modem pair without any hardware at all.
-- Use `cu(1)`, `tip(1)`, `stty(1)`, `comcontrol(8)`, and `usbconfig(8)` to drive, configure, and inspect serial and USB 设备 from user space.
-- Handle 热拔出 cleanly in a USB驱动程序's 分离 path: cancel outstanding transfers, drain callouts and taskqueues, release 总线 resources, and destroy cdev nodes, all while knowing that the 设备 may already be gone by the time the 分离 method runs.
+- 解释是什么使特定传输层的驱动程序与第2到第5部分构建的伪驱动程序不同，并指出特定传输层驱动程序必须在其Newbus基础上增加的三大类工作：匹配规则、传输机制和生命周期热插拔处理。
+- 描述编写驱动程序所需的USB思维模型：主机与设备角色、集线器和端口、设备类（CDC、HID、大容量存储、Vendor）、描述符层次结构（设备、配置、接口、端点）、四种传输类型（控制、批量、中断、等时）以及热插拔生命周期。
+- 读取USB设备的 `usbconfig` 和 `dmesg` 输出，并识别其供应商标识符、产品标识符、接口类、端点地址、端点类型和数据包大小。
+- 描述编写驱动程序所需的串行思维模型：UART作为带有波特率发生器的移位寄存器、RS-232成帧、起始位和停止位、奇偶校验、通过RTS和CTS的硬件流控制、通过XON和XOFF的软件流控制，以及 `struct termios`、`tty(9)` 和驱动程序的 `param` 回调之间的关系。
+- 解释FreeBSD的 `uart(4)` 子系统（用于真实UART硬件）与 `ucom(4)` 框架（用于USB转串行桥接器）之间的区别，并指出串行驱动程序作者绝不能混淆的两个世界。
+- 编写一个附加到 `uhub` 的USB设备驱动程序，声明一个 `STRUCT_USB_HOST_ID` 匹配表，实现 `probe` 和 `attach` 及 `detach` 方法，使用 `usbd_transfer_setup` 配置一个批量输入和一个批量输出传输，并通过标签化goto链进行干净的展开。
+- 编写一个遵循 `USB_GET_STATE` 状态机的USB传输回调，正确处理 `USB_ST_SETUP` 和 `USB_ST_TRANSFERRED`，区分 `USB_ERR_CANCELLED` 和其他错误，并使用 `usbd_xfer_set_stall` 响应停滞的端点。
+- 通过 `usb_fifo` 框架或通过自定义的 `make_dev_s` 注册的 `cdevsw` 将USB设备暴露给用户空间，并知道何时选择哪种方式。
+- 使用模式词汇阅读 `/usr/src/sys/dev/uart/` 中现有的UART驱动程序，使代码的意图在第一次阅读时就清楚，包括 `uart_class`/`uart_ops` 拆分、方法分派、波特率除数计算和tty侧的唤醒机制。
+- 将 `struct termios` 转换为UART `param` 方法的四个参数（波特率、数据位、停止位、奇偶校验），并知道哪些termios标志属于硬件层，哪些属于线路规程。
+- 使用QEMU USB重定向或 `usb_template(4)` 针对模拟设备测试USB驱动程序，并使用 `nmdm(4)` 空调制解调器对在完全没有硬件的情况下测试串行驱动程序。
+- 使用 `cu(1)`、`tip(1)`、`stty(1)`、`comcontrol(8)` 和 `usbconfig(8)` 从用户空间驱动、配置和检查串行及USB设备。
+- 在USB驱动程序的分离路径中干净地处理热拔出：取消未完成的传输、排空callout和任务队列、释放总线资源并销毁cdev节点，同时要知道在分离方法运行时设备可能已经不存在了。
 
-The list is long because transport-specific 驱动程序 touch many surfaces at once. Each item is narrow and teachable. The chapter's work is making the set of items into a coherent, reusable mental picture.
+这个列表很长，因为特定传输层的驱动程序同时涉及许多方面。每个项目都是狭窄且可教的。本章的工作是将这些项目集合成一个连贯的、可重用的思维图景。
 
-### What This Chapter Does Not Cover
+### 本章不涵盖的内容
 
-Several adjacent topics are explicitly deferred to later chapters so 第26章 stays focused on the foundations of USB and 串行驱动程序 development.
+几个相邻的主题被明确推迟到后面的章节，以便第26章专注于USB和串行驱动程序开发的基础。
 
-- **USB 等时传输 and high-bandwidth video/audio streaming** are mentioned at a conceptual level in Section 1 but not developed. Isochronous transfers are the most complex of the four transfer types and are almost always used through higher-level 框架 (audio, video capture) that deserve their own treatment. 第26章 focuses on control, bulk, and 中断传输, which together cover the vast majority of USB驱动程序 work.
-- **USB 设备-mode and gadget programming** through `usb_template(4)` is introduced briefly for testing purposes but not built out. Writing a custom USB gadget is a specialised project outside the scope of a first transport-specific chapter.
-- **The internals of the USB 主机控制器 驱动程序** (`xhci`, `ehci`, `ohci`, `uhci`) are outside scope. These 驱动程序 implement the low-level protocol machinery that `usbd_transfer_setup` eventually calls; a 驱动程序 author almost never has to modify them. The chapter treats them as a stable platform.
-- **Writing a new UART hardware 驱动程序 from scratch** is outside scope. The existing `ns8250` 驱动程序 handles every common PC 串行端口, the `pl011` 驱动程序 handles most ARM platforms, and the embedded SoC 驱动程序 handle the rest. Writing a new UART 驱动程序 is the specialised work of porting FreeBSD to a new system-on-chip, which is its own topic (touched on in Part 7 alongside Device Tree and ACPI). 第26章 teaches the reader how to *read* and *understand* a UART 驱动程序 rather than how to write one.
-- **Storage 驱动程序** (GEOM providers, 块设备, VFS integration) are the subject of 第27章. USB mass storage is touched on only as an example of a USB 设备 class, not as a 驱动程序 target.
-- **Network 驱动程序** (`ifnet(9)`, mbufs, RX/TX ring bookkeeping) are the subject of 第28章. USB network adapters are mentioned as an example of CDC 以太网, not as a 驱动程序 target.
-- **USB/IP for remote USB 设备 testing over a network** is mentioned as an option for readers who truly cannot obtain any USB pass-through, but is not developed. The standard testing pathway in this chapter is a local VM with 设备 redirection.
-- **Quirks and vendor-specific workarounds** through `usb_quirk(4)` are mentioned but not developed. A 驱动程序 author who needs quirks is already past the level this chapter teaches.
-- **Bluetooth, Wi-Fi, and other wireless transports that happen to use USB** as their physical 总线 are outside scope. Those stacks involve protocols well beyond USB itself and are their own bodies of work.
-- **Transport-agnostic abstraction for multi-总线 驱动程序** (the same 驱动程序 logic plugging into PCI, USB, and serial via a common 接口) is deferred to Part 7's portability chapter.
+- **USB等时传输和高带宽数字视频/音频流**在第1节中在概念层面提及但未展开。等时传输是四种传输类型中最复杂的，几乎总是通过更高级别的框架（音频、视频捕获）来使用，这些框架值得单独讨论。第26章专注于控制、批量和中断传输，它们共同覆盖了绝大多数USB驱动程序工作。
+- **USB设备模式和gadget编程**通过 `usb_template(4)` 为测试目的做了简要介绍但未展开。编写自定义USB gadget是一个专门的项目，超出了第一个特定传输层章节的范围。
+- **USB主机控制器驱动程序的内部机制**（`xhci`、`ehci`、`ohci`、`uhci`）不在范围内。这些驱动程序实现了 `usbd_transfer_setup` 最终调用的底层协议机制；驱动程序作者几乎不需要修改它们。本章将它们视为稳定平台。
+- **从头编写新的UART硬件驱动程序**不在范围内。现有的 `ns8250` 驱动程序处理所有常见的PC串行端口，`pl011` 驱动程序处理大多数ARM平台，嵌入式SoC驱动程序处理其余的。编写新的UART驱动程序是将FreeBSD移植到新片上系统的专门工作，这是一个独立的主题（在第7部分中与设备树和ACPI一起涉及）。第26章教读者如何*阅读*和*理解*UART驱动程序，而不是如何编写一个。
+- **存储驱动程序**（GEOM提供者、块设备、VFS集成）是第27章的主题。USB大容量存储仅作为USB设备类的示例提及，而非驱动程序目标。
+- **网络驱动程序**（`ifnet(9)`、mbuf、RX/TX环簿记）是第28章的主题。USB网络适配器仅作为CDC以太网示例提及，而非驱动程序目标。
+- **通过网络进行远程USB设备测试的USB/IP**作为真正无法获得任何USB直通的读者的选项提及，但未展开。本章的标准测试路径是带有设备重定向的本地VM。
+- **通过 `usb_quirk(4)` 的quirk和供应商特定的变通方法**已提及但未展开。需要quirk的驱动程序作者已经超出了本章所教授的水平。
+- **恰好使用USB作为物理总线的蓝牙、Wi-Fi和其他无线传输**不在范围内。这些协议栈涉及远超USB本身的协议，是独立的工作领域。
+- **多总线驱动程序的传输无关抽象**（通过公共接口将相同驱动程序逻辑插入PCI、USB和串行）推迟到第7部分的可移植性章节。
 
-Staying inside those lines keeps 第26章 a chapter about *the USB and serial transports*, not a chapter about every technique a senior transport-specific 内核 developer might use on a senior transport-specific 内核 problem.
+保持在这些界限内使得第26章成为一本关于*USB和串行传输层*的章节，而不是关于高级特定传输层内核开发者在高级特定传输层内核问题上可能使用的每一种技术的章节。
 
-### Where We Are in 第6部分
+### 我们在第6部分的位置
 
-第6部分 has three chapters. 第26章 is the opening chapter and teaches transport-specific 驱动程序 development through USB and serial 设备. 第27章 teaches transport-specific 驱动程序 development through storage 设备 and the VFS layer. 第28章 teaches it through 网络接口. The three chapters are structurally parallel in the sense that each introduces a transport, maps the subsystem, builds a minimal 驱动程序, and teaches hardware-free testing.
+第6部分有三个章节。第26章是开篇章节，通过USB和串行设备教授特定传输层驱动程序开发。第27章通过存储设备和VFS层教授特定传输层驱动程序开发。第28章通过网络接口教授这些内容。这三个章节在结构上是平行的，即每个章节都引入一个传输层、映射子系统、构建最小驱动程序，并教授无硬件测试。
 
-第26章 is the right place to start 第6部分 for three reasons. The first is that USB is the most gentle 引言 to hardware-backed 驱动程序: its core abstractions are smaller than storage's (no GEOM graph, no VFS), smaller than networking's (no mbuf chains, no 环形缓冲区 with head/tail pointers and interrupts mitigation), and the subsystem handles a large share of the hard parts on the 驱动程序's behalf. The second is that USB appears everywhere. Even a reader who will never write a storage or 网络驱动程序 will probably write a USB驱动程序 at some point: a thermometer, a data logger, a custom serial adapter, a factory test fixture. The third is pedagogical. The pattern USB teaches, a subsystem with 探测-and-附加 lifecycles, transfer setup through a config array, 回调-based completion, and a clean 分离 on unplug, is the same pattern (with different specifics) that storage and networking teach. Seeing it first in USB makes the next two chapters recognisable.
+第26章是开始第6部分的正确位置，有三个原因。第一，USB是对基于硬件的驱动程序最温和的入门方式：其核心抽象比存储的更小（没有GEOM图、没有VFS），比网络的更小（没有mbuf链、没有带头/尾指针和中断缓解的环形缓冲区），并且子系统代表驱动程序处理了很大一部分困难的工作。第二，USB无处不在。即使是一个永远不会编写存储或网络驱动程序的读者也可能在某个时候编写USB驱动程序：温度计、数据记录器、自定义串行适配器、工厂测试夹具。第三是教学方面的。USB教授的模式——一个具有探测和附加生命周期的子系统、通过配置数组进行传输设置、基于回调的完成以及拔出时的干净分离——与存储和网络教授的模式相同（具体细节不同）。先在USB中看到它使接下来的两章变得容易辨认。
 
-第26章 bridges forward to 第27章 by closing on a note about lifecycle: the USB 分离 path is a dress rehearsal for the storage-设备 hot-removal path, and the patterns the reader has just practised will come back the moment an external USB disk is pulled in 第27章. It also bridges backward to 第25章 by carrying every 第25章 discipline forward: `MODULE_DEPEND`, `MODULE_PNP_INFO`, the labelled-goto pattern, the errno vocabulary, rate-limited logging, version discipline, and a regression script that exercises the new module as rigorously as 第25章 exercised the old one.
+第26章通过以关于生命周期的注释作为结尾来向第27章过渡：USB分离路径是存储设备热移除路径的预演，读者刚刚练习过的模式将在第27章中拉出外部USB磁盘的那一刻回来。它还通过继承第25章的每一项规范来向第25章回溯：`MODULE_DEPEND`、`MODULE_PNP_INFO`、标签化goto模式、errno词汇表、速率受限的日志记录、版本规范，以及一个像第25章一样严格测试新模块的回归测试脚本。
 
-### A Small Note on Difficulty
+### 关于难度的一点说明
 
-If the transition from pseudo-驱动程序 to real hardware looks daunting on the first reading, that feeling is entirely normal. Every experienced FreeBSD developer had a first USB驱动程序 that did not 附加, a first serial session where `cu` refused to talk, and a first debug session where `dmesg` stayed silent. The chapter is structured to ease you into each of those moments with labs, troubleshooting notes, and exit points. If a section starts to feel overwhelming, the right move is not to push through but to stop, read the corresponding real 驱动程序 in `/usr/src`, and return when the real code makes the concept visible. The existing FreeBSD 驱动程序 are the single best teaching resource this chapter can point to, and the chapter will point to them often.
+如果从伪驱动程序到真实硬件的过渡在第一次阅读时看起来令人生畏，这种感觉是完全正常的。每一位有经验的FreeBSD开发者都有一个无法附加的第一个USB驱动程序，一个 `cu` 拒绝通信的第一个串行会话，以及一个 `dmesg` 保持沉默的第一个调试会话。本章的结构旨在通过实验、故障排除注释和退出点来缓解这些时刻。如果某个部分开始让你感到不知所措，正确的做法不是硬着头皮继续，而是停下来，阅读 `/usr/src` 中相应的真实驱动程序，然后在真实代码使概念变得可见时再回来。现有的FreeBSD驱动程序是本章能指向的最好的教学资源，本章会经常指向它们。
 
-## 读者指南: How to Use This Chapter
+## 读者指南：如何使用本章
 
-第26章 has three layers of engagement, and you can pick the layer that fits your current situation. The layers are independent enough that you can read for understanding now and return for hands-on practice later without losing continuity.
+第26章有三个参与层次，你可以选择适合你当前情况的层次。这些层次之间足够独立，你可以现在为了理解而阅读，以后再回来进行实践练习而不失去连贯性。
 
-**Reading only.** Three to four hours. Reading gives you the USB and serial mental models, the shape of the FreeBSD subsystems, and pattern recognition for reading existing 驱动程序. If you are not yet in a position to load 内核模块 (because your lab VM is unavailable, you are reading on a commute, or you have a planning meeting in thirty minutes), a reading-only pass is a worthwhile investment. The chapter is written so that the prose carries the teaching load; the code 块 are there to anchor the prose, not to replace it.
+**仅阅读。**三到四个小时。阅读为你提供USB和串行的思维模型、FreeBSD子系统的形态以及阅读现有驱动程序的模式识别能力。如果你目前还无法加载内核模块（因为你的实验VM不可用、你正在通勤时阅读，或者你在三十分钟后有一个计划会议），一次纯阅读的投入是值得的。本章的编写方式是让正文承担教学负荷；代码块是为了锚定正文，而不是替代它。
 
-**Reading plus the hands-on labs.** Eight to twelve hours over two or three sessions. The labs guide you through building `myfirst_usb.ko`, exploring real USB 设备 with `usbconfig`, setting up a simulated serial link with `nmdm(4)`, talking to it with `cu`, and running a 热拔出 stress test. The labs are where the chapter turns from explanation into reflex. If you can spare eight to twelve hours across two or three sessions, do the labs. The cost of skipping them is that the patterns stay abstract instead of becoming habit.
+**阅读加上动手实验。**两到三次会话，每次八到十二小时。实验引导你构建 `myfirst_usb.ko`、使用 `usbconfig` 探索真实的USB设备、使用 `nmdm(4)` 建立模拟串行链路、使用 `cu` 与其通信，以及运行热拔出压力测试。实验是本章从解释转化为条件反射的地方。如果你能在两到三次会话中抽出八到十二个小时，请做实验。跳过它们的代价是模式停留在抽象层面而不是变成习惯。
 
-**Reading plus the labs plus the challenge exercises.** Fifteen to twenty hours over three or four sessions. The challenge exercises push beyond the chapter's worked example into the territory where you have to adapt the pattern to a new requirement: add a control-transfer ioctl, port the 驱动程序 to the `usb_fifo` 框架, read an unfamiliar USB驱动程序 end-to-end, simulate a flaky cable with failure injection, or extend the regression script to cover the new module. The challenge material does not introduce new foundations; it stretches the ones the chapter has just taught. Spend time on the challenges in proportion to how much autonomy you expect to have on your next 驱动程序 project.
+**阅读加上实验加上挑战练习。**三到四次会话，十五到二十小时。挑战练习推动你超越本章的示例，进入你必须将模式适应新需求的领域：添加控制传输ioctl、将驱动程序移植到 `usb_fifo` 框架、从头到尾阅读一个陌生的USB驱动程序、使用故障注入模拟不稳定的线缆，或扩展回归测试脚本以覆盖新模块。挑战材料不引入新的基础；它拉伸本章刚刚教授的基础。在挑战上花费的时间与你期望在下一个驱动程序项目中拥有多少自主权成正比。
 
-Do not rush. This is the first chapter in the book whose material depends on real hardware or convincing simulation. Set aside a 块 of time when you can watch `dmesg` after `kldload` and read it slowly. A USB驱动程序 that 附加 without errors is usually right; a USB驱动程序 whose 附加 messages you have not actually read is often wrong in a way that will cost you an hour of debugging two days later. The small discipline of reading the 附加 output as it happens, rather than assuming it, is a habit worth forming in 第26章 because every subsequent transport-specific chapter depends on it.
+不要急于求成。这是本书中第一个其材料依赖于真实硬件或令人信服的模拟的章节。留出一块时间，这样你可以在 `kldload` 之后观看 `dmesg` 并慢慢阅读它。一个没有错误地附加的USB驱动程序通常是正确的；一个你没有实际阅读过其附加消息的USB驱动程序往往是错误的，这种错误会在两天后花费你一个小时的调试时间。在附加输出发生时阅读它而不是假设它的小纪律，是在第26章中值得养成的习惯，因为每个后续的特定传输层章节都依赖于它。
 
-### Recommended Pacing
+### 推荐的学习节奏
 
-Three sitting structures work well for this chapter.
+三种学习时段结构适合本章。
 
-- **Two long sittings of four to six hours each.** First sitting: 引言, 读者指南, How to Get the Most Out of This Chapter, Section 1, Section 2, and Lab 1. Second sitting: Section 3, Section 4, Section 5, Labs 2 through 5, and the 总结. The advantage of long sittings is that you stay in the mental model long enough to connect Section 1's vocabulary to Section 3's 回调 code.
+- **两次长时间学习，每次四到六小时。**第一次：引言、读者指南、如何从本章获得最大收益、第1节、第2节和实验1。第二次：第3节、第4节、第5节、实验2到5和总结。长时间学习的优势是你能停留在思维模型中足够长的时间，将第1节的词汇与第3节的回调代码联系起来。
 
-- **Four medium sittings of two to three hours each.** Sitting 1: 引言 through Section 1 and Lab 1. Sitting 2: Section 2 and Lab 2. Sitting 3: Section 3 and Labs 3 and 4. Sitting 4: Section 4, Section 5, Lab 5, and 总结. The advantage is that each sitting has a crisp milestone.
+- **四次中等时间学习，每次两到三小时。**学习1：引言到第1节和实验1。学习2：第2节和实验2。学习3：第3节和实验3、4。学习4：第4节、第5节、实验5和总结。优势是每次学习都有一个明确的里程碑。
 
-- **A linear reading pass followed by a hands-on pass.** Day one: read the entire chapter start to finish without running any code, to get the full mental model in place. Day two or day three: return to the chapter with a 内核 source tree and a lab VM open and work through the labs in sequence. The advantage of this approach is that the mental model is fully loaded before you touch code, which catches concept-level mistakes early.
+- **一次线性阅读后跟一次动手实践。**第一天：从头到尾阅读整章而不运行任何代码，以建立完整的思维模型。第二天或第三天：带着内核源代码树和打开的实验VM回到本章，按顺序完成实验。这种方法的优势是在你接触代码之前思维模型已经完全加载，这可以及早发现概念层面的错误。
 
-Do not attempt the whole chapter in a single marathon session. The material is dense, and the USB 回调 state machine in particular does not reward tired reading.
+不要试图在一次马拉松式的会话中完成整章。材料很密集，特别是USB回调状态机不适合疲劳阅读。
 
-### What a Good Study Session Looks Like
+### 一个好的学习时段是什么样的
 
-A good study session for this chapter has five elements visible at once. Put the book chapter on one side of your screen. Put the relevant FreeBSD source files in a second pane: `/usr/src/sys/dev/usb/usbdi.h`, `/usr/src/sys/dev/usb/misc/uled.c`, and `/usr/src/sys/dev/uart/uart_总线.h` are the three most useful to keep open. Put a terminal on your lab VM in a third pane. Put `man 4 usb`, `man 4 uart`, and `man 4 ucom` in a fourth pane for quick reference. Finally, keep a small note file open for questions you will want to answer later. If a term comes up you cannot define, write it in the note file and keep reading; if the same term comes up twice, look it up before continuing. This is the study posture that gets the most out of a long technical chapter.
+本章的一个好的学习时段需要同时看到五个元素。将书中的章节放在屏幕的一侧。将相关的FreeBSD源文件放在第二个窗格中：`/usr/src/sys/dev/usb/usbdi.h`、`/usr/src/sys/dev/usb/misc/uled.c` 和 `/usr/src/sys/dev/uart/uart_bus.h` 是保持打开的三个最有用的文件。将实验VM上的终端放在第三个窗格中。将 `man 4 usb`、`man 4 uart` 和 `man 4 ucom` 放在第四个窗格中以供快速参考。最后，保持打开一个小笔记文件，用于记录你以后想要回答的问题。如果出现一个你无法定义的术语，把它写在笔记文件中然后继续阅读；如果同一个术语出现两次，在继续之前查一下它。这是从一个长技术章节中获得最大收益的学习姿态。
 
-### If You Do Not Have a USB Device to Test With
+### 如果你没有USB设备可供测试
 
-Many readers will not have a spare USB 设备 that matches the vendor/product identifiers in the worked example. That is fine. Section 5 teaches three ways to proceed: QEMU USB 设备 redirection from a host to a guest, `usb_template(4)` for FreeBSD-as-USB-设备, and the simulated-设备 approach that tests 驱动程序 logic without a real 总线 at all. The chapter's worked example is written so that the 驱动程序's 匹配表 can be swapped for one matching any USB 设备 you do have on your desk. A USB flash drive will do. A mouse will do. A keyboard will do. The chapter explains how to point the 驱动程序 at whatever 设备 you happen to have, at the cost of temporarily stealing that 设备 from the 内核's built-in 驱动程序, which the chapter also covers.
+许多读者不会有一个与示例中的供应商/产品标识符匹配的备用USB设备。这没关系。第5节教授了三种继续的方法：从主机到客户机的QEMU USB设备重定向、用于FreeBSD作为USB设备的 `usb_template(4)`，以及完全不需要真实总线的模拟设备方法来测试驱动程序逻辑。本章的示例编写方式使得驱动程序的匹配表可以替换为与你桌上任何USB设备匹配的表。一个USB闪存盘就可以。一个鼠标就可以。一个键盘就可以。本章解释了如何将驱动程序指向你碰巧拥有的任何设备，代价是暂时从内核的内置驱动程序中夺取该设备，本章也涵盖了这一点。
 
-## How to Get the Most Out of This Chapter
+## 如何从本章获得最大收益
 
-Five habits pay off in this chapter more than in any of the earlier chapters.
+五个习惯在本章中的回报比在前面任何章节中都大。
 
-First, **keep four short manual-page files open in a browser tab or a terminal pane**: `usb(4)`, `usb_quirk(4)`, `uart(4)`, and `ucom(4)`. These four pages together are the tightest overview the FreeBSD project has of the subsystems this chapter introduces. None of them is long. `usb(4)` describes the subsystem from the user's perspective and lists the `/dev` entries that appear. `usb_quirk(4)` lists the quirks table and explains what a quirk is, which will save you puzzlement later when you see quirk code in real 驱动程序. `uart(4)` describes the serial subsystem from the user's perspective. `ucom(4)` describes the USB-to-serial 框架. Skim each once at the start of the chapter. When the prose refers to "consult the manual page for details," return to the appropriate page. The manual pages are authoritative; this book is commentary.
+第一，**在浏览器标签页或终端窗格中保持打开四个简短的手册页文件**：`usb(4)`、`usb_quirk(4)`、`uart(4)` 和 `ucom(4)`。这四个页面合在一起是FreeBSD项目对 本章引入的子系统最精炼的概述。它们都不长。`usb(4)` 从用户的角度描述子系统并列出出现的 `/dev` 条目。`usb_quirk(4)` 列出quirk表并解释什么是quirk，这将在你以后在真实驱动程序中看到quirk代码时为你节省困惑。`uart(4)` 从用户的角度描述串行子系统。`ucom(4)` 描述USB转串行框架。在本章开始时快速浏览每一个。当正文提到"详情请参阅手册页"时，返回相应的页面。手册页是权威的；本书是评论。
 
-Second, **keep three real 驱动程序 close to hand**. `/usr/src/sys/dev/usb/misc/uled.c` is a very small USB驱动程序 that talks to a USB-附加ed LED. It uses the `usb_fifo` 框架, which is one of the two user-visible patterns the chapter teaches, and its entire 附加 function is smaller than a page. `/usr/src/sys/dev/usb/misc/ugold.c` is a slightly larger USB驱动程序 that reads temperature data from a TEMPer thermometer through 中断传输. It demonstrates the other common transfer type and shows how a 驱动程序 uses a callout to pace its reads. `/usr/src/sys/dev/uart/uart_dev_ns8250.c` is the canonical 16550 UART 驱动程序; every PC 串行端口 in the world uses it. Read each of these three files once at the start of the chapter and once more at the end. The first read will feel largely opaque; the second will feel almost obvious. That change is the measure of progress this chapter offers.
+第二，**随时保持三个真实的驱动程序在手边**。`/usr/src/sys/dev/usb/misc/uled.c` 是一个非常小的USB驱动程序，与一个USB连接的LED通信。它使用 `usb_fifo` 框架，这是本章教授的两种用户可见模式之一，其整个附加函数不到一页。`/usr/src/sys/dev/usb/misc/ugold.c` 是一个稍大的USB驱动程序，通过中断传输从TEMPer温度计读取温度数据。它演示了另一种常见的传输类型，并展示了驱动程序如何使用callout来控制读取节奏。`/usr/src/sys/dev/uart/uart_dev_ns8250.c` 是经典的16550 UART驱动程序；世界上所有的PC串行端口都使用它。在本章开始时和结束时各读一次这三个文件。第一次阅读会感觉大部分不透明；第二次会感觉几乎显而易见。这种变化是本章所提供的进步的衡量标准。
 
-Third, **type every code addition by hand**. The `myfirst_usb.c` file grows through the chapter in roughly a dozen small increments. Each increment corresponds to a paragraph or two of prose. Typing the code by hand is what turns the prose into muscle memory. Pasting the code skips the lesson. If that sounds pedantic, notice that every working USB驱动程序 author has written a USB驱动程序's 附加 function at least a dozen times; typing this one is the first of that dozen.
+第三，**手动输入每个代码添加**。`myfirst_usb.c` 文件通过大约十几个小的增量在本章中增长。每个增量对应一两段正文。手动输入代码是将正文转化为肌肉记忆的方式。粘贴代码会跳过这一课。如果这听起来很迂腐，请注意每个能工作的USB驱动程序作者都至少写过十几次USB驱动程序的附加函数；输入这个是那十几次中的第一次。
 
-Fourth, **read `dmesg` after every `kldload`**. A USB驱动程序 produces a predictable pattern of 附加 messages: the 设备 is detected on a port, the 驱动程序 探测, the match succeeds, the 驱动程序 附加, the `/dev` node appears. If any of those steps is missing, something is wrong, and the sooner you notice the missing step, the sooner you fix it. The smallest discipline this chapter can give you is the habit of running `dmesg | tail -30` immediately after `kldload` and reading every line. If the output is boring, the 驱动程序 probably works. If the output surprises you, investigate before proceeding.
+第四，**在每次 `kldload` 后阅读 `dmesg`**。一个USB驱动程序产生一组可预测的附加消息模式：设备在端口上被检测到，驱动程序探测，匹配成功，驱动程序附加，`/dev` 节点出现。如果这些步骤中有任何一步缺失，说明出了问题，你越早注意到缺失的步骤，就能越早修复它。本章能给你的最小纪律是在 `kldload` 之后立即运行 `dmesg | tail -30` 并阅读每一行的习惯。如果输出很无聊，驱动程序可能工作正常。如果输出让你惊讶，在继续之前进行调查。
 
-Fifth, **after every section, ask yourself what would happen if you pulled the cable**. The question sounds silly; it is central. A well-written transport-specific 驱动程序 is always one that handles being removed while in use. A USB驱动程序 in particular runs in a world where 热拔出 is the normal operating condition. If you find yourself writing a section of code and cannot answer "what if the cable were pulled right here," the section is not yet finished. 第26章 returns to this question often, not as rhetoric but as a discipline.
+第五，**在每一节之后，问问自己如果拔掉线缆会发生什么**。这个问题听起来很傻；但它是核心问题。一个写得好的特定传输层驱动程序总是能够处理在使用中被移除的情况。USB驱动程序尤其运行在一个热拔出是正常工作条件的世界中。如果你发现自己在编写一段代码但无法回答"如果此时线缆被拔出会怎样"，那么这段代码还没有完成。第26章经常回到这个问题，不是作为修辞，而是作为一项纪律。
 
-### What to Do When Something Does Not Work
+### 当某些东西不工作时该怎么办
 
-It will not all work the first time. USB驱动程序 have a few common failure modes, and the chapter documents each of them in the troubleshooting section at the end. A short preview of the most common ones:
+不会所有东西都在第一次就工作。USB驱动程序有一些常见的故障模式，本章在最后的故障排除部分记录了每一种模式。最常见的一些的简要预览：
 
-- The 驱动程序 compiles but does not 附加 when the 设备 is plugged in. Usually the 匹配表 has the wrong vendor or product identifier. The fix is to verify the identifier with `usbconfig dump_设备_desc`.
-- The 驱动程序 附加 but the `/dev` node does not appear. Usually the `usb_fifo_附加` call failed because the name conflicts with an existing 设备. The fix is to change the `basename` or to 分离 the conflicting 驱动程序 first.
-- The 驱动程序 附加 but the first transfer never completes. Usually `usbd_transfer_start` was not called, or the transfer was submitted with a zero-length 帧. The fix is to trace through `USB_ST_SETUP` and confirm that `usbd_xfer_set_帧_len` was called before `usbd_transfer_submit`.
-- The 驱动程序 附加 but the 内核 panics on unplug. Usually the 分离 path is missing a `usbd_transfer_unsetup` call or a `usb_fifo_分离` call. The fix is to run the 分离 sequence under INVARIANTS and follow the WITNESS output back to the first dropped cleanup.
+- 驱动程序编译通过但在设备插入时不附加。通常是匹配表中的供应商标识符或产品标识符错误。修复方法是使用 `usbconfig dump_device_desc` 验证标识符。
+- 驱动程序附加但 `/dev` 节点不出现。通常是 `usb_fifo_attach` 调用因为名称与现有设备冲突而失败。修复方法是更改 `basename` 或先分离冲突的驱动程序。
+- 驱动程序附加但第一次传输从未完成。通常是没有调用 `usbd_transfer_start`，或者传输以零长度帧提交。修复方法是跟踪 `USB_ST_SETUP` 并确认在 `usbd_transfer_submit` 之前调用了 `usbd_xfer_set_frame_len`。
+- 驱动程序附加但在拔出时内核崩溃。通常是分离路径缺少 `usbd_transfer_unsetup` 调用或 `usb_fifo_detach` 调用。修复方法是在INVARIANTS下运行分离序列，并按照WITNESS输出回溯到第一个被遗漏的清理。
 
-The troubleshooting section at the end of the chapter develops each of these cases in full, with diagnostic commands and expected output. The goal of this chapter is not to have everything work on the first try; the goal is to have a systematic debugging posture that turns every failure into a teachable moment.
+本章末尾的故障排除部分详细展开了每一种情况，包括诊断命令和预期输出。本章的目标不是让一切在第一次尝试时就工作；目标是建立一个系统的调试姿态，将每一次失败转化为一次教学时刻。
 
-### Roadmap Through the Chapter
+### 本章路线图
 
-The sections in order are:
+各节顺序如下：
 
-1. **Understanding USB and Serial Device Fundamentals.** The USB mental model at the level needed to write a 驱动程序: host and 设备, hubs and ports, classes, 描述符, transfer types, 热插拔 lifecycle. The serial mental model: UART hardware, RS-232 framing, 波特率, 奇偶校验, 流控制, the tty discipline. The FreeBSD-specific split between `uart(4)` and `ucom(4)`. A first exercise with `usbconfig` and `dmesg` that grounds the vocabulary in a 设备 you can see.
+1. **理解USB和串行设备基础。**编写驱动程序所需的USB思维模型：主机与设备、集线器和端口、设备类、描述符、传输类型、热插拔生命周期。串行思维模型：UART硬件、RS-232成帧、波特率、奇偶校验、流控制、tty规程。FreeBSD特有的 `uart(4)` 和 `ucom(4)` 之间的分工。一个使用 `usbconfig` 和 `dmesg` 的初步练习，将词汇建立在你可见的设备之上。
 
-2. **Writing a USB Device Driver.** The FreeBSD USB subsystem layout. The New总线 shape of a USB驱动程序. `STRUCT_USB_HOST_ID` and the 匹配表. `DRIVER_MODULE` with `uhub` as the parent. `MODULE_DEPEND` on `usb`. `USB_PNP_HOST_INFO` for auto-load. The 探测 method using `usbd_lookup_id_by_uaa`. The 附加 method, the softc layout, the labelled-goto cleanup chain in 附加 and 分离.
+2. **编写USB设备驱动程序。**FreeBSD USB子系统布局。USB驱动程序的Newbus形态。`STRUCT_USB_HOST_ID` 和匹配表。以 `uhub` 为父设备的 `DRIVER_MODULE`。对 `usb` 的 `MODULE_DEPEND`。用于自动加载的 `USB_PNP_HOST_INFO`。使用 `usbd_lookup_id_by_uaa` 的探测方法。附加方法、softc布局、附加和分离中的标签化goto清理链。
 
-3. **Performing USB Data Transfers.** The `struct usb_config` array. `usbd_transfer_setup` and the lifetime of a `struct usb_xfer`. Control, bulk, and 中断传输 shapes. The `usb_回调_t` state machine and `USB_GET_STATE`. Stall handling with `usbd_xfer_set_stall`. Frame-level operations (`usbd_xfer_set_帧_len`, `usbd_copy_in`, `usbd_copy_out`). Creating a `/dev` entry for the USB 设备 through the `usb_fifo` 框架. A worked example that sends bytes down a bulk-out 端点 and reads bytes back from a bulk-in 端点.
+3. **执行USB数据传输。**`struct usb_config` 数组。`usbd_transfer_setup` 和 `struct usb_xfer` 的生命周期。控制、批量和中断传输的形态。`usb_callback_t` 状态机和 `USB_GET_STATE`。使用 `usbd_xfer_set_stall` 的停滞处理。帧级操作（`usbd_xfer_set_frame_len`、`usbd_copy_in`、`usbd_copy_out`）。通过 `usb_fifo` 框架为USB设备创建 `/dev` 条目。一个将字节发送到批量输出端点并从批量输入端点读回字节的完整示例。
 
-4. **Writing a Serial (UART) Driver.** The `uart(4)` subsystem at the level needed to read a real 驱动程序. The `uart_class`/`uart_ops` split. The method table dispatched through kobj. The relationship between `uart_总线_附加` and `uart_tty_附加`. Baud rate, 数据位, 停止位, 奇偶校验, and the `param` method. RTS/CTS hardware 流控制. `struct termios` and how it reaches the 驱动程序. `/dev/ttyu*` versus `/dev/cuau*` in FreeBSD. The `ucom(4)` 框架 for USB-to-serial bridges. A guided reading of the `ns8250` 驱动程序 as a canonical example.
+4. **编写串行（UART）驱动程序。**阅读真实驱动程序所需级别的 `uart(4)` 子系统。`uart_class`/`uart_ops` 拆分。通过kobj分派的方法表。`uart_bus_attach` 和 `uart_tty_attach` 之间的关系。波特率、数据位、停止位、奇偶校验和 `param` 方法。RTS/CTS硬件流控制。`struct termios` 以及它如何到达驱动程序。FreeBSD中的 `/dev/ttyu*` 与 `/dev/cuau*`。用于USB转串行桥接器的 `ucom(4)` 框架。以 `ns8250` 驱动程序为经典示例的引导阅读。
 
-5. **Testing USB和串行驱动程序 Without Real Hardware.** `nmdm(4)` virtual null-modem pairs for serial testing. `cu(1)` and `tip(1)` for terminal access. `stty(1)` and `comcontrol(8)` for configuration. QEMU USB 设备 redirection for host-to-guest pass-through. `usb_template(4)` for FreeBSD-as-gadget testing. Software loopback patterns that exercise 驱动程序 logic without any 设备 at all. A reproducible test harness that runs a regression without human intervention.
+5. **在没有真实硬件的情况下测试USB和串行驱动程序。**用于串行测试的 `nmdm(4)` 虚拟空调制解调器对。用于终端访问的 `cu(1)` 和 `tip(1)`。用于配置的 `stty(1)` 和 `comcontrol(8)`。用于主机到客户机直通的QEMU USB设备重定向。用于FreeBSD作为gadget测试的 `usb_template(4)`。在完全没有任何设备的情况下测试驱动程序逻辑的软件环回模式。一个无需人工干预即可运行回归测试的可复现的测试工具。
 
-After the five sections come a set of hands-on labs, a set of challenge exercises, a troubleshooting reference, a 总结 that closes 第26章's story, a bridge to 第27章, and a glossary. Read linearly on a first pass.
+五个小节之后是一组动手实验、一组挑战练习、一个故障排除参考、一个结束第26章故事的总结、一个通往第27章的过渡和一个术语表。第一次阅读时请按顺序线性阅读。
 
-## 第1节： Understanding USB and Serial Device Fundamentals
+## 第1节：理解USB和串行设备基础
 
-The first section teaches the mental models the rest of the chapter relies on. USB and serial 设备 share a surprising 挂载 of machinery at the `tty`/`cdevsw` layer, and at the same time they differ dramatically at the transport layer. A reader who is clear on both the similarities and the differences will find Sections 2 through 5 straightforward. A reader who is not will find the subsequent code confusingly non-obvious. This section is the single best place to spend an extra thirty minutes if you want the rest of the chapter to feel easier.
+第一节教授本章其余部分所依赖的思维模型。USB和串行设备在 `tty`/`cdevsw` 层共享了惊人的大量机制，同时它们在传输层又有显著差异。清楚了解两者相似之处和不同之处的读者会发现第2到第5节很直观。不清楚的读者会发现后续代码令人困惑地不直观。如果你想让本章的其余部分感觉更容易，这个小节是额外花三十分钟的最佳地点。
 
-The section is organised in three arcs. The first arc establishes what a *transport* is, and why transport-specific 驱动程序 look different from the pseudo-驱动程序 of Parts 2 through 5. The second arc teaches the USB model: host and 设备, hubs and ports, classes, 描述符, 端点, transfer types, and the 热插拔 lifecycle. The third arc teaches the serial model: the UART, RS-232 framing, 波特率, 奇偶校验, 流控制, and the FreeBSD-specific split between `uart(4)` and `ucom(4)`. A first exercise at the end grounds the vocabulary in a 设备 you can see with `usbconfig`.
+本节按三个弧线组织。第一个弧线确立了什么是*传输层*，以及为什么特定传输层的驱动程序与第2到第5部分的伪驱动程序看起来不同。第二个弧线教授USB模型：主机与设备、集线器和端口、设备类、描述符、端点、传输类型和热插拔生命周期。第三个弧线教授串行模型：UART、RS-232成帧、波特率、奇偶校验、流控制以及FreeBSD特有的 `uart(4)` 和 `ucom(4)` 之间的分工。最后的一个初步练习将词汇建立在你通过 `usbconfig` 可以看到的设备之上。
 
-### What a Transport Is, and Why It Matters Here
+### 什么是传输层，以及为什么它在这里很重要
 
-A *transport* is the protocol and the lifecycle by which a 设备 is connected to the rest of the system. Up to this point in the book, the `myfirst` 驱动程序 has had no transport. Its 设备 existed entirely in the New总线 tree, connected to the `nexus` through the `pseudo` parent, and its data flowed into a 缓冲区 in 内核 memory. That makes `myfirst` a *pseudo-设备*: a 设备 whose existence is entirely a software fiction. Pseudo-设备 are essential teaching tools. They let the reader learn New总线, softc management, 字符设备 接口, ioctl handling, locking, and the rest, without also learning the specifics of a 总线. By now, those topics are covered.
+*传输层*是设备连接到系统其余部分的协议和生命周期。到目前为止，`myfirst` 驱动程序一直没有传输层。它的设备完全存在于Newbus树中，通过 `pseudo` 父设备连接到 `nexus`，其数据流入内核内存中的缓冲区。这使得 `myfirst` 成为一个*伪设备*：一个完全由软件虚构的设备。伪设备是必不可少的教学工具。它们让读者在不学习总线细节的情况下学习Newbus、softc管理、字符设备接口、ioctl处理、锁定等。到目前为止，这些主题已经涵盖完毕。
 
-A transport-specific 驱动程序, by contrast, is one that 附加 to a *real* 总线. The 总线 has its own rules. It has its own way of saying "a new 设备 has appeared." It has its own way of delivering data. It has its own way of saying "a 设备 has been removed." A transport-specific 驱动程序 is still a New总线 驱动程序 (that never changes in FreeBSD), but its parent is no longer the abstract `pseudo` 总线. Its parent is `uhub` if it is a USB驱动程序, `pci` if it is a PCI 驱动程序, `acpi` or `fdt` if it is on an embedded platform, and so on. The 驱动程序's 附加 method receives arguments specific to that 总线. Its cleanup responsibilities include 总线-specific resources in addition to the ones it already had. Its lifecycle is the 总线's lifecycle, not the module's lifecycle.
+相比之下，特定传输层的驱动程序是附加到*真实*总线的驱动程序。总线有自己的规则。它有自己的方式说"一个新设备出现了"。它有自己的数据传递方式。它有自己的方式说"一个设备已被移除"。特定传输层的驱动程序仍然是一个Newbus驱动程序（这在FreeBSD中永远不会改变），但其父设备不再是抽象的 `pseudo` 总线。如果它是USB驱动程序，其父设备是 `uhub`；如果是PCI驱动程序，则是 `pci`；如果在嵌入式平台上，则是 `acpi` 或 `fdt`，等等。驱动程序的附加方法接收特定于该总线的参数。其清理责任除了已有的之外，还包括总线特定的资源。其生命周期是总线的生命周期，而不是模块的生命周期。
 
-Three broad categories of work distinguish a transport-specific 驱动程序 from the pseudo-驱动程序 of Parts 2 through 5. They are worth naming explicitly because they recur in every transport chapter in 第6部分.
+三大类工作将特定传输层的驱动程序与第2到第5部分的伪驱动程序区分开来。它们值得明确指出，因为它们在第6部分的每个传输层章节中都会出现。
 
-The first is *matching*. A pseudo-驱动程序 附加 on module load; there is nothing to match because there is no real 设备. A transport-specific 驱动程序 has to declare which 设备 it handles. On USB, this means a 匹配表 of vendor and product identifiers. On PCI, it means a 匹配表 of vendor and 设备 identifiers. On ACPI or FDT, it means a 匹配表 of string identifiers. The 内核's 总线 code enumerates 设备 as they appear and offers each one to every 注册ed 驱动程序 in turn; the 驱动程序's 探测 method decides whether to claim the 设备. Getting the 匹配表 right is the first obstacle every transport-specific 驱动程序 faces.
+第一类是*匹配*。伪驱动程序在模块加载时附加；没有什么需要匹配的，因为没有真实设备。特定传输层的驱动程序必须声明它处理哪些设备。在USB上，这意味着一个供应商和产品标识符的匹配表。在PCI上，这意味着一个供应商和设备标识符的匹配表。在ACPI或FDT上，这意味着一个字符串标识符的匹配表。内核的总线代码在设备出现时枚举它们，并依次将每个设备提供给每个已注册的驱动程序；驱动程序的探测方法决定是否认领该设备。正确设置匹配表是每个特定传输层驱动程序面临的第一个障碍。
 
-The second is *transfer mechanics*. A pseudo-驱动程序's `read` and `write` methods touch a 缓冲区 in RAM. A transport-specific 驱动程序's `read` and `write` methods have to arrange for data to move across the 总线. On USB, this means setting up one or more transfers using `usbd_transfer_setup`, submitting them with `usbd_transfer_submit`, and handling completion in a 回调. On PCI, this means programming a DMA engine. On storage, this means translating 块 requests into 总线 transactions. The transfer mechanism is 总线-specific and is where most of a transport-specific 驱动程序's new code lives.
+第二类是*传输机制*。伪驱动程序的 `read` 和 `write` 方法访问RAM中的缓冲区。特定传输层驱动程序的 `read` 和 `write` 方法必须安排数据在总线上移动。在USB上，这意味着使用 `usbd_transfer_setup` 设置一个或多个传输，使用 `usbd_transfer_submit` 提交它们，并在回调中处理完成。在PCI上，这意味着编程DMA引擎。在存储上，这意味着将块请求转换为总线事务。传输机制是总线特定的，是特定传输层驱动程序大部分新代码所在的地方。
 
-The third is *热插拔 lifecycle*. A pseudo-驱动程序 is loaded when the module is loaded and 分离ed when the module is unloaded. That is a simple lifecycle; `kldload` and `kldunload` are the only events it has to respond to. A transport-specific 驱动程序 has to deal with *热插拔*: the 设备 can appear and disappear independently of the module's lifecycle. A USB 设备 can be unplugged in the middle of a read. A SATA disk can be yanked out while the 文件系统 on it is 挂载ed. An 以太网 cable can be pulled while a TCP connection is open. The 驱动程序's 附加 method runs when a 设备 is physically inserted; its 分离 method runs when a 设备 is physically removed. The 分离 may happen while the 驱动程序 is still in use. Handling this correctly is the third big obstacle every transport-specific 驱动程序 faces.
+第三类是*热插拔生命周期*。伪驱动程序在模块加载时加载，在模块卸载时分离。那是一个简单的生命周期；`kldload` 和 `kldunload` 是它需要响应的仅有事件。特定传输层的驱动程序必须处理*热插拔*：设备可以独立于模块的生命周期出现和消失。一个USB设备可以在读取过程中被拔出。一个SATA磁盘可以在其上的文件系统已挂载时被拔出。一个以太网线缆可以在TCP连接打开时被拔出。驱动程序的附加方法在设备被物理插入时运行；其分离方法在设备被物理移除时运行。分离可能在驱动程序仍在使用时发生。正确处理这是每个特定传输层驱动程序面临的第三个大障碍。
 
-The rest of 第6部分 is about those three categories of work in three different transports. 第26章 teaches USB and serial. 第27章 teaches storage. 第28章 teaches networking. The matching, the transfer mechanics, and the 热插拔 lifecycle look different in each transport, but the three-category structure repeats. That structure is what makes it possible to learn one transport well and then learn the next one quickly.
+第6部分的其余内容是关于三种不同传输层中的这三类工作。第26章教授USB和串行。第27章教授存储。第28章教授网络。匹配、传输机制和热插拔生命周期在每种传输层中看起来不同，但三类别结构是重复的。正是这种结构使得可以先学好一种传输层，然后快速学习下一种成为可能。
 
-A useful shorthand: in Parts 2 through 5, you learned how to *be* a New总线 驱动程序. In 第6部分, you learn how to *附加* to a 总线 that has its own ideas about when and how you exist.
+一个有用的简写：在第2到第5部分中，你学习了如何*成为*一个Newbus驱动程序。在第6部分中，你学习如何*附加*到一个对你何时以及如何存在有自己想法的总线。
 
-### The USB Mental Model
+### USB思维模型
 
-USB, the Universal Serial Bus, is a tree-structured, host-controlled, 热插拔gable serial 总线. Every one of those adjectives matters, and understanding each of them is the foundation of writing a USB驱动程序.
+USB，即通用串行总线，是一种树状结构、主机控制、支持热插拔的串行总线。这些形容词中每一个都很重要，理解它们中的每一个是编写USB驱动程序的基础。
 
-*Tree-structured* means that USB 设备 do not sit on a shared wire like 设备 on an I2C 总线 or an old ISA 总线. Every USB 设备 has exactly one upstream connection, to a parent hub. The root of the tree is the *root hub*, which is exposed by the USB 主机控制器. Downstream of the root hub are other hubs and 设备. A hub has a fixed number of downstream ports; each port can either be empty or connect to exactly one 设备. The tree is rebuilt on boot and updated every time a 设备 is connected or disconnected. On FreeBSD, `usbconfig` shows this tree; on a fresh boot of a typical desktop you will see something like:
+*树状结构*意味着USB设备不像I2C总线或旧式ISA总线上的设备那样连接在共享线上。每个USB设备恰好有一个上游连接，连接到父集线器。树的根部是*根集线器*，由USB主机控制器暴露。根集线器的下游是其他集线器和设备。一个集线器有固定数量的下游端口；每个端口可以为空或恰好连接一个设备。这棵树在启动时重建，并在每次设备连接或断开时更新。在FreeBSD上，`usbconfig` 显示这棵树；在典型桌面的全新启动上，你会看到类似以下内容：
 
 ```text
 ugen0.1: <Intel EHCI root HUB> at usbus0, cfg=0 md=HOST spd=HIGH
@@ -207,37 +207,37 @@ ugen0.2: <Some Vendor Hub> at usbus0, cfg=0 md=HOST spd=HIGH
 ugen0.3: <Some Vendor Mouse> at usbus0, cfg=0 md=HOST spd=LOW
 ```
 
-The tree structure matters to a 驱动程序 author for two reasons. First, it tells you that when you write a USB驱动程序, your 驱动程序's *parent* in the New总线 tree is `uhub`. Every USB 设备 sits under a hub. When you write `DRIVER_MODULE(myfirst_usb, uhub, ...)`, you are telling the 内核 "my 驱动程序 附加 to children of `uhub`," which is the FreeBSD way of saying "my 驱动程序 附加 to USB 设备." Second, the tree structure means that enumeration is dynamic. The 内核 does not know what 设备 are on the tree until the tree is walked; a 驱动程序 is offered each 设备 as it appears, and has to decide whether to claim it.
+树状结构对驱动程序作者来说很重要，有两个原因。第一，它告诉你当你编写USB驱动程序时，你的驱动程序在Newbus树中的*父设备*是 `uhub`。每个USB设备都位于一个集线器之下。当你编写 `DRIVER_MODULE(myfirst_usb, uhub, ...)` 时，你是在告诉内核"我的驱动程序附加到 `uhub` 的子设备"，这是FreeBSD表达"我的驱动程序附加到USB设备"的方式。第二，树状结构意味着枚举是动态的。内核在遍历树之前不知道树上有哪些设备；驱动程序在设备出现时被依次提供给每个设备，并必须决定是否认领它。
 
-*Host-controlled* means that one side of the 总线 is the master, the *host*, and all other sides are slaves, the *设备*. The host initiates every transfer; 设备 respond. A USB keyboard does not push keystrokes to the host whenever a key is pressed; the host polls the keyboard on an *interrupt 端点* many times per second, and the keyboard replies with "no new keys" or "key 'A' has been pressed" in response to each poll. This polling-and-response model has important consequences for a 驱动程序. Your 驱动程序, running on the host, has to initiate every transfer. A 设备 cannot spontaneously send data; it can only respond when the host asks. What looks from user space like "the 驱动程序 received data" is always, underneath, "the 驱动程序 had a pending receive transfer and the 主机控制器 notified us that the transfer completed."
+*主机控制*意味着总线的一侧是主设备，即*主机*，所有其他侧是从设备，即*设备*。主机发起每一次传输；设备响应。一个USB键盘不会在按键被按下时向主机推送按键信息；主机每秒在一个*中断端点*上轮询键盘多次，键盘以"没有新按键"或"按键'A'已被按下"来响应每次轮询。这种轮询-响应模型对驱动程序有重要的影响。你的驱动程序运行在主机上，必须发起每一次传输。设备不能自发地发送数据；它只能在主机请求时响应。从用户空间看起来的"驱动程序接收了数据"，在底层始终是"驱动程序有一个待处理的接收传输，主机控制器通知我们传输已完成"。
 
-For most of this chapter's purposes, you are writing *host-mode* 驱动程序: 驱动程序 that run on the host side. A FreeBSD system can also be configured as a USB *设备*, through the `usb_template(4)` subsystem, and present itself as a keyboard or mass storage 设备 or CDC 以太网 接口 to another host. Device-mode 驱动程序 are a specialised topic touched on only briefly in Section 5 for testing purposes.
+出于本章大部分内容的目的，你是在编写*主机模式*驱动程序：运行在主机端的驱动程序。FreeBSD系统也可以通过 `usb_template(4)` 子系统配置为USB*设备*，并将自己呈现为键盘、大容量存储设备或CDC以太网接口给另一个主机。设备模式的驱动程序是一个专门的主题，仅在第5节中为测试目的简要涉及。
 
-*Hot-pluggable* means that 设备 can appear and disappear while the system is running, and the subsystem has to cope. The USB 主机控制器 notices when a 设备 is plugged in, a hub's port status 寄存器 tell it so, enumerates the new 设备 by asking it for its 描述符, assigns it an address on the 总线, and then offers it to any 驱动程序 whose 匹配表 applies. When a 设备 is unplugged, the 主机控制器 notices the port status change and tells the subsystem, which in turn calls the 驱动程序's 分离 method. The 分离 method may run at any time, including while the 驱动程序 is holding a transfer that will now never complete, while user space has the 驱动程序's `/dev` node open, or while the system is under load. Writing a correct 分离 method is the single hardest part of USB驱动程序 development. The chapter returns to this repeatedly.
+*热插拔*意味着设备可以在系统运行时出现和消失，子系统必须能够应对。USB主机控制器注意到设备被插入，集线器的端口状态寄存器告知它这一点，然后它通过向新设备请求其描述符来枚举它，在总线上分配一个地址，然后将其提供给任何匹配表适用的驱动程序。当设备被拔出时，主机控制器注意到端口状态变化并告知子系统，子系统依次调用驱动程序的分离方法。分离方法可能在任何时间运行，包括当驱动程序正在持有一个现在永远不会完成的传输时、当用户空间打开了驱动程序的 `/dev` 节点时，或当系统处于负载状态时。编写正确的分离方法是USB驱动程序开发中唯一最困难的部分。本章会反复回到这个话题。
 
-*Serial* means that USB is a wire-level serial protocol: bytes flow one after another on a differential pair. The speed of the 总线 has evolved over the years: low-speed (1.5 Mbps), full-speed (12 Mbps), high-speed (480 Mbps), SuperSpeed (5 Gbps), and faster variants above that. From a 驱动程序 author's perspective, the speed is mostly transparent: the 主机控制器 and the USB core handle the electrical layer and the 数据包 framing, and your 驱动程序 works at the level of "here is a 缓冲区, please send it" or "here is a 缓冲区, please fill it." The speed determines how fast data can move, but the 驱动程序 code is the same.
+*串行*意味着USB是一种线路层的串行协议：字节在差分对上一个接一个地流动。总线的速度多年来不断演进：低速（1.5 Mbps）、全速（12 Mbps）、高速（480 Mbps）、超高速（5 Gbps）以及更快的变体。从驱动程序作者的角度来看，速度大部分是透明的：主机控制器和USB核心处理电气层和数据包成帧，你的驱动程序工作在"这是一个缓冲区，请发送它"或"这是一个缓冲区，请填充它"的层面。速度决定了数据移动的速度，但驱动程序代码是相同的。
 
-With those four adjectives in place, the rest of the USB model falls into shape.
+有了这四个形容词，USB模型的其余部分就形成了。
 
-#### Device Classes and What They Mean to a Driver
+#### 设备类及其对驱动程序的意义
 
-Every USB 设备 belongs to one or more *classes*, and the class tells the host (and the 驱动程序) what kind of 设备 it is. Classes are numerical, defined by the USB Implementers Forum, and the values appear in 描述符. The ones a FreeBSD 驱动程序 author will see most often include:
+每个USB设备属于一个或多个*类*，类告诉主机（和驱动程序）它是什么类型的设备。类是数值的，由USB实现者论坛定义，值出现在描述符中。FreeBSD驱动程序作者最常看到的包括：
 
-- **HID (Human Interface Device)**, class 0x03. Keyboards, mice, joysticks, game controllers, and a long tail of programmable 设备 that pretend to be keyboards or mice. HID 设备 present reports through interrupt 端点; FreeBSD's HID subsystem handles them mostly generically, though a vendor-specific 驱动程序 can override.
-- **Mass Storage**, class 0x08. USB flash drives, external disks, card readers. These 附加 through `umass(4)` to the CAM storage 框架.
-- **Communications (CDC)**, class 0x02, with subclasses for ACM (modem-like serial), ECM (以太网), NCM (以太网 with multi-数据包 aggregation), and others. CDC ACM 设备 appear through `ucom(4)` as 串行端口s. CDC ECM and NCM 设备 appear through `cdce(4)` as 网络接口.
-- **Audio**, class 0x01. Microphones, speakers, audio 接口. FreeBSD's audio stack handles these through `uaudio(4)`.
-- **Printer**, class 0x07. USB printers. Handled through `ulpt(4)`.
-- **Hub**, class 0x09. USB hubs themselves. Handled by the core `uhub(4)` 驱动程序.
-- **Vendor-specific**, class 0xff. Any 设备 whose functionality does not fit a standard class. Almost every interesting hobby USB 设备 (USB-to-serial bridges, thermometers, relay controllers, programmers, loggers) is in this class.
+- **HID（人机接口设备）**，类 0x03。键盘、鼠标、游戏杆、游戏控制器以及大量伪装成键盘或鼠标的可编程设备。HID设备通过中断端点呈现报告；FreeBSD的HID子系统以通用方式处理它们，尽管供应商特定的驱动程序可以覆盖。
+- **大容量存储**，类 0x08。USB闪存盘、外部磁盘、读卡器。它们通过 `umass(4)` 附加到CAM存储框架。
+- **通信（CDC）**，类 0x02，包括ACM（类似调制解调器的串行）、ECM（以太网）、NCM（带多数据包聚合的以太网）等子类。CDC ACM设备通过 `ucom(4)` 以串行端口形式出现。CDC ECM和NCM设备通过 `cdce(4)` 以网络接口形式出现。
+- **音频**，类 0x01。麦克风、扬声器、音频接口。FreeBSD的音频栈通过 `uaudio(4)` 处理它们。
+- **打印机**，类 0x07。USB打印机。通过 `ulpt(4)` 处理。
+- **集线器**，类 0x09。USB集线器本身。由核心的 `uhub(4)` 驱动程序处理。
+- **供应商特定**，类 0xff。任何功能不适合标准类的设备。几乎所有有趣的业余USB设备（USB转串行桥接器、温度计、继电器控制器、编程器、记录器）都属于此类。
 
-When you write a USB驱动程序, you often write for a vendor-specific 设备 (class 0xff) and match on vendor/product identifiers. Occasionally you write for a standard-class 设备 that FreeBSD does not yet handle, or for a standard-class 设备 that has quirks requiring a dedicated 驱动程序. The class is not usually the match criterion; the vendor/product pair is. But the class tells you what 框架, if any, you should integrate with. If the 设备's class is CDC ACM, the right 框架 is `ucom`. If the class is HID, the right 框架 is `hid总线` (new in FreeBSD 14). If the class is 0xff, there is no 框架; you write a bespoke 驱动程序.
+当你编写USB驱动程序时，你通常是为供应商特定的设备（类 0xff）编写，并在供应商/产品标识符上进行匹配。偶尔你会为FreeBSD尚未处理的标准类设备编写，或者为有quirk需要专用驱动程序的标准类设备编写。类通常不是匹配条件；供应商/产品对才是。但类告诉你应该与哪个框架集成（如果有的话）。如果设备的类是CDC ACM，正确的框架是 `ucom`。如果类是HID，正确的框架是 `hidbus`（FreeBSD 14新增）。如果类是 0xff，没有框架；你编写一个定制的驱动程序。
 
-#### Descriptors: The Device's Self-Description
+#### 描述符：设备的自我描述
 
-When the host enumerates a new USB 设备, it asks the 设备 to describe itself. The 设备 responds with a hierarchy of *描述符*. Descriptors are the single most important USB concept to get clear: they are the USB equivalent of the PCI configuration space, but richer and nested.
+当主机枚举一个新的USB设备时，它要求设备描述自己。设备以一个*描述符*层次结构来响应。描述符是需要弄清楚的最重要USB概念：它们相当于USB的PCI配置空间，但更丰富且嵌套。
 
-The hierarchy is:
+层次结构如下：
 
 ```text
 Device descriptor
@@ -246,224 +246,224 @@ Device descriptor
       Endpoint descriptor [0..E]
 ```
 
-A *设备 描述符* (`struct usb_设备_描述符` in `/usr/src/sys/dev/usb/usb.h`) describes the 设备 as a whole: its vendor identifier (`idVendor`), its product identifier (`idProduct`), its 设备 class, subclass, and protocol, its maximum 数据包 size on 端点 zero, its release number, and the number of configurations it supports. Most 设备 have one configuration, but the USB spec allows more (a camera that can run in high-bandwidth or low-bandwidth modes, for example).
+*设备描述符*（`/usr/src/sys/dev/usb/usb.h` 中的 `struct usb_device_descriptor`）描述设备整体：其供应商标识符（`idVendor`）、产品标识符（`idProduct`）、设备类、子类和协议、端点零上的最大数据包大小、其版本号以及它支持的配置数量。大多数设备有一个配置，但USB规范允许更多（例如，一个可以以高带宽或低带宽模式运行的相机）。
 
-A *configuration 描述符* (`struct usb_config_描述符`) describes one mode of operation: the number of 接口 it contains, whether the 设备 is self-powered or 总线-powered, its maximum power draw. When a 驱动程序 selects a configuration (by calling `usbd_req_set_config`, though in practice the USB core does this for you), the 设备's 端点 are activated.
+*配置描述符*（`struct usb_config_descriptor`）描述一种操作模式：它包含的接口数量、设备是自供电还是总线供电、其最大功耗。当驱动程序选择一个配置时（通过调用 `usbd_req_set_config`，尽管实际上USB核心为你做了这件事），设备的端点被激活。
 
-An *接口 描述符* (`struct usb_接口_描述符`) describes one logical function of the 设备. A composite 设备, such as a USB printer with a built-in scanner, has one 接口 per function. Each 接口 has its own class, subclass, and protocol. A 驱动程序 can match on 接口 class rather than 设备 class; this is common when a 设备's overall class is "Miscellaneous" or "Composite" but one of its 接口 has a specific class. An 接口 can have multiple *alternate settings*, which select different 端点 layouts; audio streaming 接口 use alternate settings to offer different bandwidths.
+*接口描述符*（`struct usb_interface_descriptor`）描述设备的一个逻辑功能。一个复合设备，例如带有内置扫描仪的USB打印机，每个功能有一个接口。每个接口有自己的类、子类和协议。驱动程序可以在接口类而不是设备类上进行匹配；当设备的整体类是"Miscellaneous"或"Composite"但其中一个接口有特定类时，这很常见。一个接口可以有多个*备用设置*，用于选择不同的端点布局；音频流接口使用备用设置来提供不同的带宽。
 
-An *端点 描述符* (`struct usb_端点_描述符`) describes one data channel. Endpoints have:
+*端点描述符*（`struct usb_endpoint_descriptor`）描述一个数据通道。端点有：
 
-- An *address*, which is the 端点 number (0 through 15) combined with a direction bit (IN, meaning from 设备 to host, or OUT, meaning from host to 设备).
-- A *type*, which is one of control, bulk, interrupt, or isochronous.
-- A *maximum 数据包 size*, which is the largest single 数据包 the 端点 can handle.
-- An *interval*, which for interrupt and isochronous 端点 tells the host how often to poll.
+- 一个*地址*，是端点号（0到15）与方向位（IN，表示从设备到主机，或OUT，表示从主机到设备）的组合。
+- 一个*类型*，是控制、批量、中断或等时之一。
+- 一个*最大数据包大小*，是端点可以处理的最大单个数据包。
+- 一个*间隔*，对于中断和等时端点，告诉主机多久轮询一次。
 
-Endpoint zero is special: every 设备 has it, it is always a control 端点, and it is always bidirectional (one IN half and one OUT half). The USB core uses 端点 zero for enumeration (asking the 设备 for 描述符, setting its address, selecting its configuration). A 驱动程序 can also use 端点 zero for vendor-specific control requests, though 驱动程序 usually access it through helper functions rather than setting up a transfer directly.
+端点零是特殊的：每个设备都有它，它始终是控制端点，并且始终是双向的（一个IN半部和一个OUT半部）。USB核心使用端点零进行枚举（向设备请求描述符、设置其地址、选择其配置）。驱动程序也可以使用端点零进行供应商特定的控制请求，不过驱动程序通常通过辅助函数访问它，而不是直接设置传输。
 
-The 描述符 hierarchy matters to a 驱动程序 because the 驱动程序's `探测` method has access to the 描述符 through the `struct usb_附加_arg` it receives, and its match logic often reads fields from them. The `struct usbd_lookup_info` inside `struct usb_附加_arg` carries the 设备's identifiers, its class, subclass, and protocol, the current 接口's class, subclass, and protocol, and a few other fields. The 匹配表 filters on some subset of those; the helper macros `USB_VP(v, p)`, `USB_VPI(v, p, info)`, `USB_IFACE_CLASS(c)`, and similar build entries that match different combinations of fields.
+描述符层次结构对驱动程序很重要，因为驱动程序的 `probe` 方法可以通过它接收的 `struct usb_attach_arg` 访问描述符，其匹配逻辑通常从中读取字段。`struct usb_attach_arg` 中的 `struct usbd_lookup_info` 携带设备的标识符、其类、子类和协议、当前接口的类、子类和协议以及其他一些字段。匹配表对这些字段的某个子集进行过滤；辅助宏 `USB_VP(v, p)`、`USB_VPI(v, p, info)`、`USB_IFACE_CLASS(c)` 等构建匹配不同字段组合的条目。
 
-#### The Four Transfer Types
+#### 四种传输类型
 
-USB defines four transfer types, each suited to a different kind of data movement. A 驱动程序 picks one or more types for its 端点, and the choice affects everything about how the 驱动程序 is structured.
+USB定义了四种传输类型，每种适用于不同类型的数据移动。驱动程序为其端点选择一种或多种类型，该选择影响驱动程序结构的一切。
 
-*Control transfers* are for setup, configuration, and command exchange. Every 设备 supports them on 端点 zero. They have a small, structured format: an eight-byte setup 数据包 (the `struct usb_设备_request`) followed by an optional data stage and a status stage. The setup 数据包 specifies what the request is doing: its direction (IN or OUT), its type (standard, class, or vendor), its recipient (设备, 接口, or 端点), and four fields (`bRequest`, `wValue`, `wIndex`, `wLength`) whose meaning depends on the request. Standard requests include `GET_DESCRIPTOR`, `SET_CONFIGURATION`, and so on; class and vendor requests are defined by the class specification or the vendor. Control transfers are reliable: the 总线 protocol guarantees delivery or returns a specific error. They are also relatively slow, because the 总线 allocates only a small share of its bandwidth to them.
+*控制传输*用于设置、配置和命令交换。每个设备在端点零上支持它们。它们有一个小型、结构化的格式：一个八字节的设置数据包（`struct usb_device_request`）后跟一个可选的数据阶段和一个状态阶段。设置数据包指定请求正在做什么：其方向（IN或OUT）、其类型（标准、类或供应商）、其接收者（设备、接口或端点）以及四个字段（`bRequest`、`wValue`、`wIndex`、`wLength`），其含义取决于请求。标准请求包括 `GET_DESCRIPTOR`、`SET_CONFIGURATION` 等；类和供应商请求由类规范或供应商定义。控制传输是可靠的：总线协议保证交付或返回特定错误。它们也相对较慢，因为总线只分配很小一部分带宽给它们。
 
-*Bulk transfers* are for large, reliable, non-time-critical data. A USB flash drive uses 批量传输 for the actual data. A printer uses bulk OUT for the print stream. A USB-to-serial bridge uses bulk IN and bulk OUT for the two directions of the serial stream. Bulk transfers are reliable (errors are retried by the 总线 hardware), but they have no guaranteed timing: they use whatever bandwidth is left after control, interrupt, and isochronous traffic has been scheduled. In practice, on a lightly-loaded 总线, 批量传输 are very fast. On a heavily-loaded 总线, they can stall for milliseconds at a time. Bulk 端点 are the most common 端点 type for 设备-to-host or host-to-设备 streaming of data where latency is not critical.
+*批量传输*用于大量、可靠、非时间关键的数据。USB闪存盘使用批量传输来传输实际数据。打印机使用批量OUT来传输打印流。USB转串行桥接器使用批量IN和批量OUT来传输串行流的两个方向。批量传输是可靠的（错误由总线硬件重试），但它们没有保证的时序：它们使用在控制、中断和等时流量被调度后剩余的任何带宽。在实践中，在轻负载的总线上，批量传输非常快。在重负载的总线上，它们可能一次停滞数毫秒。批量端点是在延迟不关键的设备到主机或主机到设备数据流中最常见的端点类型。
 
-*Interrupt transfers* are for small, time-sensitive data. The name is misleading: there are no hardware interrupts here. The "interrupt" refers to the fact that the 设备 needs to get the host's attention periodically, and the host polls the 端点 at a configurable interval to see whether there is new data. A USB keyboard uses 中断传输 to deliver keystrokes; a USB mouse uses them for movement reports; a thermometer uses them to deliver periodic readings. Interrupt 端点 have an `interval` field that tells the host how often to poll (in milliseconds for low- and full-speed 设备, in micro帧 for high-speed). A 驱动程序 that wants to know about input as it happens sets up an interrupt-IN transfer, submits it, and the USB core arranges the polling. When data arrives, the 驱动程序's 回调 fires.
+*中断传输*用于小型、时间敏感的数据。这个名字有误导性：这里没有硬件中断。"中断"指的是设备需要定期引起主机的注意，主机以可配置的间隔轮询端点以查看是否有新数据。USB键盘使用中断传输来传递按键信息；USB鼠标使用它们来传递移动报告；温度计使用它们来传递周期性读数。中断端点有一个 `interval` 字段，告诉主机多久轮询一次（对于低速和全速设备以毫秒为单位，对于高速以微帧为单位）。一个希望在输入发生时就得到通知的驱动程序设置一个中断IN传输，提交它，USB核心安排轮询。当数据到达时，驱动程序的回调被触发。
 
-*Isochronous transfers* are for streaming data with guaranteed bandwidth but no error recovery. USB audio and USB video use isochronous 端点. The 总线 reserves a fixed share of each 帧 for isochronous traffic, so the bandwidth is predictable, but transfers are not retried on error; if a 数据包 is corrupted, it is lost. This trade-off makes sense for audio and video, where a dropped sample is better than a stall. Isochronous transfers are the most complex to program because they typically operate on many small 帧 per transfer; the `struct usb_xfer` machinery supports up to thousands of 帧 per transfer. 第26章 introduces 等时传输 at the conceptual level and does not develop them further; real isochronous 驱动程序 (audio, video) are beyond the chapter's scope.
+*等时传输*用于具有保证带宽但没有错误恢复的流数据。USB音频和USB视频使用等时端点。总线为每个帧保留固定份额给等时流量，因此带宽是可预测的，但传输在错误时不被重试；如果一个数据包损坏，它就丢失了。这种权衡对音频和视频是有意义的，因为丢弃一个样本比一个停滞要好。等时传输编程最复杂，因为它们通常在一次传输中操作许多小帧；`struct usb_xfer` 机制支持每次传输多达数千帧。第26章在概念层面介绍等时传输，不会进一步展开；真正的等时驱动程序（音频、视频）超出了本章的范围。
 
-A typical vendor-specific USB 设备 that a hobbyist or a 驱动程序-development learner will write code for looks like this: a vendor/product identifier, one vendor-specific 接口, one bulk-IN 端点, one bulk-OUT 端点, and possibly an interrupt-IN 端点 for status events. That is the shape of the worked example in Sections 2 and 3.
+一个业余爱好者或驱动程序开发学习者通常会编写的典型供应商特定USB设备看起来像这样：一个供应商/产品标识符、一个供应商特定的接口、一个批量IN端点、一个批量OUT端点，可能还有一个用于状态事件的中断IN端点。这就是第2节和第3节中示例的形态。
 
-#### The USB Hot-Plug Lifecycle
+#### USB热插拔生命周期
 
-The 热插拔 lifecycle is the sequence of events that happens when a USB 设备 is inserted, in use, and removed. Writing a 驱动程序 that handles this lifecycle correctly is the most important single discipline in USB驱动程序 development.
+热插拔生命周期是USB设备被插入、使用和移除时发生的事件序列。编写一个正确处理此生命周期的驱动程序是USB驱动程序开发中最重要的单项技能。
 
-When a 设备 is inserted, the 主机控制器 notices a port status change. It waits for the 设备 to stabilise, then resets the port and assigns the 设备 a temporary address of zero. It sends `GET_DESCRIPTOR` to 端点 zero on address zero, retrieves the 设备 描述符, and then assigns the 设备 a unique address with `SET_ADDRESS`. All subsequent communication uses the new address. The host sends `GET_DESCRIPTOR` for the full configuration 描述符 (including 接口 and 端点), chooses a configuration, and sends `SET_CONFIGURATION`. At that point the 设备's 端点 are active and the USB subsystem offers the 设备 to every 注册ed 驱动程序 in turn by calling each 驱动程序's `探测` method. The first 驱动程序 to claim the 设备 by returning a non-error code from `探测` wins; the subsystem then calls that 驱动程序's `附加` method.
+当设备被插入时，主机控制器注意到端口状态变化。它等待设备稳定，然后重置端口并给设备分配一个临时地址零。它向地址零的端点零发送 `GET_DESCRIPTOR`，获取设备描述符，然后使用 `SET_ADDRESS` 给设备分配一个唯一地址。所有后续通信使用新地址。主机发送 `GET_DESCRIPTOR` 获取完整的配置描述符（包括接口和端点），选择一个配置，并发送 `SET_CONFIGURATION`。此时设备的端点处于活动状态，USB子系统通过调用每个已注册驱动程序的 `probe` 方法依次将设备提供给每个驱动程序。第一个通过从 `probe` 返回非错误代码来认领设备的驱动程序获胜；子系统随后调用该驱动程序的 `attach` 方法。
 
-During normal operation, the 驱动程序 submits transfers to its 端点, the 主机控制器 schedules them on the 总线, and the 回调 fire on completion. This is the steady state 第26章's code examples operate in.
+在正常操作期间，驱动程序向其端点提交传输，主机控制器在总线上调度它们，回调在完成时触发。这就是第26章代码示例运行的稳定状态。
 
-When the 设备 is removed, the 主机控制器 notices another port status change. It does not wait; the electrical signal is gone immediately. The subsystem cancels any outstanding transfers on the 设备's 端点 (they complete in the 回调 with `USB_ERR_CANCELLED`), and then it calls the 驱动程序's `分离` method. The `分离` method has to release every resource the `附加` method acquired, including any `/dev` nodes it created, any locks, any 缓冲区, and any transfers. It has to do this in the face of the fact that other threads may be in the middle of calling into the 驱动程序 through those resources. A read in progress must be woken up and returned with an error. An ioctl in progress must be allowed to finish or interrupted. A 回调 that has just fired with `USB_ERR_CANCELLED` must not try to re-submit.
+当设备被移除时，主机控制器注意到另一个端口状态变化。它不等待；电信号立即消失。子系统取消设备端点上所有未完成的传输（它们在回调中以 `USB_ERR_CANCELLED` 完成），然后调用驱动程序的 `detach` 方法。`detach` 方法必须释放 `attach` 方法获取的每一个资源，包括它创建的任何 `/dev` 节点、任何锁、任何缓冲区和任何传输。它必须在其他线程可能正在通过这些资源调用驱动程序的情况下来完成这些工作。一个正在进行中的读取必须被唤醒并返回错误。一个正在进行中的ioctl必须被允许完成或被中断。一个刚刚以 `USB_ERR_CANCELLED` 触发的回调不能尝试重新提交。
 
-The 热插拔 lifecycle is why USB驱动程序 cannot be written the way pseudo-驱动程序 are written. In a pseudo-驱动程序, the module lifecycle (`kldload`/`kldunload`) is the only lifecycle; nothing unexpected happens. In a USB驱动程序, the 设备 lifecycle is separate from the module lifecycle and is driven by physical events. A user can unplug the 设备 while a user-space process is 块ed in `read()` on the 驱动程序's `/dev` node. The 驱动程序 must wake that process up and return an error. A well-written USB驱动程序 treats this as the normal case, not the edge case.
+热插拔生命周期就是为什么USB驱动程序不能用伪驱动程序的方式编写的原因。在伪驱动程序中，模块生命周期（`kldload`/`kldunload`）是唯一的生命周期；不会发生意外的事情。在USB驱动程序中，设备生命周期与模块生命周期是分开的，由物理事件驱动。用户可以在用户空间进程在驱动程序的 `/dev` 节点上阻塞在 `read()` 中时拔出设备。驱动程序必须唤醒该进程并返回错误。一个编写良好的USB驱动程序将此视为正常情况，而非边界情况。
 
-Section 2 will walk through the structure of a USB驱动程序 that handles this correctly. For now, keep the lifecycle in mind: 探测, 附加, steady-state transfers, 分离. Every USB驱动程序 has that sequence.
+第2节将演示一个正确处理此情况的USB驱动程序的结构。现在，请记住生命周期：探测、附加、稳定状态传输、分离。每个USB驱动程序都有这个序列。
 
-#### USB Speeds and What They Imply
+#### USB速度及其影响
 
-USB has gone through several speed generations, and each matters to a 驱动程序 writer in different ways. Low-speed (1.5 Mbps) was the original USB 1.0 speed, mostly used by keyboards and mice. Full-speed (12 Mbps) was USB 1.1, used by printers, early cameras, and mass-storage 设备. High-speed (480 Mbps) was USB 2.0, which became the dominant speed for most 设备 in the 2000s. SuperSpeed (5 Gbps) was USB 3.0, which added a separate physical layer for high-throughput applications. SuperSpeed+ (10 Gbps and 20 Gbps) came with USB 3.1 and 3.2. USB 4.0 reuses the Thunderbolt physical layer and supports 40 Gbps.
+USB经历了几个速度代际，每一代对驱动程序编写者都有不同的影响。低速（1.5 Mbps）是USB 1.0的原始速度，主要用于键盘和鼠标。全速（12 Mbps）是USB 1.1，用于打印机、早期相机和大容量存储设备。高速（480 Mbps）是USB 2.0，在2000年代成为大多数设备的主流速度。超高速（5 Gbps）是USB 3.0，为高吞吐量应用添加了独立的物理层。超高速+（10 Gbps和20 Gbps）随USB 3.1和3.2出现。USB 4.0复用Thunderbolt物理层，支持40 Gbps。
 
-For most 驱动程序 writing, only three differences between these speeds matter:
+对于大多数驱动程序编写，这些速度之间只有三个差异是重要的：
 
-**Maximum 数据包 size.** Low-speed 端点 have a maximum 数据包 size of 8 bytes. Full-speed goes up to 64 bytes. High-speed bulk 端点 go up to 512 bytes. SuperSpeed bulk 端点 go up to 1024 bytes with burst support. Your 缓冲区 sizes in the transfer configuration should match the 端点's speed; using a 512-byte 缓冲区 on a full-speed bulk 端点 wastes memory because only 64 bytes fit in each 数据包.
+**最大数据包大小。**低速端点的最大数据包大小为8字节。全速最高到64字节。高速批量端点最高到512字节。超高速批量端点最高到1024字节并支持突发。你在传输配置中的缓冲区大小应该与端点的速度匹配；在全速批量端点上使用512字节缓冲区是浪费内存，因为每个数据包只能容纳64字节。
 
-**Isochronous bandwidth.** Isochronous transfers reserve bandwidth at a specific speed. A 设备 that asks for 1 MB/s of isochronous bandwidth can only be supported on a 主机控制器 that can provide it; on slower hosts, the 设备 must negotiate a lower rate or fail. This is why some USB audio 设备 work on one port but not another.
+**等时带宽。**等时传输以特定速度保留带宽。一个要求1 MB/s等时带宽的设备只能在能够提供该带宽的主机控制器上支持；在较慢的主机上，设备必须协商较低的速率或失败。这就是为什么一些USB音频设备在一个端口上工作而在另一个上不工作。
 
-**Endpoint polling interval.** Interrupt 端点 are polled at a specific interval encoded in the 描述符's `bInterval` field. The units are milliseconds at low/full speed and "125 microsecond micro帧" at high/SuperSpeed. The 框架 handles the math; your 驱动程序 just declares the logical polling interval via the 端点 描述符 and the 框架 does the right thing.
+**端点轮询间隔。**中断端点以描述符 `bInterval` 字段中编码的特定间隔轮询。单位在低速/全速时为毫秒，在高速/超高速时为"125微秒微帧"。框架处理数学运算；你的驱动程序只需通过端点描述符声明逻辑轮询间隔，框架会做正确的事情。
 
-For the 驱动程序 we write in this chapter (`myfirst_usb` and the UART bridges like FTDI), speed does not affect the code structure. A bulk-IN channel's 回调 is the same whether it runs at 12 Mbps or 5 Gbps. The differences are in the numbers, not the flow.
+对于我们本章编写的驱动程序（`myfirst_usb` 和像FTDI这样的UART桥接器），速度不影响代码结构。一个批量IN通道的回调在12 Mbps或5 Gbps下运行是相同的。差异在于数字，而不在于流程。
 
-#### Endpoints, FIFOs, and Flow Control
+#### 端点、FIFO和流控制
 
-A USB 端点 is logically an I/O queue at one end of a pipe. On the 设备 side, an 端点 corresponds to a hardware FIFO in the chip. On the host side, the 端点 is a 框架 abstraction. Between them, USB 数据包 flow under the control of the USB protocol itself, which handles retransmission, sequencing, and error detection.
+USB端点在逻辑上是管道一端的I/O队列。在设备侧，端点对应芯片中的硬件FIFO。在主机侧，端点是框架抽象。在它们之间，USB数据包在USB协议本身的控制下流动，协议处理重传、排序和错误检测。
 
-The host cannot be told "the 设备 is full" the way you might expect on a traditional serial link. Instead, when a 设备 cannot accept more data (because its FIFO is full), it returns a NAK handshake. NAK means "try again later." The host will keep retrying, at the protocol level, until either the 设备 accepts the data (returns ACK) or some higher-level timeout fires. This is called NAK-limiting or 总线 throttling, and it happens invisibly to the 驱动程序: the 框架 sees the final ACK and delivers a successful completion.
+主机不能像在传统串行链路上预期的那样被告知"设备已满"。相反，当设备无法接受更多数据时（因为其FIFO已满），它返回一个NAK握手。NAK意味着"稍后重试"。主机将在协议层持续重试，直到设备接受数据（返回ACK）或某个更高级别的超时触发。这被称为NAK限制或总线节流，它对驱动程序是不可见的：框架看到最终的ACK并交付一个成功的完成。
 
-Similarly, when the 设备 has no data to send (for a bulk-IN or interrupt-IN transfer), it returns NAK to the IN token, and the host polls again. From the 驱动程序's perspective, the transfer is simply "pending" until the 设备 has something to say.
+类似地，当设备没有数据要发送时（对于批量IN或中断IN传输），它对IN令牌返回NAK，主机再次轮询。从驱动程序的角度来看，传输只是"待处理"的，直到设备有话要说。
 
-This NAK mechanism is how USB handles 流控制 at the protocol level. Your 驱动程序 does not need to implement its own throttling logic for bulk and interrupt channels; the USB protocol does it. Where 流控制 does come into play is in higher-level protocols, where the 设备 might want to signal a logical end-of-message or a temporary unavailability. Those signals are protocol-specific and not part of USB itself.
+这种NAK机制是USB在协议层处理流控制的方式。你的驱动程序不需要为批量和中断通道实现自己的节流逻辑；USB协议会处理它。流控制确实发挥作用的地方是在更高级别的协议中，设备可能想要发出逻辑上的消息结束或临时不可用的信号。这些信号是协议特定的，不属于USB本身。
 
-#### Descriptors In Depth
+#### 深入了解描述符
 
-USB 描述符 are the self-describing mechanism by which a 设备 tells the host what it is and how to talk to it. We introduced them briefly earlier; here is a more complete picture.
+USB描述符是设备向主机描述自己以及如何与其通信的自我描述机制。我们之前简要介绍了它们；这里给出更完整的图景。
 
-The 设备 描述符 is the root. It contains the 设备's 供应商ID, 产品ID, USB specification version, 设备 class/subclass/protocol (for 设备 that declare themselves at the 设备 level rather than the 接口 level), maximum 数据包 size for 端点 zero, and the number of configurations.
+设备描述符是根。它包含设备的供应商标识符、产品标识符、USB规范版本、设备类/子类/协议（对于在设备级别而非接口级别声明自己的设备）、端点零的最大数据包大小以及配置数量。
 
-Configuration 描述符 describe complete configurations. A configuration is a set of 接口 that work together. Most 设备 have one configuration; some have multiple to support different modes of operation (e.g., a 设备 that can be either a printer or a scanner, selected by configuration).
+配置描述符描述完整的配置。配置是一组协同工作的接口。大多数设备有一个配置；有些有多个以支持不同的操作模式（例如，一个可以通过配置选择作为打印机或扫描仪的设备）。
 
-Interface 描述符 describe functional subsets of the 设备. Each 接口 has a class, subclass, and protocol that tells the host what kind of 驱动程序 to use. A multi-function 设备 has multiple 接口 描述符 in the same configuration. Additionally, an 接口 can have alternate settings: different sets of 端点 selectable on the fly for things like "low bandwidth mode" vs "high bandwidth mode".
+接口描述符描述设备的功能子集。每个接口有一个类、子类和协议，告诉主机使用哪种驱动程序。多功能设备在同一个配置中有多个接口描述符。此外，一个接口可以有备用设置：可以选择不同的端点集合，用于"低带宽模式"与"高带宽模式"之类的情况。
 
-Endpoint 描述符 describe individual 端点 within an 接口. Each has an address (with direction bit), a transfer type, a maximum 数据包 size, and an interval (for interrupt and isochronous 端点).
+端点描述符描述接口内的单个端点。每个端点有一个地址（带方向位）、一个传输类型、一个最大数据包大小和一个间隔（用于中断和等时端点）。
 
-String 描述符 hold human-readable strings: the manufacturer name, the product name, the serial number. These are optional; their presence is indicated by nonzero string indices in the other 描述符.
+字符串描述符包含人类可读的字符串：制造商名称、产品名称、序列号。这些是可选的；它们的存在由其他描述符中的非零字符串索引指示。
 
-Class-specific 描述符 extend the standard 描述符 with class-specific metadata. HID 设备 have a report 描述符 that describes the format of the reports they send. Audio 设备 have 描述符 for audio controls. Mass-storage 设备 have 描述符 for 接口 subclasses.
+类特定描述符用类特定的元数据扩展标准描述符。HID设备有一个报告描述符，描述它们发送的报告格式。音频设备有用于音频控制的描述符。大容量存储设备有用于接口子类的描述符。
 
-The USB 框架 parses all of this at enumeration time and exposes the parsed data to 驱动程序 through the `struct usb_附加_arg`. Your 驱动程序 does not have to read 描述符 itself; it queries the 框架 for the information it needs. When the chapter says "the 接口's `bInterfaceClass`", what is meant is "the `bInterfaceClass` field of the 接口 描述符 the 框架 parsed and cached for us."
+USB框架在枚举时解析所有这些内容，并通过 `struct usb_attach_arg` 将解析后的数据暴露给驱动程序。你的驱动程序不必自己读取描述符；它查询框架获取所需的信息。当本章说"接口的 `bInterfaceClass`"时，指的是"框架为我们解析并缓存的接口描述符的 `bInterfaceClass` 字段。"
 
-`usbconfig -d ugenN.M dump_all_config_desc` is how you see the parsed 描述符 from userland. Run that command on a few 设备 you own and note how the 描述符 look. You will see that even simple 设备 like a mouse have a nontrivial 描述符 tree: typically one 设备 描述符, one configuration 描述符, one 接口 描述符 (with class=HID), and one or two 端点 描述符 (for the HID report input and maybe an output).
+`usbconfig -d ugenN.M dump_all_config_desc` 是从用户空间查看已解析描述符的方式。在你拥有的几个设备上运行该命令，注意描述符的样子。你会看到即使是像鼠标这样简单的设备也有一个不平凡的描述符树：通常一个设备描述符、一个配置描述符、一个接口描述符（类=HID）和一两个端点描述符（用于HID报告输入，可能还有一个输出）。
 
-#### Request-Response Over USB
+#### USB上的请求-响应
 
-The USB 控制传输 type supports a request-response pattern between host and 设备. A 控制传输 consists of three phases: a setup stage where the host sends an 8-byte setup 数据包 describing the request, an optional data stage where either the host sends data or the 设备 returns data, and a status stage where the recipient acknowledges the operation.
+USB控制传输类型支持主机和设备之间的请求-响应模式。一个控制传输由三个阶段组成：主机发送描述请求的八字节设置数据包的设置阶段、主机发送数据或设备返回数据的可选数据阶段，以及接收者确认操作的状态阶段。
 
-The setup 数据包 has five fields:
+设置数据包有五个字段：
 
-- `bmRequestType`: describes the direction (in or out), the type of request (standard, class, or vendor), and the recipient (设备, 接口, 端点, or other).
-- `bRequest`: the request number. Standard requests have well-known numbers (GET_DESCRIPTOR = 6, SET_ADDRESS = 5, and so on). Class and vendor requests have class-specific or vendor-specific meanings.
-- `wValue`: a 16-bit parameter, often used to specify a 描述符 index or a value to set.
-- `wIndex`: another 16-bit parameter, often used to specify an 接口 or 端点.
-- `wLength`: the number of bytes in the data stage (zero if there is no data stage).
+- `bmRequestType`：描述方向（输入或输出）、请求类型（标准、类或供应商）和接收者（设备、接口、端点或其他）。
+- `bRequest`：请求编号。标准请求有众所周知的编号（GET_DESCRIPTOR = 6，SET_ADDRESS = 5等）。类和供应商请求有类特定或供应商特定的含义。
+- `wValue`：一个16位参数，通常用于指定描述符索引或要设置的值。
+- `wIndex`：另一个16位参数，通常用于指定接口或端点。
+- `wLength`：数据阶段中的字节数（如果没有数据阶段则为零）。
 
-Every USB 设备 must support a small set of standard requests: GET_DESCRIPTOR, SET_ADDRESS, SET_CONFIGURATION, and a few others. The 框架 handles all of these at enumeration time. Your 驱动程序 may also issue vendor-specific requests to configure the 设备 in ways the standard does not define.
+每个USB设备必须支持一小组标准请求：GET_DESCRIPTOR、SET_ADDRESS、SET_CONFIGURATION和其他几个。框架在枚举时处理所有这些。你的驱动程序也可以发出供应商特定的请求来以标准未定义的方式配置设备。
 
-For example, the FTDI 驱动程序 issues vendor-specific requests like `FTDI_SIO_SET_BAUD_RATE`, `FTDI_SIO_SET_LINE_CTRL`, and `FTDI_SIO_MODEM_CTRL` to program the chip. These requests are documented in FTDI's application notes; they are not part of USB itself, but they work over the USB control-transfer mechanism.
+例如，FTDI驱动程序发出像 `FTDI_SIO_SET_BAUD_RATE`、`FTDI_SIO_SET_LINE_CTRL` 和 `FTDI_SIO_MODEM_CTRL` 这样的供应商特定请求来编程芯片。这些请求记录在FTDI的应用笔记中；它们不是USB本身的一部分，但它们通过USB控制传输机制工作。
 
-When your 驱动程序 needs to issue a vendor-specific control request, the pattern is the one we showed in 第3节： construct the setup 数据包, copy it into 帧 zero of a 控制传输, copy any data into 帧 one (for data-stage requests), and submit. The 框架 handles the three phases and calls your 回调 when the transfer completes.
+当你的驱动程序需要发出供应商特定的控制请求时，模式是我们在第3节中展示的：构造设置数据包，将其复制到控制传输的帧零中，将任何数据复制到帧一中（对于有数据阶段的请求），然后提交。框架处理三个阶段并在传输完成时调用你的回调。
 
-### The Serial Mental Model
+### 串行思维模型
 
-The serial side of 第26章 is about a much older and much simpler protocol than USB. Serial communication over a UART is one of the oldest ways two computers can talk to each other, and its simplicity is both its strength and its limitation. A reader coming to UART after USB will find the protocol almost trivially small. But the integration with the rest of the operating system, the tty discipline, 波特率 management, 奇偶校验, 流控制, and the two-worlds split between `uart(4)` and `ucom(4)`, is where most of the actual work lives.
+第26章的串行部分是关于一个比USB古老得多也简单得多的协议。通过UART进行的串行通信是两台计算机互相通信的最古老方式之一，其简单性既是它的优势也是它的局限。一个在USB之后接触UART的读者会发现这个协议几乎小得不值一提。但与操作系统其余部分的集成、tty规程、波特率管理、奇偶校验、流控制以及 `uart(4)` 和 `ucom(4)` 之间的两个世界分裂，才是大部分实际工作所在。
 
-#### The UART as a Piece of Hardware
+#### UART作为一种硬件
 
-A UART is a *Universal Asynchronous Receiver/Transmitter*: a chip that converts bytes into a serial bit stream on a wire and back again. The classical UART has two pins for data (TX and RX), two pins for 流控制 (RTS and CTS), four pins for modem status (DTR, DSR, DCD, RI), a ground pin, and occasionally a pin for a second "ring" signal that most modern equipment ignores. On a classic PC, the 串行端口 has a nine-pin or twenty-five-pin D-subminiature connector and operates at RS-232 voltage levels (typically +/- 12 V). Modern embedded UARTs usually operate at 3.3 V or 1.8 V logic levels; a level converter chip sits between the UART and the RS-232 connector if a compatible port is needed.
+UART是*通用异步收发器*：一种将字节转换为线缆上的串行比特流并反向转换的芯片。经典UART有两个数据引脚（TX和RX）、两个流控制引脚（RTS和CTS）、四个调制解调器状态引脚（DTR、DSR、DCD、RI）、一个接地引脚，偶尔还有一个大多数现代设备忽略的第二个"振铃"信号引脚。在经典PC上，串行端口有一个九针或二十五针的D型超小型连接器，以RS-232电压电平运行（通常为+/- 12 V）。现代嵌入式UART通常以3.3 V或1.8 V逻辑电平运行；如果需要兼容端口，UART和RS-232连接器之间会有一个电平转换芯片。
 
-Inside the UART, the core is a shift 注册. When the 驱动程序 writes a byte to the UART's transmit 注册, the UART adds a start bit, shifts the byte out bit by bit at the configured 波特率, adds an optional 奇偶校验 bit, and then adds one or two 停止位. When a receiving UART detects a falling edge (the start bit), it samples the line at the middle of each bit time, assembles the bits into a byte, checks the 奇偶校验, verifies the stop bit, and then stores the byte in its receive 注册. If any of those steps fails (the 奇偶校验 does not match, the stop bit is wrong, the framing is off), the UART notes a framing error, a 奇偶校验 error, or a break condition in its status 注册.
+UART内部的核心是一个移位寄存器。当驱动程序向UART的发送寄存器写入一个字节时，UART添加一个起始位，以配置的波特率逐位移出该字节，添加一个可选的奇偶校验位，然后添加一个或两个停止位。当接收UART检测到一个下降沿（起始位）时，它在每个位时间的中间采样线路，将位组装成一个字节，检查奇偶校验，验证停止位，然后将字节存储在其接收寄存器中。如果这些步骤中有任何一步失败（奇偶校验不匹配、停止位错误、成帧错误），UART会在其状态寄存器中记录一个成帧错误、奇偶校验错误或中断条件。
 
-On most modern UARTs, the single receive and transmit 寄存器 are backed by small first-in-first-out 缓冲区 (FIFOs). The 16550A UART, still the de facto standard, has a 16-byte FIFO on each side. A 驱动程序 that programs the FIFO with an appropriate "trigger level" can let the hardware 缓冲区 incoming bytes and raise an interrupt only when the FIFO passes the trigger level. This is the difference between "one interrupt per byte" (slow) and "one interrupt per trigger level" (fast). The 16550A's FIFO is a big part of why this chip became the universal PC standard.
+在大多数现代UART上，单个接收和发送寄存器由小型先进先出缓冲区（FIFO）支持。16550A UART仍然是事实上的标准，每侧有一个16字节的FIFO。一个用适当的"触发级别"编程FIFO的驱动程序可以让硬件缓冲传入的字节，只在FIFO超过触发级别时才引发中断。这就是"每字节一次中断"（慢）和"每个触发级别一次中断"（快）之间的区别。16550A的FIFO是这块芯片成为通用PC标准的重要原因。
 
-The UART's speed is controlled by a *波特率 divisor*: the UART has an input clock (often 1.8432 MHz on classic PC hardware), and the 波特率 is the clock divided by 16 times the divisor. A divisor of 1 with a 1.8432 MHz clock gives 115200 baud. A divisor of 12 gives 9600 baud. The FreeBSD `ns8250` 驱动程序 computes the divisor from the requested 波特率 and programs it into the UART's divisor-latch 寄存器. Section 4 walks through this code.
+UART的速度由一个*波特率除数*控制：UART有一个输入时钟（在经典PC硬件上通常为1.8432 MHz），波特率是时钟除以16倍除数。除数为1、时钟为1.8432 MHz时得到115200波特率。除数为12时得到9600波特率。FreeBSD的 `ns8250` 驱动程序从请求的波特率计算除数并将其编程到UART的除数锁存寄存器中。第4节将详细讲解这段代码。
 
-RS-232 framing is the full protocol: start bit (one), 数据位 (five, six, seven, or eight), optional 奇偶校验 bit (none, odd, even, mark, or space), stop bit (one or two). A typical modern configuration is "8N1": eight 数据位, no 奇偶校验, one stop bit. An older configuration sometimes seen on industrial equipment is "7E1": seven 数据位, even 奇偶校验, one stop bit. The 驱动程序 programs the UART's line control 注册 to select the framing; `struct termios` carries the configuration from user space.
+RS-232成帧是完整的协议：起始位（一个）、数据位（五个、六个、七个或八个）、可选的奇偶校验位（无、奇、偶、标记或空格）、停止位（一个或两个）。典型的现代配置是"8N1"：八个数据位、无奇偶校验、一个停止位。在工业设备上有时会看到的较旧配置是"7E1"：七个数据位、偶校验、一个停止位。驱动程序编程UART的线路控制寄存器来选择成帧方式；`struct termios` 从用户空间传递配置。
 
-#### Flow Control
+#### 流控制
 
-The UART can transmit faster than the receiver can read if the receiver's code is slow or is doing other work. *Flow control* is how the receiver tells the transmitter to pause. Two mechanisms exist.
+如果接收方代码运行缓慢或正在做其他工作，UART的传输速度可能快于接收方的读取速度。*流控制*是接收方告诉发送方暂停的方式。有两种机制。
 
-*Hardware 流控制* uses two extra wires: *RTS* (Request To Send) from the receiver, and *CTS* (Clear To Send) from the transmitter's perspective (it is the wire the other side drives). When the receiver's 缓冲区 is filling up, it deasserts RTS. The transmitter, seeing CTS deasserted, stops transmitting. When the 缓冲区 empties, the receiver reasserts RTS, CTS asserts on the other side, and transmission resumes. Hardware 流控制 is reliable and requires no software overhead on either side; it is the default choice when the hardware supports it.
+*硬件流控制*使用两根额外的线：来自接收方的*RTS*（请求发送），以及从发送方角度看（即对方驱动的线）的*CTS*（清除发送）。当接收方的缓冲区快满时，它撤销RTS。发送方看到CTS被撤销，停止发送。当缓冲区排空时，接收方重新置位RTS，另一侧的CTS被置位，传输恢复。硬件流控制可靠且不需要任何一侧的软件开销；当硬件支持时，它是默认选择。
 
-*Software 流控制*, also called XON/XOFF, uses two in-band bytes: XOFF (traditionally ASCII DC3, 0x13) to pause transmission, and XON (ASCII DC1, 0x11) to resume. The receiver sends XOFF when it is almost full and XON when it has room again. This mechanism works over a three-wire connection (TX, RX, ground) with no extra pins, at the cost of reserving two byte values for control use. If you are sending binary data that may contain 0x11 or 0x13, you cannot use software 流控制; hardware 流控制 is the only option.
+*软件流控制*，也称为XON/XOFF，使用两个带内字节：XOFF（传统上是ASCII DC3，0x13）来暂停传输，XON（ASCII DC1，0x11）来恢复传输。接收方在几乎满时发送XOFF，在有空间时发送XON。这种机制在三线连接（TX、RX、地线）上工作，不需要额外引脚，代价是保留两个字节值用于控制。如果你发送的二进制数据可能包含0x11或0x13，就不能使用软件流控制；硬件流控制是唯一选择。
 
-FreeBSD's tty discipline handles software 流控制 entirely in software, at the line-discipline layer, with no involvement from the UART 驱动程序. Hardware 流控制 is partly in the 驱动程序 (the 驱动程序 programs the UART's automatic RTS/CTS feature if the chip supports it) and partly in the tty layer. A 驱动程序 author should know which 流控制 method the tty layer has selected; the CRTSCTS flag in `struct termios` signals hardware 流控制.
+FreeBSD的tty规程完全在软件中、在线路规程层处理软件流控制，不涉及UART驱动程序。硬件流控制部分在驱动程序中（如果芯片支持，驱动程序编程UART的自动RTS/CTS功能），部分在tty层。驱动程序作者应该知道tty层选择了哪种流控制方法；`struct termios` 中的CRTSCTS标志表示硬件流控制。
 
-#### /dev/ttyuN and /dev/cuauN: A FreeBSD-Specific Quirk
+#### /dev/ttyuN 和 /dev/cuauN：FreeBSD特有的特性
 
-The FreeBSD tty layer creates two 设备 nodes per 串行端口. The *callin* node is `/dev/ttyuN` (where N is the port number, 0 for the first port). The *callout* node is `/dev/cuauN`. The distinction is historical, from the days of dial-up modems, and remains useful.
+FreeBSD的tty层为每个串行端口创建两个设备节点。*呼入*节点是 `/dev/ttyuN`（其中N是端口号，第一个端口为0）。*呼出*节点是 `/dev/cuauN`。这个区别是历史性的，来自拨号调制解调器时代，但仍然有用。
 
-A process opening `/dev/ttyuN` is saying "I want to answer an incoming call": the open 块 until the modem raises DCD (Data Carrier Detect). Once DCD is up, the open completes. When DCD drops, the open process receives SIGHUP. The node is for incoming connections.
+一个打开 `/dev/ttyuN` 的进程是在说"我想接听一个来电"：打开操作会阻塞直到调制解调器升起DCD（数据载波检测）。一旦DCD升起，打开操作完成。当DCD下降时，打开的进程收到SIGHUP。该节点用于传入连接。
 
-A process opening `/dev/cuauN` is saying "I want to make an outgoing call": the open succeeds immediately, without 块ing on DCD. The process can then dial out or, on non-modem uses, simply talk to the 串行端口. The node is for outgoing connections, and more generally for any use that does not require modem semantics.
+一个打开 `/dev/cuauN` 的进程是在说"我想拨打一个外线"：打开操作立即成功，不会在DCD上阻塞。进程然后可以拨出，或者在非调制解调器使用中，简单地与串行端口通信。该节点用于外发连接，更一般地用于任何不需要调制解调器语义的使用场景。
 
-In modern use, when a 串行端口 is connected to something that is not a modem (a microcontroller, a console, a GPS receiver), the right node to open is almost always `/dev/cuau0`. Opening `/dev/ttyu0` on a non-modem port will usually hang, because DCD is never asserted. The distinction is FreeBSD-specific; Linux has no callout nodes and uses `/dev/ttyS0` or `/dev/ttyUSB0` for everything.
+在现代使用中，当串行端口连接到非调制解调器的东西（微控制器、控制台、GPS接收器）时，正确的节点几乎总是 `/dev/cuau0`。在非调制解调器端口上打开 `/dev/ttyu0` 通常会挂起，因为DCD永远不会被置位。这个区别是FreeBSD特有的；Linux没有呼出节点，对一切都使用 `/dev/ttyS0` 或 `/dev/ttyUSB0`。
 
-The chapter's labs will use `/dev/cuau0` and the simulated pair `/dev/nmdm0A`/`/dev/nmdm0B` for serial exercises. The callin nodes are not used.
+本章的实验将使用 `/dev/cuau0` 和模拟对 `/dev/nmdm0A`/`/dev/nmdm0B` 进行串行练习。呼入节点不使用。
 
-#### Two Worlds: `uart(4)` and `ucom(4)`
+#### 两个世界：`uart(4)` 和 `ucom(4)`
 
-FreeBSD separates real UART hardware from USB-to-serial bridges into two distinct subsystems. The separation is not visible from user space (a USB serial adapter and a built-in 串行端口 both appear as tty 设备), but it is very visible from inside the 内核, and a 驱动程序 author must not confuse the two.
+FreeBSD将真正的UART硬件与USB转串行桥接器分离为两个不同的子系统。这种分离从用户空间不可见（USB串行适配器和内置串行端口都显示为tty设备），但从内核内部非常明显，驱动程序作者绝不能混淆两者。
 
-`uart(4)` is the subsystem for real UARTs. Its scope includes the built-in 串行端口 on a PC motherboard, PCI serial cards, the PrimeCell `PL011` found on ARM embedded boards, the embedded SoC UARTs on i.MX, Marvell, Qualcomm, Broadcom, and Allwinner platforms, and so on. The `uart` subsystem lives in `/usr/src/sys/dev/uart/`. Its core code is in `uart_core.c` and `uart_tty.c`. Its canonical hardware 驱动程序 is `uart_dev_ns8250.c`. A 驱动程序 that 附加 to a real UART writes a `uart_class` and a small set of `uart_ops`, and the subsystem handles everything else. The `/dev` nodes that `uart(4)` creates are called `ttyu0`, `ttyu1`, and so on (callin) and `cuau0`, `cuau1`, and so on (callout).
+`uart(4)` 是用于真正UART的子系统。其范围包括PC主板上的内置串行端口、PCI串行卡、ARM嵌入式板上发现的PrimeCell `PL011`、i.MX、Marvell、Qualcomm、Broadcom和Allwinner平台上的嵌入式SoC UART等。`uart` 子系统位于 `/usr/src/sys/dev/uart/`。其核心代码在 `uart_core.c` 和 `uart_tty.c` 中。其经典硬件驱动程序是 `uart_dev_ns8250.c`。一个附加到真正UART的驱动程序编写一个 `uart_class` 和一小组 `uart_ops`，子系统处理其余一切。`uart(4)` 创建的 `/dev` 节点称为 `ttyu0`、`ttyu1` 等（呼入）和 `cuau0`、`cuau1` 等（呼出）。
 
-`ucom(4)` is the 框架 for USB-to-serial bridges: FTDI, Prolific, Silicon Labs, WCH, and similar. Its scope is *not* a UART at all; it is a USB 设备 whose 端点 happen to behave like a 串行端口. The `ucom` 框架 lives in `/usr/src/sys/dev/usb/serial/`. Its header is `usb_serial.h`. Its body is `usb_serial.c`. A USB-to-串行驱动程序 writes USB 探测, 附加, and 分离 methods as in any other USB驱动程序, and then 寄存器 a `struct ucom_回调` with the 框架. The 回调 has entries for "open", "close", "set line parameters", "start reading", "stop reading", "start writing", and so on. The 框架 creates the `/dev` node (called `ttyU0`, `ttyU1` for callin, `cuaU0`, `cuaU1` for callout, note the capital U) and runs the tty discipline on top of the 驱动程序's USB transfers.
+`ucom(4)` 是用于USB转串行桥接器的框架：FTDI、Prolific、Silicon Labs、WCH等。其范围*不是*UART；它是一个端点碰巧表现得像串行端口的USB设备。`ucom` 框架位于 `/usr/src/sys/dev/usb/serial/`。其头文件是 `usb_serial.h`。其主体是 `usb_serial.c`。一个USB转串行驱动程序像任何其他USB驱动程序一样编写USB探测、附加和分离方法，然后向框架注册一个 `struct ucom_callback`。回调有条目用于"打开"、"关闭"、"设置线路参数"、"开始读取"、"停止读取"、"开始写入"等。框架创建 `/dev` 节点（呼入称为 `ttyU0`、`ttyU1`，呼出称为 `cuaU0`、`cuaU1`，注意大写字母U）并在驱动程序的USB传输之上运行tty规程。
 
-The two worlds never mix. `uart(4)` is for hardware that is physically a UART. `ucom(4)` is for USB 设备 that behave like a UART. A USB-to-serial adapter is a `ucom` 驱动程序, not a `uart` 驱动程序. A PCI serial card is a `uart` 驱动程序 (specifically, a shim in `uart_总线_pci.c`), not a `ucom` 驱动程序. The user-space 接口 is similar (both produce `cu*` 设备 nodes), but the 内核 code is entirely disjoint.
+这两个世界从不混合。`uart(4)` 用于物理上是UART的硬件。`ucom(4)` 用于行为像UART的USB设备。USB转串行适配器是一个 `ucom` 驱动程序，而不是 `uart` 驱动程序。PCI串行卡是一个 `uart` 驱动程序（具体来说是 `uart_bus_pci.c` 中的一个垫片），而不是 `ucom` 驱动程序。用户空间接口是相似的（两者都产生 `cu*` 设备节点），但内核代码完全不相交。
 
-A historical note that sometimes confuses readers: FreeBSD once had a separate `sio(4)` 驱动程序 for 16550-family UARTs. `sio(4)` was retired years ago and is not present in FreeBSD 14.3. If you see references to `sio` in older documentation, translate them mentally to `uart(4)`. Do not try to find or extend `sio`; it is gone.
+一个有时会让读者困惑的历史注记：FreeBSD曾经有一个单独的 `sio(4)` 驱动程序用于16550系列UART。`sio(4)` 已在多年前退役，在FreeBSD 14.3中不存在。如果你在旧文档中看到对 `sio` 的引用，在心中将它们翻译为 `uart(4)`。不要试图找到或扩展 `sio`；它已经不存在了。
 
-#### What termios Carries, and Where It Goes
+#### termios传递什么，以及它去哪里
 
-`struct termios` is the user-space structure that configures a tty. It has five fields: `c_iflag` (input flags), `c_oflag` (output flags), `c_cflag` (control flags), `c_lflag` (local flags), `c_cc` (control characters), and two speed fields `c_ispeed` and `c_ospeed`. The fields are manipulated with `tcgetattr(3)`, `tcsetattr(3)`, and the shell command `stty(1)`.
+`struct termios` 是配置tty的用户空间结构。它有五个字段：`c_iflag`（输入标志）、`c_oflag`（输出标志）、`c_cflag`（控制标志）、`c_lflag`（本地标志）、`c_cc`（控制字符），以及两个速度字段 `c_ispeed` 和 `c_ospeed`。这些字段通过 `tcgetattr(3)`、`tcsetattr(3)` 和shell命令 `stty(1)` 来操作。
 
-A UART 驱动程序 cares almost exclusively about `c_cflag` and the speed fields. `c_cflag` carries:
+UART驱动程序几乎只关心 `c_cflag` 和速度字段。`c_cflag` 携带：
 
-- `CSIZE`: the character size (CS5, CS6, CS7, CS8).
-- `CSTOPB`: if set, two 停止位; if clear, one.
-- `PARENB`: if set, 奇偶校验 is enabled; the type depends on `PARODD`.
-- `PARODD`: if set with `PARENB`, odd 奇偶校验; if clear with `PARENB`, even 奇偶校验.
-- `CRTSCTS`: hardware 流控制.
-- `CLOCAL`: ignore modem status lines; treat the link as local.
-- `CREAD`: enable the receiver.
+- `CSIZE`：字符大小（CS5、CS6、CS7、CS8）。
+- `CSTOPB`：如果设置，两个停止位；如果清除，一个。
+- `PARENB`：如果设置，启用奇偶校验；类型取决于 `PARODD`。
+- `PARODD`：如果与 `PARENB` 一起设置，奇校验；如果与 `PARENB` 一起清除，偶校验。
+- `CRTSCTS`：硬件流控制。
+- `CLOCAL`：忽略调制解调器状态线；将链路视为本地。
+- `CREAD`：启用接收器。
 
-When user space calls `tcsetattr`, the tty layer checks the request, invokes the 驱动程序's `param` method (via the `tsw_param` 回调 in `ttydevsw`), and the 驱动程序 translates the termios fields into hardware 注册 settings. The `uart_tty.c` bridge code walks through this in full and is the best place to see the translation happen.
+当用户空间调用 `tcsetattr` 时，tty层检查请求，调用驱动程序的 `param` 方法（通过 `ttydevsw` 中的 `tsw_param` 回调），驱动程序将termios字段翻译为硬件寄存器设置。`uart_tty.c` 桥接代码完整地展示了这个过程，是查看翻译发生的最佳位置。
 
-`c_iflag`, `c_oflag`, and `c_lflag` are mostly handled by the tty line discipline, not by the 驱动程序. They control things like whether the line discipline maps CR to LF, whether echo is enabled, whether canonical mode is active, and so on. A UART 驱动程序 does not need to know any of that; the tty layer handles it.
+`c_iflag`、`c_oflag` 和 `c_lflag` 主要由tty线路规程处理，而不是由驱动程序处理。它们控制诸如线路规程是否将CR映射为LF、是否启用回显、规范模式是否激活等。UART驱动程序不需要知道任何这些；tty层会处理它。
 
-#### Flow Control at the Multiple Layers of a TTY
+#### TTY多层中的流控制
 
-Flow control sounds like a single concept, but in practice there are several independent layers that can each throttle the data flow. Understanding the layers helps debug situations where data is mysteriously not flowing.
+流控制听起来像是一个单一概念，但实际上有几个独立的层，每一层都可以限制数据流。理解这些层有助于调试数据神秘地不流动的情况。
 
-The lowest layer is electrical. On a real RS-232 line, 流控制 signals (RTS, CTS, DTR, DSR) are physical pins on the connector. The remote side's transmitter only sends data when its CTS pin is asserted. The local side asserts the RTS pin to tell the remote it is ready to receive. For this to work, the cable must pass RTS and CTS through correctly, and both ends must have 流控制 configured consistently.
+最底层是电气层。在真正的RS-232线路上，流控制信号（RTS、CTS、DTR、DSR）是连接器上的物理引脚。远端的发送器只在CTS引脚被置位时才发送数据。本端置位RTS引脚告诉远端它准备好接收了。为了使这工作，线缆必须正确地传递RTS和CTS，两端必须一致地配置流控制。
 
-The next layer is in the UART chip itself. Some 16650 and later UARTs have automatic 流控制: if configured, the chip itself monitors CTS and pauses the transmitter without 驱动程序 involvement. The `CRTSCTS` flag in `c_cflag` enables this.
+下一层在UART芯片本身。一些16650和更高版本的UART具有自动流控制：如果配置了，芯片本身监控CTS并在没有驱动程序参与的情况下暂停发送器。`c_cflag` 中的 `CRTSCTS` 标志启用此功能。
 
-The next layer is in the UART 框架's 环形缓冲区. When the RX ring fills past a high-water mark, the 框架 deasserts RTS (if 流控制 is enabled) to tell the remote side to pause. When it drains below a low-water mark, RTS is reasserted.
+下一层在UART框架的环形缓冲区中。当RX环超过高水位标记时，框架撤销RTS（如果启用了流控制）以告诉远端暂停。当它排空到低水位标记以下时，RTS被重新置位。
 
-The next layer is the tty line discipline, which has its own input and output queues. The line discipline can also generate XON/XOFF bytes (0x11 and 0x13) if `IXON` and `IXOFF` are set in `c_iflag`. These are software 流控制 signals.
+下一层是tty线路规程，它有自己的输入和输出队列。如果在 `c_iflag` 中设置了 `IXON` 和 `IXOFF`，线路规程还可以生成XON/XOFF字节（0x11和0x13）。这些是软件流控制信号。
 
-The highest layer is the userland program's read loop. If the program is slow at consuming data, bytes accumulate at every layer below it.
+最高层是用户态程序的读取循环。如果程序消耗数据很慢，字节会在它下面的每一层累积。
 
-When debugging flow-control issues, check each layer. Use `stty -a -f /dev/cuau0` to see what `c_cflag` and `c_iflag` have active. Use `comcontrol /dev/cuau0` to see the current modem signals. Use a multimeter or oscilloscope on the physical signals if you can. Work down the layers until you find the one that is actually 块ing the flow.
+在调试流控制问题时，检查每一层。使用 `stty -a -f /dev/cuau0` 查看 `c_cflag` 和 `c_iflag` 有哪些处于活动状态。使用 `comcontrol /dev/cuau0` 查看当前的调制解调器信号。如果可以的话，在物理信号上使用万用表或示波器。从上到下检查各层，直到找到实际阻塞数据流的那一层。
 
-#### Why Baud Rate Errors Are Insidious
+#### 为什么波特率误差难以察觉
 
-A common class of serial bug is a baud-rate mismatch that almost works. Suppose one side is running at 115200 and the other at 114400 (which is what you get from a slightly-off crystal). Most bytes will come through, but a few will be corrupted. The exact error rate depends on the bit pattern. Long runs of one polarity drift further than alternating patterns.
+一类常见的串行bug是波特率不匹配但几乎能工作的情况。假设一边以115200运行，另一边以114400运行（这是由稍微偏差的晶体产生的）。大多数字节会通过，但少数会损坏。确切的错误率取决于位模式。长连同一极性的位比交替模式的位偏移更大。
 
-Even worse, the error rate depends on the byte being sent. ASCII printable characters are in the range 0x20 to 0x7e, where the bits are well-distributed. Non-printable characters like 0xff or 0x00 are more likely to suffer bit errors because they present long runs of one polarity.
+更糟糕的是，错误率取决于发送的字节。ASCII可打印字符在0x20到0x7e范围内，其中位分布良好。像0xff或0x00这样的不可打印字符更容易出现位错误，因为它们呈现长连同一极性。
 
-If you find your 串行驱动程序 "mostly works" but drops or corrupts a few bytes out of thousands, suspect a baud-rate mismatch before suspecting a logic bug in your 驱动程序. Compare the actual divisor the chip is using against the expected divisor. If they differ, the 波特率 is not what you asked for.
+如果你发现你的串行驱动程序"大部分工作正常"但在数千字节中丢弃或损坏了少数字节，在怀疑驱动程序中的逻辑bug之前，先怀疑波特率不匹配。比较芯片使用的实际除数与预期除数。如果它们不同，波特率就不是你要求的值。
 
-The 16550 uses a clock source (usually 1.8432 MHz) divided by a 16-bit divisor to produce 16 times the 波特率. For 115200, the divisor is `(1843200 / (115200 * 16)) = 1`. For 9600, it is 12. For arbitrary rates, the divisor may not be an integer, and the closest integer produces a rounded rate. A rate of 115200 requested from a 24 MHz clock would produce a divisor of `(24000000 / (115200 * 16)) = 13.02`, rounding to 13, giving an actual rate of `(24000000 / (13 * 16)) = 115384`, which is 0.16% off. Standard tolerance for serial communication is 2-3%, so 0.16% is fine.
+16550使用时钟源（通常为1.8432 MHz）除以16位除数来产生16倍波特率。对于115200，除数为 `(1843200 / (115200 * 16)) = 1`。对于9600，为12。对于任意速率，除数可能不是整数，最接近的整数产生一个舍入的速率。从24 MHz时钟请求115200的速率会产生除数 `(24000000 / (115200 * 16)) = 13.02`，舍入为13，给出实际速率 `(24000000 / (13 * 16)) = 115384`，偏差0.16%。串行通信的标准容差为2-3%，所以0.16%是可以的。
 
-When you configure a UART for a nonstandard 波特率, check whether the rate can be represented exactly. If not, test with actual data exchange, not just a loopback check.
+当你为非标准波特率配置UART时，检查速率是否可以精确表示。如果不能，用实际数据交换测试，而不仅仅是环回检查。
 
-#### Historical Note on Minor Numbers
+#### 关于次设备号的历史注记
 
-Older FreeBSD versions encoded a lot of information into the minor numbers of serial 设备 files. Different minor numbers for the "callin" side vs the "callout" side, for hardware-flow vs software-flow, and for various lock states. This encoding is largely gone in modern FreeBSD; the distinctions are now handled by separate 设备 nodes with different names (`ttyu` vs `cuau`, with suffixes for lock and init states). If you see odd minor-number manipulation in old code, know that modern code does not need it.
+较旧的FreeBSD版本在串行设备文件的次设备号中编码了大量信息。不同的次设备号用于"呼入"侧与"呼出"侧、硬件流控制与软件流控制以及各种锁定状态。这种编码在现代FreeBSD中已基本消失；这些区别现在由具有不同名称的独立设备节点处理（`ttyu` 与 `cuau`，带有锁定和初始化状态的后缀）。如果你在旧代码中看到奇怪次设备号操作，要知道现代代码不需要它。
 
-#### 总结 Section 1
+#### 第1节总结
 
-Section 1 has established the two mental models 第26章 depends on. The USB model is a tree-structured, host-controlled, 热插拔gable serial 总线 with four transfer types, a rich 描述符 hierarchy, and a lifecycle in which physical events drive 内核 events. The serial model is a simple shift-注册 hardware protocol with 波特率, 奇偶校验, 停止位, and optional 流控制, integrated into FreeBSD through a subsystem split between `uart(4)` for real UARTs and `ucom(4)` for USB-to-serial bridges, and exposed to user space through the tty discipline and 设备 nodes like `/dev/cuau0`.
+第1节建立了第26章所依赖的两个思维模型。USB模型是一个树状结构、主机控制、支持热插拔的串行总线，具有四种传输类型、丰富的描述符层次结构以及物理事件驱动内核事件的生命周期。串行模型是一个简单的移位寄存器硬件协议，具有波特率、奇偶校验、停止位和可选的流控制，通过 `uart(4)`（用于真正UART）和 `ucom(4)`（用于USB转串行桥接器）之间的子系统分裂集成到FreeBSD中，并通过tty规程和像 `/dev/cuau0` 这样的设备节点暴露给用户空间。
 
-Before moving on, spend a few minutes with `usbconfig` on a real system. The vocabulary you have just learned is easier to keep straight once you have seen a real USB 设备's 描述符 with your own eyes.
+在继续之前，花几分钟在一个真实系统上使用 `usbconfig`。你刚刚学到的词汇在你亲眼看到真实USB设备的描述符后更容易理清。
 
-### Exercise: Use `usbconfig` and `dmesg` to Explore USB Devices on Your System
+### 练习：使用 `usbconfig` 和 `dmesg` 探索你系统上的USB设备
 
-This exercise is a short hands-on checkpoint that grounds Section 1's vocabulary in a 设备 you can see. Perform it on your lab VM (or on any FreeBSD 14.3 system with at least one USB 设备 connected). It takes about fifteen minutes.
+本练习是一个简短的动手检查点，将第1节的词汇建立在你可见的设备上。在你的实验VM上（或任何连接了至少一个USB设备的FreeBSD 14.3系统上）执行它。大约需要十五分钟。
 
-**Step 1. Inventory.** Run `usbconfig` with no arguments:
+**步骤1. 清单。** 运行无参数的 `usbconfig`：
 
 ```console
 $ usbconfig
@@ -472,9 +472,9 @@ ugen0.2: <Generic Storage> at usbus0, cfg=0 md=HOST spd=HIGH (500mA)
 ugen0.3: <Logitech USB Mouse> at usbus0, cfg=0 md=HOST spd=LOW (98mA)
 ```
 
-The first line is the root hub. Each other line is a 设备. Read the format: `ugenN.M` where N is the 总线 number and M is the 设备 number; the description in angle brackets is the 设备's string; `cfg` is the active configuration; `md` is the mode (HOST or DEVICE); `spd` is the 总线 speed (LOW, FULL, HIGH, SUPER); the parenthesised current is the maximum 总线-supplied power draw.
+第一行是根集线器。其余每行是一个设备。阅读格式：`ugenN.M` 其中N是总线号，M是设备号；尖括号中的描述是设备的字符串；`cfg` 是活动配置；`md` 是模式（HOST或DEVICE）；`spd` 是总线速度（LOW、FULL、HIGH、SUPER）；括号中的电流是最大总线供电功耗。
 
-**Step 2. Dump a 设备's 描述符.** Pick one of the non-root-hub 设备 and dump its 设备 描述符:
+**步骤2. 转储设备的描述符。** 选择一个非根集线器的设备并转储其设备描述符：
 
 ```console
 $ usbconfig -d ugen0.2 dump_device_desc
@@ -497,9 +497,9 @@ ugen0.2: <Generic Storage> at usbus0, cfg=0 md=HOST spd=HIGH (500mA)
   bNumConfigurations = 0x0001
 ```
 
-Read each field. Notice that `bDeviceClass` is zero: that is the USB convention for "the class is defined per 接口, not at the 设备 level." For this 设备, the 接口 class will be Mass Storage (0x08).
+读取每个字段。注意 `bDeviceClass` 为零：这是USB中"类在每个接口上定义，而不是在设备级别"的约定。对于这个设备，接口类将是Mass Storage（0x08）。
 
-**Step 3. Dump the active configuration.** Now dump the configuration 描述符, which includes the 接口 and 端点:
+**步骤3. 转储活动配置。** 现在转储配置描述符，它包括接口和端点：
 
 ```console
 $ usbconfig -d ugen0.2 dump_curr_config_desc
@@ -545,9 +545,9 @@ ugen0.2: <Generic Storage> at usbus0, cfg=0 md=HOST spd=HIGH (500mA)
         bInterval = 0x0000
 ```
 
-Every field in Section 1's vocabulary is right there. The 接口 class is 0x08 (Mass Storage). The subclass is 0x06 (SCSI). The protocol is 0x50 (Bulk-only Transport). There are two 端点. Endpoint 0 has address 0x81 (the high bit indicates IN direction, the low five bits are the 端点 number, 1). Endpoint 1 has address 0x02 (the high bit is clear, meaning OUT; the 端点 number is 2). Both 端点 are bulk. Both have a maximum 数据包 size of 0x0200 = 512 bytes. The interval is zero because bulk 端点 do not use it.
+第1节词汇中的每个字段都在这里。接口类是0x08（Mass Storage）。子类是0x06（SCSI）。协议是0x50（Bulk-only Transport）。有两个端点。端点0的地址是0x81（高位表示IN方向，低五位是端点号1）。端点1的地址是0x02（高位清除，表示OUT；端点号是2）。两个端点都是批量的。它们都有0x0200 = 512字节的最大数据包大小。间隔为零，因为批量端点不使用它。
 
-**Step 4. Match this against `dmesg`.** Run `dmesg | grep -A 3 ugen0.2` (or look at the last boot's output for the matching 设备). You should see a line like:
+**步骤4. 将此与 `dmesg` 匹配。** 运行 `dmesg | grep -A 3 ugen0.2`（或查看上次启动的输出以找到匹配的设备）。你应该看到类似这样的行：
 
 ```text
 ugen0.2: <Generic Storage> at usbus0
@@ -555,37 +555,37 @@ umass0 on uhub0
 umass0: <Generic Storage, class 0/0, rev 2.00/1.12, addr 2> on usbus0
 ```
 
-This is the same information, formatted by the 内核's own logging. The 驱动程序 that 附加ed is `umass`, which is FreeBSD's USB mass 存储驱动程序, and it 附加ed to the Mass Storage 接口 class.
+这是相同的信息，由内核自己的日志格式化。附加的驱动程序是 `umass`，即FreeBSD的USB大容量存储驱动程序，它附加到了Mass Storage接口类。
 
-**Step 5. Try `usbconfig -d ugen0.3 dump_all_config_desc` on another 设备.** A mouse, a keyboard, or a flash drive will all work. Compare the 端点 types: a mouse has one interrupt-IN 端点; a flash drive has one bulk-IN and one bulk-OUT; a keyboard has one interrupt-IN. The pattern holds.
+**步骤5. 在另一个设备上尝试 `usbconfig -d ugen0.3 dump_all_config_desc`。** 鼠标、键盘或闪存盘都可以。比较端点类型：鼠标有一个中断IN端点；闪存盘有一个批量IN和一个批量OUT；键盘有一个中断IN。模式是一致的。
 
-If you want a small additional exercise, write down the vendor and product identifiers of one of your 设备. In Section 2 you will be asked to put vendor and product identifiers into a 匹配表; using ones you can see now is concrete.
+如果你想要一个小的额外练习，写下你其中一个设备的供应商标识符和产品标识符。在第2节中，你将被要求将供应商标识符和产品标识符放入匹配表；使用你现在能看到的标识符更具体。
 
-### 总结 Section 1
+### 第1节总结
 
-Section 1 has done four things. It established the mental model of a transport: the protocol plus the lifecycle, plus the three broad categories of work (matching, transfer mechanics, 热插拔 lifecycle) that a transport-specific 驱动程序 has to add to its New总线 foundation. It built the USB model: host and 设备, hubs and ports, classes, 描述符 with their nested structure, the four transfer types, and the 热插拔 lifecycle. It built the serial model: the UART as a shift 注册 with a baud generator, RS-232 framing, 波特率 and 奇偶校验 and 停止位, hardware and software 流控制, the FreeBSD-specific callin and callout node distinction, the two-worlds split between `uart(4)` and `ucom(4)`, and the role of `struct termios`. And it anchored the vocabulary in a concrete exercise that reads 描述符 off a real USB 设备 with `usbconfig`.
+第1节完成了四件事。它确立了传输层的思维模型：协议加生命周期，加上特定传输层驱动程序必须在其Newbus基础上增加的三大类工作（匹配、传输机制、热插拔生命周期）。它构建了USB模型：主机和设备、集线器和端口、设备类、具有嵌套结构的描述符、四种传输类型以及热插拔生命周期。它构建了串行模型：UART作为带有波特率发生器的移位寄存器、RS-232成帧、波特率和奇偶校验和停止位、硬件和软件流控制、FreeBSD特有的呼入和呼出节点区别、`uart(4)` 和 `ucom(4)` 之间的两个世界分裂以及 `struct termios` 的作用。它通过一个使用 `usbconfig` 从真实USB设备读取描述符的具体练习锚定了词汇。
 
-From here, the chapter turns to code. Section 2 builds a USB驱动程序 skeleton: 探测, 附加, 分离, 匹配表, registration macros. Section 3 makes that 驱动程序 do real work by adding transfers. Section 4 turns to the serial side, walks through the `uart(4)` subsystem with a real 驱动程序 as the guide, and explains where `ucom(4)` fits in. Section 5 brings the material back to the lab and teaches how to test USB and 串行驱动程序 without physical hardware. Each section builds on the mental models just established. If a later paragraph refers to a 描述符 or a transfer type and the term does not feel immediate, return to Section 1 for a quick refresher before continuing.
+从这里开始，本章转向代码。第2节构建USB驱动程序骨架：探测、附加、分离、匹配表、注册宏。第3节通过添加传输使该驱动程序做真正的工作。第4节转向串行方面，以一个真实驱动程序为引导，遍历 `uart(4)` 子系统，并解释 `ucom(4)` 在哪里融入。第5节将材料带回实验室，教授如何在没有物理硬件的情况下测试USB和串行驱动程序。每一节都建立在刚刚建立的思维模型之上。如果后面的段落提到一个描述符或传输类型而这个词不让你感觉立刻明了，在继续之前返回第1节快速复习。
 
-## 第2节： Writing a USB Device Driver
+## 第2节：编写USB设备驱动程序
 
-### Moving from Concepts to Code
+### 从概念到代码
 
-Section 1 built a mental picture of USB: a host that talks to 设备 through a tree of hubs, 设备 that describe themselves with nested 描述符, four transfer types that cover every conceivable traffic pattern, and a 热插拔 lifecycle that 驱动程序 must respect because USB 设备 appear and disappear at any moment. Section 2 turns those concepts into a real 驱动程序 skeleton. By the end of this section, you will have a USB驱动程序 that compiles, loads, 附加 to a matching 设备, and 分离 cleanly when the 设备 is unplugged. It will not yet perform data transfers; that is the job of Section 3. But the scaffolding you build here is the same scaffolding every FreeBSD USB驱动程序 uses, from the tiniest notification LED to the most complex mass-storage controller.
+第1节构建了USB的思维图景：一个通过集线器树与设备通信的主机、用嵌套描述符描述自身的设备、覆盖所有可能流量模式的四种传输类型，以及驱动程序必须遵守的热插拔生命周期，因为USB设备随时可能出现和消失。第2节将这些概念转化为一个真实的驱动程序骨架。到本节结束时，你将拥有一个可以编译、加载、附加到匹配设备并在设备被拔出时干净分离的USB驱动程序。它还不会执行数据传输；那是第3节的工作。但你在这里构建的脚手架是每个FreeBSD USB驱动程序使用的相同脚手架，从最小的通知LED到最复杂的大容量存储控制器。
 
-The discipline you learned in 第25章 carries forward unchanged. Every resource must have an owner. Every successful allocation in `附加` must be paired with an explicit release in `分离`. Every failure path must leave the system in a clean state. The labelled-goto cleanup chain, the errno-returning helper functions, the softc-based resource tracking, the rate-limited logging: all of it still applies. What changes is the set of resources you manage. Instead of 总线 resources allocated through New总线 and a 字符设备 created through `make_dev`, you will manage USB transfer objects allocated through the USB stack and, optionally, a `/dev` entry created through the `usb_fifo` 框架. The shape of the code stays the same. Only the specific calls change.
+你在第25章中学到的规范保持不变。每个资源都必须有一个所有者。`attach` 中每个成功的分配都必须与 `detach` 中的显式释放配对。每个失败路径都必须让系统保持在干净状态。标签化goto清理链、返回errno的辅助函数、基于softc的资源跟踪、速率受限的日志记录：所有这些仍然适用。变化的是你管理的资源集合。不再是通过对Newbus分配的总线资源和通过 `make_dev` 创建的字符设备，你将管理通过USB栈分配的USB传输对象，以及可选地通过 `usb_fifo` 框架创建的 `/dev` 条目。代码的形态保持不变。只有具体的调用改变了。
 
-This section moves from the outside in. It begins by explaining where a USB驱动程序 sits inside the FreeBSD USB subsystem, because placing the 驱动程序 in its correct environment is a prerequisite for understanding every call that follows. It then covers the 匹配表, which is how a USB驱动程序 declares which 设备 it wants. It walks through `探测` and `附加`, the two halves of the 驱动程序's entry point into the world. It covers the softc layout, which is where the 驱动程序 keeps its per-设备 state. It presents the cleanup chain, which is how the 驱动程序 unwinds its own work when `分离` is called. And it ends with the registration macros that bind the 驱动程序 to the 内核模块 system.
+本节从外向内推进。首先解释USB驱动程序在FreeBSD USB子系统中的位置，因为将驱动程序放置在正确的环境中是理解后续每个调用的前提。然后介绍匹配表，这是USB驱动程序声明它想要哪些设备的方式。接着遍历 `probe` 和 `attach`，即驱动程序进入世界的入口点的两半。介绍softc布局，这是驱动程序保存其每个设备状态的地方。展示清理链，这是驱动程序在调用 `detach` 时如何展开自己的工作。最后以将驱动程序绑定到内核模块系统的注册宏结束。
 
-Along the way, the chapter uses `uled.c` as a recurring reference. That is a real FreeBSD 驱动程序, about three hundred lines long, located at `/usr/src/sys/dev/usb/misc/uled.c`. It is short enough to read end to end in a single sitting and rich enough to show every piece of machinery a USB驱动程序 needs. If you want to ground every idea in this section against real code, open that file now in another window and keep it open. Every time the chapter references a pattern, you will be able to see the pattern in a working 驱动程序.
+在此过程中，本章以 `uled.c` 作为反复引用的参考。那是一个真实的FreeBSD驱动程序，大约三百行代码，位于 `/usr/src/sys/dev/usb/misc/uled.c`。它短到可以在一次阅读中从头到尾读完，又足够丰富以展示USB驱动程序需要的每一个机制。如果你想将本节中的每个概念与真实代码对照，现在就在另一个窗口中打开那个文件并保持打开。每次本章引用一个模式时，你都能在一个工作的驱动程序中看到该模式。
 
-### Where a USB Driver Sits in the FreeBSD Tree
+### USB驱动程序在FreeBSD树中的位置
 
-FreeBSD's USB subsystem lives under `/usr/src/sys/dev/usb/`. That directory contains everything from the 主机控制器 驱动程序 at the bottom (`controller/ehci.c`, `controller/xhci.c`, and so on) to the class 驱动程序 higher up (`net/if_cdce.c`, `wlan/if_rum.c`, `input/ukbd.c`), to 串行驱动程序 (`serial/uftdi.c`, `serial/uplcom.c`), to generic 框架 code (`usb_设备.c`, `usb_transfer.c`, `usb_request.c`). When a new 驱动程序 is added to the tree, it goes into one of these subdirectories according to its role. A 驱动程序 for a blinking-LED gadget belongs under `misc/`. A 驱动程序 for a network adapter belongs under `net/`. A 驱动程序 for a serial adapter belongs under `serial/`. For your own work, you will not add files to `/usr/src/sys/dev/usb/` directly; you will build out-of-tree modules in your own workshop directory, the same way 第25章 did. The directory layout matters for reading the source, not for writing it.
+FreeBSD的USB子系统位于 `/usr/src/sys/dev/usb/` 下。该目录包含从底层的主机控制器驱动程序（`controller/ehci.c`、`controller/xhci.c` 等）到更高层的类驱动程序（`net/if_cdce.c`、`wlan/if_rum.c`、`input/ukbd.c`），到串行驱动程序（`serial/uftdi.c`、`serial/uplcom.c`），到通用框架代码（`usb_device.c`、`usb_transfer.c`、`usb_request.c`）的一切。当一个新的驱动程序被添加到树中时，它根据其角色进入这些子目录之一。一个用于闪烁LED小工具的驱动程序属于 `misc/`。一个用于网络适配器的驱动程序属于 `net/`。一个用于串行适配器的驱动程序属于 `serial/`。对于你自己的工作，你不会直接向 `/usr/src/sys/dev/usb/` 添加文件；你将在自己的工作目录中构建树外模块，就像第25章那样。目录布局对于阅读源代码很重要，但对于编写不重要。
 
-Every FreeBSD USB驱动程序 sits somewhere in a small vertical stack. At the bottom is the 主机控制器 驱动程序, which actually talks to the silicon. Above that is the USB 框架, which handles 描述符 parsing, 设备 enumeration, transfer scheduling, hub routing, and the generic machinery every 设备 needs. Above the 框架 are the class 驱动程序, which you will write. A class 驱动程序 附加 to a USB 接口, not to the 总线 directly. This is the most important architectural point in the chapter.
+每个FreeBSD USB驱动程序位于一个小的垂直栈中的某个位置。底部是主机控制器驱动程序，它实际与硅片通信。其上是USB框架，处理描述符解析、设备枚举、传输调度、集线器路由以及每个设备需要的通用机制。框架之上是类驱动程序，你将编写的就是这些。一个类驱动程序附加到一个USB接口，而不是直接附加到总线。这是本章中最重要的架构要点。
 
-In the New总线 tree, the 附加ment relationship looks like this:
+在Newbus树中，附加关系看起来像这样：
 
 ```text
 nexus0
@@ -597,17 +597,17 @@ nexus0
                            └─ [class driver]
 ```
 
-The 驱动程序 you will write 附加 to `uhub`, not to `us总线`, not to `ehci`, and not to `pci`. The USB 框架 walks the 设备 描述符, creates a child for each 接口, and offers those children to class 驱动程序 through the new总线 探测 mechanism. When your 驱动程序's 探测 routine is called, it is being asked: "here is an 接口; is it yours?" The 匹配表 in your 驱动程序 is how you answer that question.
+你将编写的驱动程序附加到 `uhub`，而不是 `usbus`，不是 `ehci`，也不是 `pci`。USB框架遍历设备描述符，为每个接口创建一个子设备，并通过Newbus探测机制将这些子设备提供给类驱动程序。当你的驱动程序的探测例程被调用时，它被问到的是："这是一个接口；是你的吗？"你驱动程序中的匹配表就是你回答这个问题的方式。
 
-There is one subtle point to absorb. A USB 设备 can expose multiple 接口 simultaneously. A multi-function peripheral (say, a USB audio 设备 with a headset and a microphone on the same silicon) exposes one 接口 for playback and another for capture. FreeBSD gives each 接口 its own new总线 child, and each child can be claimed by a different 驱动程序. This is why USB驱动程序 附加 at the 接口 level: it lets the 框架 route 接口 independently. Your 驱动程序 should not assume the 设备 has only one 接口. When you write the 匹配表, you write it against a specific 接口, identified by its class, subclass, protocol, or by its vendor/product pair plus an optional 接口 number.
+有一个微妙的要点需要理解。一个USB设备可以同时暴露多个接口。一个多功能外设（例如，一个在同一硅片上带有耳机和麦克风的USB音频设备）暴露一个接口用于播放，另一个用于捕获。FreeBSD为每个接口提供自己的Newbus子设备，每个子设备可以被不同的驱动程序认领。这就是为什么USB驱动程序在接口级别附加：它让框架独立地路由接口。你的驱动程序不应该假设设备只有一个接口。当你编写匹配表时，你是针对一个特定的接口编写的，由其类、子类、协议或由其供应商/产品对加可选的接口号来标识。
 
-### The Match Table: Telling the Kernel Which Devices Are Yours
+### 匹配表：告诉内核哪些设备是你的
 
-A USB驱动程序 advertises which 设备 it will accept through an array of `STRUCT_USB_HOST_ID` entries. This is analogous to the PCI 匹配表 from Chapter 23, but with USB-specific fields. The authoritative definition lives in `/usr/src/sys/dev/usb/usbdi.h`. Each entry specifies one or more of the following: a 供应商ID, a 产品ID, a 设备 class/subclass/protocol triple, an 接口 class/subclass/protocol triple, or a manufacturer-defined bcdDevice range. You can match broadly (any 设备 that advertises 接口 class 0x03, which is HID) or narrowly (the single 设备 with vendor 0x0403 and product 0x6001, which is an FTDI FT232). Most 驱动程序 match narrowly, because most real 设备 have 驱动程序-specific quirks that apply only to particular hardware revisions.
+USB驱动程序通过一个 `STRUCT_USB_HOST_ID` 条目数组来宣传它将接受哪些设备。这类似于第23章中的PCI匹配表，但具有USB特定的字段。权威定义位于 `/usr/src/sys/dev/usb/usbdi.h`。每个条目指定以下一项或多项：供应商标识符、产品标识符、设备类/子类/协议三元组、接口类/子类/协议三元组，或制造商定义的bcdDevice范围。你可以广泛匹配（任何宣传接口类0x03的设备，即HID）或狭窄匹配（供应商标识符0x0403和产品标识符0x6001的单一设备，即FTDI FT232）。大多数驱动程序狭窄匹配，因为大多数真实设备有仅适用于特定硬件修订版的驱动程序特定quirk。
 
-The 框架 provides convenience macros to build match entries without having to initialize each field by hand. The most common are `USB_VPI(vendor, product, info)` for vendor/product pairs with an optional 驱动程序-specific information field, and the more verbose form where you fill in `mfl_`, `pfl_`, `dcl_`, `dcsl_`, `dcpl_`, `icl_`, `icsl_`, `icpl_` flags to indicate which fields are significant. For clarity and maintainability, 驱动程序 written today tend to use the compact macros whenever they are applicable.
+框架提供了便利宏来构建匹配条目，而不必手动初始化每个字段。最常见的是 `USB_VPI(vendor, product, info)` 用于供应商/产品对，带有一个可选的驱动程序特定信息字段，以及更详细的形式，你填写 `mfl_`、`pfl_`、`dcl_`、`dcsl_`、`dcpl_`、`icl_`、`icsl_`、`icpl_` 标志来指示哪些字段是重要的。为了清晰和可维护性，今天编写的驱动程序倾向于在适用时使用紧凑宏。
 
-Here is how `uled.c` declares its 匹配表. The source is in `/usr/src/sys/dev/usb/misc/uled.c`:
+以下是 `uled.c` 如何声明其匹配表的。源代码位于 `/usr/src/sys/dev/usb/misc/uled.c`：
 
 ```c
 static const STRUCT_USB_HOST_ID uled_devs[] = {
@@ -616,9 +616,9 @@ static const STRUCT_USB_HOST_ID uled_devs[] = {
 };
 ```
 
-Two entries, each naming a specific vendor/product pair. The third argument to `USB_VPI` is an unsigned integer that the 驱动程序 can use to distinguish variants at 探测 time; `uled` sets it to zero because both 设备 behave the same way. The vendor and product symbolic names resolve to numeric identifiers defined in `/usr/src/sys/dev/usb/usbdevs.h`, which is a large table generated from `/usr/src/sys/dev/usb/usbdevs`. Adding a new match entry for your own development hardware often means adding a line to `usbdevs` and regenerating the header, or bypassing the symbolic names entirely and writing the hexadecimal values directly in the 匹配表.
+两个条目，每个指定一个特定的供应商/产品对。`USB_VPI` 的第三个参数是一个无符号整数，驱动程序可以在探测时用来区分变体；`uled` 将其设为零，因为两个设备的行为方式相同。供应商和产品的符号名称解析为在 `/usr/src/sys/dev/usb/usbdevs.h` 中定义的数字标识符，这是一个从 `/usr/src/sys/dev/usb/usbdevs` 生成的大型表格。为你自己的开发硬件添加新的匹配条目通常意味着向 `usbdevs` 添加一行并重新生成头文件，或者完全绕过符号名称直接在匹配表中写入十六进制值。
 
-For your own out-of-tree 驱动程序, you do not need to touch `usbdevs` at all. You can write:
+对于你自己的树外驱动程序，你根本不需要碰 `usbdevs`。你可以写：
 
 ```c
 static const STRUCT_USB_HOST_ID myfirst_usb_devs[] = {
@@ -626,19 +626,19 @@ static const STRUCT_USB_HOST_ID myfirst_usb_devs[] = {
 };
 ```
 
-The numeric form is perfectly acceptable. Use it when you are prototyping against a specific 设备 and do not yet want to propose additions to the upstream `usbdevs` file.
+数字形式是完全可接受的。当你正在针对特定设备进行原型设计且还不想向上游 `usbdevs` 文件提议添加时使用它。
 
-One important detail about 匹配表s: the `STRUCT_USB_HOST_ID` type includes a flag byte that records which fields are meaningful. When you use `USB_VPI`, the macro fills in those flags for you. If you hand-build an entry with literal braces, you must also fill in the flags yourself, because a zero flag byte means "match anything," and you rarely want that. Prefer the macros.
+关于匹配表的一个重要细节：`STRUCT_USB_HOST_ID` 类型包含一个标志字节，记录哪些字段是有意义的。当你使用 `USB_VPI` 时，宏会为你填充这些标志。如果你用字面花括号手动构建条目，你也必须自己填充标志，因为零标志字节意味着"匹配任何设备"，而你很少想要那样。请使用宏。
 
-The 匹配表 is plain data. It does not allocate memory, it does not touch hardware, and it does not depend on any per-设备 state. It is loaded into the 内核 along with the module and used by the 框架 every time a new USB 设备 is enumerated.
+匹配表是纯数据。它不分配内存，不触碰硬件，也不依赖任何每个设备的状态。它随模块一起加载到内核中，并在每次枚举新的USB设备时被框架使用。
 
-### The `探测` Method
+### `probe` 方法
 
-The USB 框架 calls a 驱动程序's `探测` method once per 接口 when a matching-like candidate is presented. The goal of `探测` is to answer a single question: "Should this 驱动程序 附加 to this 接口?" The method must not touch hardware. It must not allocate resources. It must not sleep. All it does is look at the USB 附加 argument, compare it against the 匹配表, and return either a 总线-探测 value (indicating a match, with an associated priority) or `ENXIO` (indicating that this 驱动程序 does not want this 接口).
+当出现一个类似匹配的候选时，USB框架每个接口调用一次驱动程序的 `probe` 方法。`probe` 的目标是回答一个单一的问题："这个驱动程序应该附加到这个接口吗？"该方法不能触碰硬件。它不能分配资源。它不能睡眠。它所做的就是查看USB附加参数，将其与匹配表比较，然后返回一个总线探测值（表示匹配，带有相关优先级）或 `ENXIO`（表示这个驱动程序不想要这个接口）。
 
-The 附加 argument lives in a structure called `struct usb_附加_arg`, defined in `/usr/src/sys/dev/usb/usbdi.h`. It carries the 供应商ID, the 产品ID, the 设备 描述符, the 接口 描述符, and a handful of helper fields. New总线 lets a 驱动程序 retrieve it through `设备_get_ivars(dev)`. For USB驱动程序, the 框架 provides a wrapper called `usbd_lookup_id_by_uaa` that takes a 匹配表 and an 附加 argument and returns zero on a match or a nonzero errno on a miss. This wrapper encapsulates every case the 驱动程序 needs to handle: vendor/product matching, class/subclass/protocol matching, the flag-byte logic, and the 接口-level dispatch.
+附加参数存在于一个名为 `struct usb_attach_arg` 的结构中，定义在 `/usr/src/sys/dev/usb/usbdi.h`。它携带供应商标识符、产品标识符、设备描述符、接口描述符和一些辅助字段。Newbus让驱动程序通过 `device_get_ivars(dev)` 获取它。对于USB驱动程序，框架提供了一个名为 `usbd_lookup_id_by_uaa` 的包装器，它接收一个匹配表和一个附加参数，匹配时返回零，不匹配时返回非零errno。这个包装器封装了驱动程序需要处理的每一种情况：供应商/产品匹配、类/子类/协议匹配、标志字节逻辑和接口级分派。
 
-A complete 探测 method for our running example looks like this:
+我们的运行示例的一个完整探测方法看起来像这样：
 
 ```c
 static int
@@ -660,23 +660,23 @@ myfirst_usb_probe(device_t dev)
 }
 ```
 
-The three guard clauses at the top of the function are worth explaining in detail, because they reflect standard USB-驱动程序 hygiene.
+函数顶部的三个守卫子句值得详细解释，因为它们反映了标准的USB驱动程序卫生习惯。
 
-The first guard rejects the case where the USB stack is acting as a 设备 rather than a host. FreeBSD's USB stack can operate in USB-on-the-Go 设备 mode, where the machine itself appears as a USB peripheral to some other host. Most 驱动程序 are host-side 驱动程序 and have no meaningful behavior in 设备 mode, so they reject it immediately.
+第一个守卫拒绝USB栈作为设备而非主机运行的情况。FreeBSD的USB栈可以在USB-on-the-Go设备模式下运行，其中机器本身作为某个其他主机的USB外设出现。大多数驱动程序是主机端驱动程序，在设备模式下没有有意义的行为，所以它们立即拒绝。
 
-The second guard rejects configurations other than index zero. USB 设备 can expose multiple configurations, and a 驱动程序 usually targets one specific configuration. Restricting 探测 to configuration index zero keeps the logic simple for the common case.
+第二个守卫拒绝索引零以外的配置。USB设备可以暴露多个配置，驱动程序通常针对一个特定配置。将探测限制为配置索引零使常见情况的逻辑保持简单。
 
-The third guard rejects 接口 other than index zero. If the 设备 has multiple 接口 and you are writing a 驱动程序 for the first one, this clause is what ensures the 框架 does not offer you the other 接口 by mistake.
+第三个守卫拒绝索引零以外的接口。如果设备有多个接口而你正在为第一个接口编写驱动程序，这个子句确保框架不会错误地将其他接口提供给你。
 
-After the guards, the call to `usbd_lookup_id_by_uaa` does the real matching work. If the 设备's vendor, product, class, subclass, or protocol matches any entry in the table, the function returns zero, and the 探测 method returns zero, which the USB 框架 interprets as "this 驱动程序 wants this 设备." Returning `ENXIO` tells the 框架 to try another candidate 驱动程序. If no candidate wants the 设备, it ends up 附加ed to `ugen`, the generic USB驱动程序, which exposes raw 描述符 and transfers through `/dev/ugenN.M` nodes but provides no 设备-specific behavior.
+守卫之后，对 `usbd_lookup_id_by_uaa` 的调用做真正的匹配工作。如果设备的供应商、产品、类、子类或协议匹配表中的任何条目，函数返回零，探测方法返回零，USB框架将其解释为"这个驱动程序想要这个设备"。返回 `ENXIO` 告诉框架尝试另一个候选驱动程序。如果没有候选者想要该设备，它最终被附加到 `ugen`，即通用USB驱动程序，它通过 `/dev/ugenN.M` 节点暴露原始描述符和传输，但不提供设备特定的行为。
 
-A subtle point worth noting: `探测` returns zero for a match rather than a positive 总线-探测 value. Other FreeBSD 总线 框架 use positive values like `BUS_PROBE_DEFAULT` to indicate a priority, but for USB the convention is zero for match and a nonzero errno for non-match. The 框架 handles priority through the dispatch order rather than through 探测 return values.
+一个值得注意的微妙点：`probe` 为匹配返回零而不是正的总线探测值。其他FreeBSD总线框架使用像 `BUS_PROBE_DEFAULT` 这样的正值来指示优先级，但对于USB，约定是零表示匹配，非零errno表示不匹配。框架通过分派顺序而不是通过探测返回值来处理优先级。
 
-### The `附加` Method
+### `attach` 方法
 
-Once `探测` reports a match, the 框架 calls `附加`. This is where the 驱动程序 does real work: allocate its softc, record the parent 设备 pointer, lock the 接口, set up transfer channels (covered in Section 3), create a `/dev` entry if the 驱动程序 is user-facing, and log a short informational message. Every allocation and registration in `附加` has to be paired with a symmetric release in `分离`, and because any step can fail, the function must have a clear cleanup path from every failure point.
+一旦 `probe` 报告匹配，框架调用 `attach`。这是驱动程序做真正工作的地方：分配其softc、记录父设备指针、锁定接口、设置传输通道（在第3节中介绍）、如果驱动程序面向用户则创建 `/dev` 条目，并记录一条简短的信息消息。`attach` 中的每个分配和注册都必须与 `detach` 中的对称释放配对，并且因为任何步骤都可能失败，函数必须从每个故障点有清晰的清理路径。
 
-A minimal 附加 method looks like this:
+一个最小的附加方法看起来像这样：
 
 ```c
 static int
@@ -721,27 +721,27 @@ fail_mtx:
 }
 ```
 
-Read through this function top to bottom. Each 块 does one thing.
+从上到下阅读这个函数。每个代码块做一件事。
 
-The call to `设备_set_usb_desc` fills in the New总线 设备 description string from the USB 描述符. After this call, `设备_printf` messages will include the manufacturer and product strings read from the 设备 itself, which makes logs much more informative.
+对 `device_set_usb_desc` 的调用从USB描述符填充Newbus设备描述字符串。在此调用之后，`device_printf` 消息将包含从设备本身读取的制造商和产品字符串，这使日志更加有用。
 
-The call to `mtx_init` creates a 互斥锁 that will protect the per-设备 state. Every USB 传输回调 runs under this 互斥锁 (the 框架 takes it for you around the 回调), so everything the 回调 touches must be serialised by it. 第25章 introduced 互斥锁es; the usage here is the same.
+对 `mtx_init` 的调用创建一个互斥锁，用于保护每个设备的状态。每个USB传输回调都在这个互斥锁下运行（框架在回调周围为你获取它），所以回调触及的一切都必须由它来序列化。第25章介绍了互斥锁；这里的用法是相同的。
 
-The two `sc->sc_` assignments cache two pointers that the rest of the 驱动程序 will need. `sc->sc_udev` is the `struct usb_设备 *` that the 驱动程序 uses when issuing USB requests. `sc->sc_iface_index` identifies the 接口 index this 驱动程序 附加ed to, so later transfer-setup calls target the right 接口.
+两个 `sc->sc_` 赋值缓存了驱动程序其余部分需要的两个指针。`sc->sc_udev` 是驱动程序在发出USB请求时使用的 `struct usb_device *`。`sc->sc_iface_index` 标识该驱动程序附加到的接口索引，以便后续的传输设置调用目标指向正确的接口。
 
-The call to `usbd_transfer_setup` is the biggest single operation in `附加`. It allocates and configures all the transfer objects the 驱动程序 will use, based on a configuration array (`myfirst_usb_config`) that Section 3 will examine in detail. If this call fails, the 驱动程序 has not yet allocated anything except the 互斥锁, so the cleanup path goes to `fail_mtx` and destroys the 互斥锁.
+对 `usbd_transfer_setup` 的调用是 `attach` 中最大的单项操作。它基于一个配置数组（`myfirst_usb_config`，第3节将详细研究）分配并配置驱动程序将使用的所有传输对象。如果此调用失败，驱动程序除了互斥锁之外还没有分配任何东西，所以清理路径转到 `fail_mtx` 并销毁互斥锁。
 
-The call to `make_dev` creates the user-visible `/dev` node. The 第25章 pattern applies here: set `si_drv1` on the cdev so that the cdevsw handlers can retrieve the softc through `dev->si_drv1`. If this call fails, the cleanup path goes to `fail_xfer`, which also runs the unsetup for the transfers before destroying the 互斥锁.
+对 `make_dev` 的调用创建用户可见的 `/dev` 节点。第25章的模式在这里适用：在cdev上设置 `si_drv1`，以便cdevsw处理程序可以通过 `dev->si_drv1` 获取softc。如果此调用失败，清理路径转到 `fail_xfer`，它在销毁互斥锁之前也运行传输的取消设置。
 
-The `return (0)` on the happy path is the contract with the 框架: a zero return means the 设备 is 附加ed and the 驱动程序 is ready.
+成功路径上的 `return (0)` 是与框架的契约：零返回意味着设备已附加，驱动程序准备就绪。
 
-The two labels at the bottom implement the labelled-goto cleanup chain from 第25章. Each label corresponds to the state the 驱动程序 has reached at the time the failure happened, and the cleanup fall-through runs exactly the teardown steps needed to undo the work done so far. When you read a FreeBSD 驱动程序 and see this pattern, you are looking at the same discipline you practised in 第25章 applied to a new set of resources.
+底部的两个标签实现了第25章的标签化goto清理链。每个标签对应驱动程序在失败发生时达到的状态，清理的穿透运行恰好是撤销到目前为止所做工作所需的拆卸步骤。当你阅读FreeBSD驱动程序并看到这种模式时，你正在看的是你在第25章练习过的相同规范应用于一组新资源。
 
-One important detail about the USB 框架 that 第25章 did not need to cover: if you look at `uled.c` or any other real USB驱动程序, you will sometimes see `usbd_transfer_setup` accept a pointer to the 接口 index rather than an integer. The 框架 can modify that pointer in the case of virtual or multiplexed 接口; pass it by address, not by value. The skeleton above does this correctly.
+关于第25章不需要涵盖的USB框架的一个重要细节：如果你查看 `uled.c` 或任何其他真实的USB驱动程序，你有时会看到 `usbd_transfer_setup` 接受一个指向接口索引的指针而不是整数。框架可以在虚拟或复用接口的情况下修改该指针；按地址传递，而不是按值传递。上面的骨架正确地做到了这一点。
 
-### The Softc: Per-Device State
+### Softc：每个设备的状态
 
-A USB驱动程序's softc is a plain C structure stored as the New总线 驱动程序 data for each 附加ed 设备. It is allocated automatically by the 框架 based on the size declared in the 驱动程序 描述符, and it is the place where all per-设备 mutable state lives. For our running example, the softc looks like this:
+USB驱动程序的softc是一个普通的C结构，存储为每个已附加设备的Newbus驱动程序数据。它由框架根据驱动程序描述符中声明的大小自动分配，是所有每个设备可变状态存放的地方。对于我们的运行示例，softc看起来像这样：
 
 ```c
 struct myfirst_usb_softc {
@@ -756,27 +756,27 @@ struct myfirst_usb_softc {
 };
 ```
 
-Let us walk through each member.
+让我们逐一看看每个成员。
 
-`sc_udev` is the opaque pointer the USB 框架 uses to identify the 设备. Every USB call that acts on the 设备 takes this pointer.
+`sc_udev` 是USB框架用来标识设备的不透明指针。每个操作设备的USB调用都接收这个指针。
 
-`sc_mtx` is the per-设备 互斥锁 that protects the softc itself and any shared state the 驱动程序 cares about. The 互斥锁 must be acquired before touching any field that a 传输回调 might also touch, and the 传输回调 always runs with this 互斥锁 held (the 框架 handles the locking for you when it invokes the 回调).
+`sc_mtx` 是保护softc本身以及驱动程序关心的任何共享状态的每个设备互斥锁。在触碰传输回调也可能触碰的任何字段之前必须获取该互斥锁，并且传输回调始终在该互斥锁被持有的情况下运行（框架在调用回调时为你处理锁定）。
 
-`sc_xfer[]` is an array of transfer objects, one per channel the 驱动程序 uses. Its size is a compile-time constant. Section 3 will discuss how each entry in this array is set up by the configuration array passed to `usbd_transfer_setup`.
+`sc_xfer[]` 是传输对象数组，驱动程序使用的每个通道一个。其大小是编译时常量。第3节将讨论这个数组中的每个条目是如何由传递给 `usbd_transfer_setup` 的配置数组设置的。
 
-`sc_dev` is the 字符设备 entry, if the 驱动程序 exposes a user-facing node. For 驱动程序 that do not expose a `/dev` node (some 驱动程序 only export data through `sysctl` or `devctl` events), this field can be omitted.
+`sc_dev` 是字符设备条目，如果驱动程序暴露面向用户的节点的话。对于不暴露 `/dev` 节点的驱动程序（一些驱动程序只通过 `sysctl` 或 `devctl` 事件导出数据），此字段可以省略。
 
-`sc_iface_index` records which 接口 on the USB 设备 this 驱动程序 附加ed to. It is used by transfer setup and, in multi-接口 驱动程序, as a discriminator in logging.
+`sc_iface_index` 记录该驱动程序附加到USB设备上的哪个接口。它用于传输设置，在多接口驱动程序中用作日志中的区分器。
 
-`sc_flags` is a bit vector for 驱动程序-private state. Two flags are declared here: `MYFIRST_USB_FLAG_OPEN` is set while a userland process holds the 设备 open, and `MYFIRST_USB_FLAG_DETACHING` is set at the start of `分离` so that any concurrent I/O path can see that it must abort quickly. This is an application of a standard pattern: setting a flag under the 互斥锁 at the start of 分离, so anyone else who wakes up sees it and bails out.
+`sc_flags` 是一个用于驱动程序私有状态的位向量。这里声明了两个标志：`MYFIRST_USB_FLAG_OPEN` 在用户态进程持有设备打开时设置，`MYFIRST_USB_FLAG_DETACHING` 在 `detach` 开始时设置，以便任何并发的I/O路径都能看到它必须快速中止。这是一个标准模式的应用：在互斥锁下、在分离开始时设置一个标志，以便其他唤醒的人看到它并退出。
 
-Real 驱动程序 often have many more fields: per-transfer 缓冲区, request queues, 回调-to-回调 state machines, timers, and so on. You add to the softc as the 驱动程序 grows. The guiding principle is that any state that persists between function calls, and is not global to the module, belongs in the softc.
+真实的驱动程序通常有更多字段：每个传输的缓冲区、请求队列、回调到回调的状态机、定时器等。你随着驱动程序的增长向softc添加内容。指导原则是，任何在函数调用之间持续存在的、不是模块全局的状态，都属于softc。
 
-### The `分离` Method
+### `detach` 方法
 
-When a 设备 is unplugged, when the module is unloaded, or when userspace uses `devctl 分离`, the 框架 calls the 驱动程序's `分离` method. The 驱动程序's job is to release every resource it allocated in `附加`, cancel any in-flight work, make sure no 回调 is running, and return zero. If `分离` returns an error, the 框架 treats the 设备 as still 附加ed, which can create problems if the hardware has already physically vanished. Most 驱动程序 return zero unconditionally, or only return an error in very specific "设备 总线y" cases where the 驱动程序 implements its own reference counting for userspace handles.
+当设备被拔出、模块被卸载或用户空间使用 `devctl detach` 时，框架调用驱动程序的 `detach` 方法。驱动程序的工作是释放它在 `attach` 中分配的每个资源、取消任何进行中的工作、确保没有回调正在运行，并返回零。如果 `detach` 返回错误，框架将设备视为仍然附加，这在硬件已经物理消失时可能造成问题。大多数驱动程序无条件返回零，或仅在驱动程序为用户空间句柄实现了自己的引用计数的非常特定的"设备忙"情况下返回错误。
 
-The 分离 method for our running example is the symmetric cleanup of the 附加 method:
+我们的运行示例的分离方法是附加方法的对称清理：
 
 ```c
 static int
@@ -801,15 +801,15 @@ myfirst_usb_detach(device_t dev)
 }
 ```
 
-The first 块 sets the 分离ing flag under the 互斥锁. If another thread is about to take the 互斥锁 and start a new transfer, it will see the flag and refuse. The `destroy_dev` call removes the `/dev` entry; after it returns, no new open calls can arrive. The `usbd_transfer_unsetup` call cancels any in-flight transfers and waits for their 回调 to complete; after it returns, no 传输回调 can still be running. With no new openers and no running 回调, it is safe to destroy the 互斥锁.
+第一个代码块在互斥锁下设置分离标志。如果另一个线程即将获取互斥锁并启动一个新的传输，它会看到标志并拒绝。`destroy_dev` 调用移除 `/dev` 条目；它返回后，不会有新的打开调用到来。`usbd_transfer_unsetup` 调用取消任何进行中的传输并等待它们的回调完成；它返回后，没有传输回调可以仍在运行。没有新的打开者和没有运行的回调，销毁互斥锁就是安全的。
 
-There is a subtlety here that new 内核 programmers sometimes stumble over: the order matters. Destroying the `/dev` entry before unwinding the transfers ensures that no new user operation can start, but it does not stop the transfers that were already running when 分离 was called. That is `usbd_transfer_unsetup`'s job. Both steps are necessary, and the order (cdev first, then transfers, then 互斥锁) is the right one because each later step depends on no new work arriving during it.
+这里有一个新的内核程序员有时会犯的微妙错误：顺序很重要。在展开传输之前销毁 `/dev` 条目确保没有新的用户操作可以启动，但不会停止分离被调用时已经在运行的传输。那是 `usbd_transfer_unsetup` 的工作。两步都是必要的，顺序（先是cdev，然后是传输，最后是互斥锁）是正确的，因为每个后续步骤依赖于在其期间没有新工作到来。
 
-One further point about 分离 and concurrency. The 框架 guarantees that no 探测, 附加, or 分离 runs concurrently with another 探测, 附加, or 分离 on the same 设备. But 传输回调 run on their own path, and they can be in progress at the exact moment 分离 is called. The combination of the 分离ing flag and `usbd_transfer_unsetup` is what makes this safe. If you add new resources to your 驱动程序, you must add symmetric cleanup that accounts for this concurrency.
+关于分离和并发性的另一点。框架保证同一个设备上没有探测、附加或分离与另一个探测、附加或分离并发运行。但传输回调在自己的路径上运行，它们可以在分离被调用的确切时刻正在进行。分离标志和 `usbd_transfer_unsetup` 的组合使这变得安全。如果你向驱动程序添加新资源，你必须添加考虑这种并发性的对称清理。
 
-### Registration Macros
+### 注册宏
 
-Every FreeBSD 驱动程序 needs to 注册 itself with the 内核 so that the 内核 knows when to call its 探测, 附加, and 分离 routines. USB驱动程序 use a small set of macros that bind everything together into a 内核模块. The macros go at the bottom of the 驱动程序 file and look intimidating at first but are entirely mechanical once you know what each line does.
+每个FreeBSD驱动程序都需要向内核注册自己，以便内核知道何时调用其probe、attach和detach例程。USB驱动程序使用一小组宏将所有内容绑定到一个内核模块中。这些宏位于驱动程序文件的底部，初看起来令人生畏，但一旦你知道每一行做什么，它们就完全是机械的了。
 
 ```c
 static device_method_t myfirst_usb_methods[] = {
@@ -831,83 +831,83 @@ MODULE_VERSION(myfirst_usb, 1);
 USB_PNP_HOST_INFO(myfirst_usb_devs);
 ```
 
-Let us read each 块.
+让我们阅读每个代码块。
 
-The `设备_method_t` array lists the methods the 驱动程序 supplies. For a USB驱动程序 that does not implement extra new总线 children, the three entries shown are sufficient: 探测, 附加, 分离. More complex 驱动程序 might add `设备_suspend`, `设备_resume`, or `设备_shutdown`, but for the vast majority of USB驱动程序 the three basic entries are all that is needed. `DEVMETHOD_END` terminates the array; the 框架 requires it.
+`device_method_t` 数组列出了驱动程序提供的方法。对于不实现额外Newbus子设备的USB驱动程序，显示的三个条目就足够了：probe、attach、detach。更复杂的驱动程序可能会添加 `device_suspend`、`device_resume` 或 `device_shutdown`，但对于绝大多数USB驱动程序来说，三个基本条目就是所需的全部。`DEVMETHOD_END` 终止数组；框架要求它。
 
-The `驱动程序_t` structure binds the methods array to a human-readable name and declares the softc size. The name is used in 内核 logs and by `devctl`. The softc size tells New总线 how much memory to allocate per 设备.
+`driver_t` 结构将方法数组绑定到人类可读的名称并声明softc大小。名称在内核日志和 `devctl` 中使用。softc大小告诉Newbus每个设备分配多少内存。
 
-The `DRIVER_MODULE` macro 寄存器 the 驱动程序 with the 内核. The arguments are, in order: the module name, the parent 总线 name (always `uhub` for USB class 驱动程序), the 驱动程序 structure, and two optional hooks for events. The event hooks are rarely needed and are usually `NULL`.
+`DRIVER_MODULE` 宏将驱动程序注册到内核。参数依次为：模块名称、父总线名称（对于USB类驱动程序始终是 `uhub`）、驱动程序结构和两个可选的事件钩子。事件钩子很少需要，通常为 `NULL`。
 
-The `MODULE_DEPEND` macro declares that this module needs `usb` to be loaded first. The three numbers are the minimum, preferred, and maximum compatible versions of the `usb` module. For most 驱动程序, `1, 1, 1` is correct: the USB 框架 has versioned its 接口 at 1 for a long time, and it would be unusual to require anything else.
+`MODULE_DEPEND` 宏声明此模块需要先加载 `usb`。三个数字是 `usb` 模块的最小、首选和最大兼容版本。对于大多数驱动程序，`1, 1, 1` 是正确的：USB框架已将其接口版本保持在1很长时间，要求其他值是不寻常的。
 
-The `MODULE_VERSION` macro declares this module's own version number. Other modules that want to depend on `myfirst_usb` would reference the number you declare here.
+`MODULE_VERSION` 宏声明此模块自己的版本号。想要依赖 `myfirst_usb` 的其他模块会引用你在这里声明的数字。
 
-The `USB_PNP_HOST_INFO` macro is the last piece. It exports the 匹配表 into a format the `devd(8)` daemon can read, so that when a matching USB 设备 is plugged in, userspace can auto-load the module. This macro is a relatively recent addition to FreeBSD; older 驱动程序 may not have it. Including it is strongly recommended for any 驱动程序 that wants to participate in FreeBSD's USB plug-and-play system.
+`USB_PNP_HOST_INFO` 宏是最后一块。它将匹配表导出为 `devd(8)` 守护进程可以读取的格式，这样当匹配的USB设备被插入时，用户空间可以自动加载模块。这个宏是FreeBSD的较新添加；较旧的驱动程序可能没有它。强烈建议任何想要参与FreeBSD USB即插即用系统的驱动程序包含它。
 
-Together, these five declarations turn your 驱动程序 file into a loadable 内核模块. Once the file is compiled with a `Makefile` that uses `bsd.kmod.mk`, running `kldload myfirst_usb.ko` will bind the 驱动程序 to the 内核, and any matching 设备 plugged in afterwards will trigger your 探测 and 附加 routines.
+这五个声明一起将你的驱动程序文件转化为可加载的内核模块。一旦文件用使用 `bsd.kmod.mk` 的 `Makefile` 编译，运行 `kldload myfirst_usb.ko` 将把驱动程序绑定到内核，之后插入的任何匹配设备都将触发你的probe和attach例程。
 
-### The Hot-Plug Lifecycle, Revisited in Code
+### 热插拔生命周期，代码中的回顾
 
-Section 1 introduced the 热插拔 lifecycle at the level of mental model: a 设备 appears, the 框架 enumerates it, your 驱动程序 附加, userland interacts with it, the 设备 disappears, the 框架 calls 分离, your 驱动程序 cleans up. With the code in front of you, that narrative now has a concrete sequence:
+第1节在思维模型的层面介绍了热插拔生命周期：设备出现，框架枚举它，你的驱动程序附加，用户态与之交互，设备消失，框架调用detach，你的驱动程序清理。有了面前的代码，那个叙述现在有了具体的序列：
 
-1. The user plugs in a matching 设备.
-2. The USB 框架 enumerates the 设备, reads all its 描述符, and decides which 接口 to offer to which 驱动程序.
-3. For each 接口 that matches your 驱动程序's 匹配表, the 框架 creates a New总线 child and calls your `探测` method.
-4. Your `探测` method returns zero.
-5. The 框架 calls your `附加` method. You initialise the softc, set up transfers, create the `/dev` node, and return zero.
-6. Userland opens the `/dev` node and begins issuing I/O. The 传输回调 from Section 3 start running.
-7. The user unplugs the 设备.
-8. The 框架 calls your `分离` method. You set the 分离ing flag, destroy the `/dev` node, call `usbd_transfer_unsetup` to cancel all in-flight transfers and wait for 回调 to finish, destroy the 互斥锁, and return zero.
-9. The 框架 deallocates the softc and removes the New总线 child.
+1. 用户插入一个匹配的设备。
+2. USB框架枚举设备，读取其所有描述符，并决定将哪个接口提供给哪个驱动程序。
+3. 对于匹配你驱动程序匹配表的每个接口，框架创建一个Newbus子设备并调用你的 `probe` 方法。
+4. 你的 `probe` 方法返回零。
+5. 框架调用你的 `attach` 方法。你初始化softc、设置传输、创建 `/dev` 节点，并返回零。
+6. 用户态打开 `/dev` 节点并开始发出I/O。第3节的传输回调开始运行。
+7. 用户拔出设备。
+8. 框架调用你的 `detach` 方法。你设置分离标志、销毁 `/dev` 节点、调用 `usbd_transfer_unsetup` 取消所有进行中的传输并等待回调完成、销毁互斥锁，并返回零。
+9. 框架释放softc并移除Newbus子设备。
 
-At every step, the 框架 handles the parts you do not have to write yourself. Your responsibility is narrow: react correctly to 探测, 附加, and 分离, and run 传输回调 that respect the state machine. The machinery around you handles enumeration, 总线 arbitration, transfer scheduling, hub routing, and the dozens of corner cases that USB layer imposes.
+在每一步，框架处理你不必自己编写的部分。你的责任是狭窄的：正确响应probe、attach和detach，并运行尊重状态机的传输回调。你周围的机制处理枚举、总线仲裁、传输调度、集线器路由以及USB层强加的几十个边界情况。
 
-The lifecycle has one more subtle quirk that is worth naming. Between the user unplugging the 设备 and the 框架 calling `分离`, there is a brief window in which any in-flight transfer sees a special error: `USB_ERR_CANCELLED`. The transfer 框架 itself generates this error when it tears down the transfers in response to the disconnect. Section 3 will explain how to handle this error in the 回调 state machine. For now, know that it exists and that it is the 驱动程序's normal signal that the 设备 is going away.
+生命周期还有一个值得指出的微妙怪癖。在用户拔出设备和框架调用 `detach` 之间，有一个短暂的窗口，其中任何进行中的传输会看到一个特殊错误：`USB_ERR_CANCELLED`。传输框架本身在响应断开连接时拆除传输时生成此错误。第3节将解释如何在回调状态机中处理此错误。现在，只需知道它存在，并且它是驱动程序收到设备即将消失的正常信号。
 
-### 总结 Section 2
+### 第2节总结
 
-Section 2 has given you a complete USB驱动程序 skeleton. The skeleton does not yet move data; that is Section 3's topic. But every other part of the 驱动程序 is in place: the 匹配表, the 探测 method, the 附加 method, the softc, the 分离 method, and the registration macros. You have seen how the USB 框架 routes a newly enumerated 设备 through your 探测 routine, how your 附加 routine takes ownership and sets up state, how the 驱动程序 integrates with New总线 through `设备_get_ivars` and `设备_get_softc`, and how the 分离 routine walks the allocation steps in reverse to leave the system clean.
+第2节给了你一个完整的USB驱动程序骨架。该骨架还没有移动数据；那是第3节的主题。但驱动程序的每个其他部分都已就位：匹配表、probe方法、attach方法、softc、detach方法和注册宏。你已经看到USB框架如何通过你的probe例程路由新枚举的设备，你的attach例程如何获取所有权并设置状态，驱动程序如何通过 `device_get_ivars` 和 `device_get_softc` 与Newbus集成，以及detach例程如何反向遍历分配步骤以使系统保持干净。
 
-Two themes from 第25章 have extended naturally into USB territory. First, the labelled-goto cleanup chain. Every resource you acquire has its own label, and every failure path falls through exactly the right sequence of teardown calls. When you compare `myfirst_usb_附加` above with the 附加 functions in `uled.c`, `ugold.c`, or `uftdi.c`, you will see the same pattern repeated. Second, the discipline of single-source-of-truth state in the softc. Every field has one owner, one lifecycle, and one clear place where it is initialised and destroyed. These habits are what make a 驱动程序 readable, portable, and maintainable.
+第25章的两个主题自然地延伸到了USB领域。第一，标签化goto清理链。你获取的每个资源都有自己的标签，每个失败路径穿透恰好正确的拆卸调用序列。当你将上面的 `myfirst_usb_attach` 与 `uled.c`、`ugold.c` 或 `uftdi.c` 中的附加函数比较时，你会看到相同的模式重复。第二，softc中单一事实来源状态的规范。每个字段有一个所有者、一个生命周期和一个清晰的初始化和销毁位置。这些习惯使驱动程序可读、可移植和可维护。
 
-Section 3 will now give this skeleton a voice. Transfer channels will be declared in a configuration array. The USB 框架 will allocate the underlying 缓冲区 and schedule the transactions. A 回调 will wake up each time a transfer completes or needs more data, and it will use a three-state state machine to decide what to do. The same discipline you just learned will apply, but the new concern is the data pipeline itself: how bytes move between the 驱动程序 and the 设备.
+第3节现在将给这个骨架一个声音。传输通道将在配置数组中声明。USB框架将分配底层缓冲区并调度事务。一个回调将在每次传输完成或需要更多数据时被唤醒，它将使用一个三状态状态机来决定做什么。你刚刚学到的相同规范将适用，但新的关注点是数据管道本身：字节如何在驱动程序和设备之间移动。
 
-### Reading `uled.c` As a Complete Example
+### 阅读作为完整示例的 `uled.c`
 
-Before moving into transfers, it is worth pausing to read the canonical small-驱动程序 example end to end. The file `/usr/src/sys/dev/usb/misc/uled.c` is approximately three hundred lines of C that implements a 驱动程序 for the Dream Cheeky and Riso Kagaku USB webmail notifier LEDs: small USB gadgets with three coloured LEDs that a host program can light up. The 驱动程序 is short enough to hold in your head, self-contained, and it exercises every pattern we have discussed.
+在进入传输之前，值得停下来阅读一下经典的小驱动程序示例。文件 `/usr/src/sys/dev/usb/misc/uled.c` 大约三百行C代码，实现了Dream Cheeky和Riso Kagaku USB网络邮件通知器LED的驱动程序：带有三个彩色LED的小型USB小工具，主机程序可以点亮它们。这个驱动程序短到可以完全装在脑子里，自包含，并且练习了我们讨论过的每一种模式。
 
-When you open the file, the first 块 you encounter is the standard set of header includes. A USB驱动程序 pulls in headers from several layers: `sys/param.h`, `sys/systm.h`, `sys/总线.h` for the fundamentals; `sys/module.h` for `MODULE_VERSION` and `MODULE_DEPEND`; the USB headers under `dev/usb/` for the 框架; and `usbdevs.h` for the symbolic vendor and product constants. Note that `usbdevs.h` is not a hand-maintained header: it is build-generated from the text file `/usr/src/sys/dev/usb/usbdevs` when the 内核 or module is compiled, so the constants it exposes reflect whatever entries the in-tree `usbdevs` file currently lists. `uled.c` also pulls in `sys/conf.h` and friends because it creates a 字符设备.
+当你打开文件时，你遇到的第一个代码块是标准的头文件包含。一个USB驱动程序从多个层引入头文件：`sys/param.h`、`sys/systm.h`、`sys/bus.h` 用于基础；`sys/module.h` 用于 `MODULE_VERSION` 和 `MODULE_DEPEND`；`dev/usb/` 下的USB头文件用于框架；以及 `usbdevs.h` 用于符号供应商和产品常量。注意 `usbdevs.h` 不是手动维护的头文件：它是在编译内核或模块时从文本文件 `/usr/src/sys/dev/usb/usbdevs` 构建生成的，所以它暴露的常量反映了树内 `usbdevs` 文件当前列出的任何条目。`uled.c` 还引入了 `sys/conf.h` 和相关文件，因为它创建一个字符设备。
 
-The second 块 is the softc declaration. `uled` keeps its state in a structure that has the 设备 pointer, a 互斥锁, an array of two transfer pointers (one for control, one for data), a 字符设备 pointer, a 回调 state pointer, and a small "color" byte that records the current LED colour. The softc is straightforward: every field is private, every allocation has one place where it is made and one place where it is freed.
+第二个代码块是softc声明。`uled` 将其状态保存在一个结构中，包含设备指针、互斥锁、两个传输指针的数组（一个用于控制，一个用于数据）、字符设备指针、回调状态指针和一个记录当前LED颜色的"color"字节。softc很直接：每个字段都是私有的，每个分配有一个创建的地方和一个释放的地方。
 
-The third 块 is the 匹配表. `uled` supports two vendors (Dream Cheeky and Riso Kagaku) with one 产品ID each. The `USB_VPI` macro fills in the flag byte for a vendor-plus-product match. The table is two entries, flat and simple.
+第三个代码块是匹配表。`uled` 支持两个供应商（Dream Cheeky和Riso Kagaku），每个有一个产品标识符。`USB_VPI` 宏为供应商加产品匹配填充标志字节。表是两个条目，扁平且简单。
 
-The fourth 块 is the transfer configuration array. `uled` declares two channels: a control-out channel used to send SET_REPORT requests to the 设备 (which is how the LED colour is actually programmed), and an interrupt-in channel that reads status 数据包 from the LED. The control channel has `type = UE_CONTROL` and a 缓冲区 size big enough to hold the setup 数据包 plus the payload. The interrupt channel has `type = UE_INTERRUPT`, `direction = UE_DIR_IN`, and a 缓冲区 size that matches the LED's report size.
+第四个代码块是传输配置数组。`uled` 声明两个通道：一个用于向设备发送SET_REPORT请求的控制输出通道（这是LED颜色实际被编程的方式），以及一个从LED读取状态数据包的中断输入通道。控制通道有 `type = UE_CONTROL` 和足够容纳设置数据包加有效载荷的缓冲区大小。中断通道有 `type = UE_INTERRUPT`、`direction = UE_DIR_IN` 和与LED报告大小匹配的缓冲区大小。
 
-The fifth 块 is the 回调 functions. The control 回调 follows the three-state machine you saw in 第3节： in `USB_ST_SETUP`, it constructs a setup 数据包 and an eight-byte HID report payload, submits the transfer, and returns. In `USB_ST_TRANSFERRED`, it wakes any userland writer that was waiting for the colour change to complete. In the default case (errors), it handles cancellation gracefully and retries on other errors.
+第五个代码块是回调函数。控制回调遵循你在第3节中看到的三状态机：在 `USB_ST_SETUP` 中，它构造一个设置数据包和一个八字节HID报告有效载荷，提交传输并返回。在 `USB_ST_TRANSFERRED` 中，它唤醒任何等待颜色更改完成的用户态写入者。在默认情况（错误）中，它优雅地处理取消并在其他错误上重试。
 
-The interrupt 回调 is similar but without the setup-数据包 complication. It reads an eight-byte status report, checks whether it indicates a button press (the Riso Kagaku 设备 have an optional button), and rearms.
+中断回调类似但没有设置数据包的复杂性。它读取一个八字节状态报告，检查它是否指示按钮按下（Riso Kagaku设备有一个可选按钮），然后重新武装。
 
-The sixth 块 is the character-设备 methods. `uled` exposes a `/dev/uled0` entry that accepts `write(2)` calls with a three-byte payload (red, green, blue). The `d_write` handler copies the three bytes into the softc, starts the 控制传输, and returns. When the transfer completes, the colour is actually programmed. The `d_read` handler is not implemented (LEDs do not have meaningful state to read), so reads return zero.
+第六个代码块是字符设备方法。`uled` 暴露一个 `/dev/uled0` 条目，接受带有三字节有效载荷（红、绿、蓝）的 `write(2)` 调用。`d_write` 处理程序将三个字节复制到softc中，启动控制传输并返回。当传输完成时，颜色实际被编程。`d_read` 处理程序未实现（LED没有有意义的状态可读），所以读取返回零。
 
-The seventh 块 is the New总线 methods: 探测, 附加, 分离. The 探测 uses `usbd_lookup_id_by_uaa` exactly as shown in Section 2. The 附加 calls `设备_set_usb_desc`, initialises the 互斥锁, calls `usbd_transfer_setup` with the configuration array, and creates the 字符设备. The 分离 runs these in reverse.
+第七个代码块是Newbus方法：probe、attach、detach。探测使用 `usbd_lookup_id_by_uaa`，与第2节中展示的完全相同。附加调用 `device_set_usb_desc`、初始化互斥锁、用配置数组调用 `usbd_transfer_setup` 并创建字符设备。分离反向运行这些步骤。
 
-The eighth 块 is the registration macros. `DRIVER_MODULE(uled, uhub, ...)`, `MODULE_DEPEND(uled, usb, 1, 1, 1)`, `MODULE_VERSION(uled, 1)`, and `USB_PNP_HOST_INFO(uled_devs)`. Exactly the sequence you learned.
+第八个代码块是注册宏。`DRIVER_MODULE(uled, uhub, ...)`、`MODULE_DEPEND(uled, usb, 1, 1, 1)`、`MODULE_VERSION(uled, 1)` 和 `USB_PNP_HOST_INFO(uled_devs)`。正是你学到的序列。
 
-Reading through `uled.c` with the Section 2 vocabulary in hand, the whole file legibly maps onto the patterns you now understand. Every structural choice the 驱动程序 makes has a name. Every line of code is an instance of a general pattern. This is the kind of clarity that makes FreeBSD 驱动程序 readable.
+带着第2节的词汇阅读 `uled.c`，整个文件清晰地映射到你现在理解的模式上。驱动程序做出的每个结构选择都有一个名称。每一行代码都是一个通用模式的实例。这就是使FreeBSD驱动程序可读的那种清晰度。
 
-Before continuing to Section 3, we recommend you actually open `uled.c` now and read it. Even if some lines are still obscure, the overall structure will match the mental model you have built. The details will make more sense as you progress through the rest of the chapter, and revisiting this file after finishing the chapter is an excellent way to consolidate the material.
+在继续第3节之前，我们建议你现在实际打开 `uled.c` 并阅读它。即使有些行仍然不清楚，整体结构会匹配你构建的思维模型。细节会随着你在本章其余部分的推进而更有意义，在完成本章后重新访问这个文件是巩固材料的绝佳方式。
 
-## 第3节： Performing USB Data Transfers
+## 第3节：执行USB数据传输
 
-### The Transfer Configuration Array
+### 传输配置数组
 
-A USB驱动程序 declares its transfers up front, at compile time, through a small array of `struct usb_config` entries. Each entry describes one transfer channel: its type (control, bulk, interrupt, or isochronous), its direction (in or out), which 端点 it targets, how big its 缓冲区 is, which flags apply, and which 回调 function to invoke when the transfer completes. The 框架 reads this array once, during `附加`, when the 驱动程序 calls `usbd_transfer_setup`. From that point on, each channel behaves like a small state machine that the 驱动程序 drives through its 回调.
+USB驱动程序在编译时通过一个小的 `struct usb_config` 条目数组预先声明其传输。每个条目描述一个传输通道：其类型（控制、批量、中断或等时）、其方向（输入或输出）、它目标指向哪个端点、其缓冲区有多大、哪些标志适用以及传输完成时调用哪个回调函数。框架在 `attach` 期间当驱动程序调用 `usbd_transfer_setup` 时读取这个数组一次。从那时起，每个通道像一个小的状态机一样运行，驱动程序通过其回调来驱动它。
 
-The configuration array is declarative. You are not programming the sequence of hardware operations; you are telling the 框架 what channels your 驱动程序 will use, and the 框架 builds the infrastructure to support them. This is an effective abstraction, and it is one of the reasons USB驱动程序 in FreeBSD are usually much shorter than equivalent 驱动程序 for 总线es like PCI that demand direct 注册 manipulation.
+配置数组是声明性的。你不是在编程硬件操作的序列；你是在告诉框架你的驱动程序将使用哪些通道，框架构建支持它们的基础设施。这是一个有效的抽象，也是FreeBSD中的USB驱动程序通常比需要直接寄存器操作的总线（如PCI）的等效驱动程序短得多的原因之一。
 
-For our running example, we will declare three channels. A bulk-IN channel for reading data from the 设备, a bulk-OUT channel for writing data to the 设备, and an interrupt-IN channel for receiving asynchronous status events. A real 驱动程序 for a serial adapter or an LED notifier might use one or two of these; we use three to show the pattern applied to different transfer types.
+对于我们的运行示例，我们将声明三个通道。一个用于从设备读取数据的批量IN通道、一个用于向设备写入数据的批量OUT通道和一个用于接收异步状态事件的中断IN通道。一个用于串行适配器或LED通知器的真实驱动程序可能使用其中一两个；我们使用三个来展示应用于不同传输类型的模式。
 
 ```c
 enum {
@@ -946,34 +946,34 @@ static const struct usb_config myfirst_usb_config[MYFIRST_USB_N_XFER] = {
 };
 ```
 
-The enumeration at the top gives each channel a name and defines `MYFIRST_USB_N_XFER` as the total count. This is a common idiom; it keeps the channels symbolically accessible and makes it easy to add a new channel later. `MYFIRST_USB_N_XFER` is what you pass to `usbd_transfer_setup`, to `usbd_transfer_unsetup`, and to the softc's `sc_xfer[]` array declaration.
+顶部的枚举为每个通道起了一个名字，并将 `MYFIRST_USB_N_XFER` 定义为总数。这是一个常见的习惯用法；它使通道可以通过符号名访问，并方便以后添加新通道。`MYFIRST_USB_N_XFER` 是你传递给 `usbd_transfer_setup`、`usbd_transfer_unsetup` 以及 softc 的 `sc_xfer[]` 数组声明的值。
 
-The array itself uses designated initialisers, which keeps the assignment of each channel to its enumeration index explicit. Let us walk through the fields.
+数组本身使用指定初始化器，使每个通道到其枚举索引的赋值保持明确。让我们逐一分析各个字段。
 
-`type` is one of `UE_CONTROL`, `UE_BULK`, `UE_INTERRUPT`, or `UE_ISOCHRONOUS`, from `/usr/src/sys/dev/usb/usb.h`. It has to match the 端点's type as declared in the USB 描述符. If you say `UE_BULK` but the 设备 has an interrupt 端点, `usbd_transfer_setup` will fail.
+`type` 是 `UE_CONTROL`、`UE_BULK`、`UE_INTERRUPT` 或 `UE_ISOCHRONOUS` 之一，定义在 `/usr/src/sys/dev/usb/usb.h` 中。它必须匹配 USB 描述符中声明的端点类型。如果你指定 `UE_BULK` 但设备有一个中断端点，`usbd_transfer_setup` 将失败。
 
-`端点` identifies the 端点 number, but in most 驱动程序 the special value `UE_ADDR_ANY` is used, which tells the 框架 to pick any 端点 whose type and direction match. This works because most USB 接口 have only one 端点 of each (type, direction) pair, so "any" is unambiguous. A 设备 with multiple bulk-in 端点 would require explicit 端点 addresses.
+`端点` 标识端点号，但在大多数驱动程序中，使用特殊值 `UE_ADDR_ANY`，它告诉框架挑选任何类型和方向匹配的端点。这之所以有效，是因为大多数 USB 接口每种（类型、方向）对只有一个端点，因此"任意"是明确的。具有多个批量输入端点的设备需要显式的端点地址。
 
-`direction` is `UE_DIR_IN` or `UE_DIR_OUT`. Again, this must match the 描述符.
+`direction` 是 `UE_DIR_IN` 或 `UE_DIR_OUT`。同样，这必须匹配描述符。
 
-`bufsize` is the size of the 缓冲区 the 框架 allocates for this channel. For 批量传输, 512 bytes is a common choice because that is the maximum 数据包 size for high-speed bulk 端点, so a single 512-byte 缓冲区 can hold exactly one 数据包. Larger 缓冲区 are supported, but for most purposes 512 or a small multiple is correct. For interrupt 端点, the 缓冲区 can be smaller because interrupt 数据包 are typically eight, sixteen, or sixty-four bytes.
+`bufsize` 是框架为该通道分配的缓冲区大小。对于批量传输，512字节是一个常见选择，因为那是高速批量端点的最大数据包大小，所以一个512字节的缓冲区可以恰好容纳一个数据包。支持更大的缓冲区，但大多数情况下512或其小的倍数是正确的。对于中断端点，缓冲区可以更小，因为中断数据包通常是八、十六或六十四字节。
 
-`flags` is a bitfield struct (each flag is a one-bit integer). The flags affect how the 框架 handles short transfers, stalls, timeouts, and pipe behaviour.
+`flags` 是一个位字段结构（每个标志是一个一位整数）。这些标志影响框架如何处理短传输、停滞、超时和管道行为。
 
-- `pipe_bof` (pipe 块ed on failure): if the transfer fails, 块 further transfers on the same pipe until the 驱动程序 explicitly restarts it. This is usually set for both read and write 端点.
-- `short_xfer_ok`: for incoming transfers, treat a transfer that completed with less data than requested as success rather than error. Setting this is what allows a bulk-IN channel to read responses of variable length from a 设备.
-- `force_short_xfer`: for outgoing transfers, finish the transfer with a short 数据包 even when the data is aligned to a full 数据包 boundary. This is used by some protocols to signal the end of a message.
-- Several other flags control more advanced behaviour; for most 驱动程序, `pipe_bof` plus `short_xfer_ok` (on reads) plus possibly `force_short_xfer` (on writes, protocol-dependent) is all that is needed.
+- `pipe_bof`（管道失败时阻塞）：如果传输失败，阻塞同一管道上的后续传输，直到驱动程序显式重启它。这通常在读写端点上都设置。
+- `short_xfer_ok`：对于传入传输，将以少于请求数据量完成的传输视为成功而非错误。设置这个允许批量IN通道从设备读取可变长度的响应。
+- `force_short_xfer`：对于传出传输，即使数据对齐到完整数据包边界，也以短数据包结束传输。一些协议使用它来发出消息结束信号。
+- 其他几个标志控制更高级的行为；对于大多数驱动程序，`pipe_bof` 加上 `short_xfer_ok`（在读通道上）加上可能的 `force_short_xfer`（在写通道上，取决于协议）就是所需的全部。
 
-`回调` is the function the 框架 calls whenever this channel needs attention. The 回调 is a `usb_回调_t`, which takes a pointer to the `struct usb_xfer` and returns void. All of the channel's state-machine logic lives inside the 回调.
+`callback` 是框架在该通道需要注意时调用的函数。回调是一个 `usb_callback_t`，接收一个指向 `struct usb_xfer` 的指针并返回void。通道的所有状态机逻辑都在回调内部。
 
-`timeout` (in milliseconds) sets an upper bound on how long a transfer can wait before being forcibly completed with an error. Setting a timeout is useful for write channels, because it prevents a hung 设备 from stalling the 驱动程序 indefinitely. For read channels, leaving the timeout at zero (meaning "no timeout") is common, because reads are often expected to 块 waiting for the 设备 to have something to say.
+`timeout`（以毫秒为单位）设置传输在被强制以错误完成之前可以等待的上限。设置超时对于写通道很有用，因为它防止挂起的设备无限期地阻塞驱动程序。对于读通道，将超时留为零（意味着"无超时"）是常见的，因为读取通常被期望阻塞等待设备有话要说。
 
-This array, combined with `usbd_transfer_setup`, is all the 驱动程序 needs to declare its data pipeline. The 框架 allocates the underlying DMA 缓冲区, sets up the scheduling, and watches the pipes. The 驱动程序 never has to call into a 注册 or schedule a transaction by hand. It just writes 回调.
+这个数组结合 `usbd_transfer_setup`，是驱动程序声明其数据管道所需的全部。框架分配底层DMA缓冲区、设置调度并监视管道。驱动程序永远不必手动调用寄存器或调度事务。它只需要编写回调。
 
-### Setting Up and Tearing Down Transfers
+### 设置和拆卸传输
 
-In the `附加` method shown in Section 2, the call to `usbd_transfer_setup` creates the channels from the configuration array:
+在第2节中展示的 `attach` 方法中，对 `usbd_transfer_setup` 的调用从配置数组创建通道：
 
 ```c
 error = usbd_transfer_setup(uaa->device, &sc->sc_iface_index,
@@ -981,29 +981,29 @@ error = usbd_transfer_setup(uaa->device, &sc->sc_iface_index,
     sc, &sc->sc_mtx);
 ```
 
-The arguments are, in order: the USB 设备 pointer, a pointer to the 接口 index (the 框架 can update it in certain multi-接口 scenarios), the destination array for the created transfer objects, the configuration array, the number of channels, the softc pointer (which is passed into 回调 via `usbd_xfer_softc`), and the 互斥锁 the 框架 will hold around each 回调.
+参数依次为：USB设备指针、指向接口索引的指针（框架可以在某些多接口场景中更新它）、创建的传输对象的目标数组、配置数组、通道数量、softc指针（通过 `usbd_xfer_softc` 传递给回调）和框架将在每个回调周围持有的互斥锁。
 
-If this call succeeds, `sc->sc_xfer[]` is populated with pointers to `struct usb_xfer` objects. Each object encapsulates a channel's state. From this point, the 驱动程序 can submit a transfer on a channel with `usbd_transfer_submit(sc->sc_xfer[i])`, and the 框架 will, in the fullness of time, call the corresponding 回调.
+如果此调用成功，`sc->sc_xfer[]` 被填充为指向 `struct usb_xfer` 对象的指针。每个对象封装了一个通道的状态。从这时起，驱动程序可以通过 `usbd_transfer_submit(sc->sc_xfer[i])` 在通道上提交传输，框架最终会调用相应的回调。
 
-The symmetric teardown, shown in the `分离` method, is `usbd_transfer_unsetup`:
+在 `detach` 方法中展示的对称拆卸是 `usbd_transfer_unsetup`：
 
 ```c
 usbd_transfer_unsetup(sc->sc_xfer, MYFIRST_USB_N_XFER);
 ```
 
-This call does three things, in order. It cancels any in-flight transfer on each channel. It waits for the corresponding 回调 to run with `USB_ST_ERROR` or `USB_ST_CANCELLED`, so the 驱动程序 has a chance to clean up any per-transfer state. It frees the 框架's internal state for the channel. After `usbd_transfer_unsetup` returns, the `sc_xfer[]` entries are no longer valid, and the associated 回调 will not be invoked again.
+此调用依次做三件事。它取消每个通道上任何进行中的传输。它等待相应的回调以 `USB_ST_ERROR` 或 `USB_ST_CANCELLED` 运行，以便驱动程序有机会清理任何每个传输的状态。它释放框架为通道分配的内部状态。在 `usbd_transfer_unsetup` 返回后，`sc_xfer[]` 条目不再有效，关联的回调也不会再被调用。
 
-This is the piece of machinery that makes 分离 safe in the presence of ongoing I/O. You do not need to implement your own "wait for outstanding transfers" logic. The 框架 provides it, atomically, through this single call.
+这就是使分离在有进行中I/O的情况下变得安全的机制。你不需要实现自己的"等待未完成传输"逻辑。框架通过这单个调用原子地提供了它。
 
-### The Callback State Machine
+### 回调状态机
 
-Every 传输回调 follows the same three-state state machine. When the 框架 invokes the 回调, you ask `USB_GET_STATE(xfer)` for the current state, and then you handle it. The three possible states are declared in `/usr/src/sys/dev/usb/usbdi.h`:
+每个传输回调都遵循相同的三状态状态机。当框架调用回调时，你通过 `USB_GET_STATE(xfer)` 询问当前状态，然后处理它。三个可能的状态在 `/usr/src/sys/dev/usb/usbdi.h` 中声明：
 
-- `USB_ST_SETUP`: the 框架 is ready to submit a new transfer on this channel. You should prepare the transfer (set its length, copy data into its 缓冲区, and so on) and call `usbd_transfer_submit`. If you have no work for this channel right now, simply return; the 框架 will leave the channel idle until something else triggers a submit.
-- `USB_ST_TRANSFERRED`: the most recent transfer completed successfully. You should read out the results (copy received data out, decide what to do next) and either return (if the channel should go idle) or fall through to `USB_ST_SETUP` to start another transfer.
-- `USB_ST_ERROR`: the most recent transfer failed. You should inspect `usbd_xfer_get_error(xfer)` to see why, handle the error (for most errors, you fall through to `USB_ST_SETUP` to retry after a short delay; for stalls, you issue a clear-stall), and decide whether to continue.
+- `USB_ST_SETUP`：框架准备好在此通道上提交新的传输。你应该准备传输（设置其长度、将数据复制到其缓冲区中等）并调用 `usbd_transfer_submit`。如果你现在没有该通道的工作，简单地返回；框架会让通道保持空闲直到其他事情触发提交。
+- `USB_ST_TRANSFERRED`：最近的传输成功完成。你应该读出结果（复制接收的数据、决定下一步做什么）然后要么返回（如果通道应该空闲）要么穿透到 `USB_ST_SETUP` 开始另一次传输。
+- `USB_ST_ERROR`：最近的传输失败。你应该检查 `usbd_xfer_get_error(xfer)` 查看原因，处理错误（对于大多数错误，你穿透到 `USB_ST_SETUP` 在短暂延迟后重试；对于停滞，你发出清除停滞），并决定是否继续。
 
-The typical shape of a bulk-read 回调 looks like this:
+典型的批量读取回调的形状如下：
 
 ```c
 static void
@@ -1051,27 +1051,27 @@ tr_setup:
 }
 ```
 
-Let us walk through every piece.
+让我们逐一分析每个部分。
 
-The first line retrieves the softc pointer from the transfer object. This is how the 回调 gets at the per-设备 state. It works because the softc was passed to `usbd_transfer_setup`, which stored it inside the transfer object.
+第一行从传输对象获取softc指针。这是回调获取每个设备状态的方式。它之所以有效是因为softc被传递给了 `usbd_transfer_setup`，后者将其存储在传输对象内部。
 
-The call to `usbd_xfer_status` fills in `actlen`, the number of bytes actually transferred on 帧 zero. For a read, this is how much data arrived. For a write, it is how much data was sent. The other three parameters (which this example does not use) give the total transfer length, the timeout, and a status flags pointer; most 回调 only need `actlen`.
+对 `usbd_xfer_status` 的调用填充 `actlen`，即帧零上实际传输的字节数。对于读取，这是到达了多少数据。对于写入，这是发送了多少数据。其他三个参数（本例不使用）提供总传输长度、超时和状态标志指针；大多数回调只需要 `actlen`。
 
-The switch on `USB_GET_STATE(xfer)` is the state machine. In `USB_ST_TRANSFERRED`, the 回调 copies the received data out of the USB 帧 into the 驱动程序's own 缓冲区. The helper function `myfirst_usb_deliver_received` (which you would write) could push the data onto a queue, wake a sleeping read() on the `/dev` node, or feed a higher-level protocol parser.
+对 `USB_GET_STATE(xfer)` 的switch是状态机。在 `USB_ST_TRANSFERRED` 中，回调将接收到的数据从USB帧复制到驱动程序自己的缓冲区。辅助函数 `myfirst_usb_deliver_received`（你需要编写的）可以将数据推送到队列、唤醒 `/dev` 节点上睡眠的read()或馈送给更高级别的协议解析器。
 
-The `FALLTHROUGH` after processing the transferred data takes the 回调 into the `USB_ST_SETUP` branch. This is the idiomatic pattern for channels that run continuously: every time a read finishes, immediately start another read. If the 驱动程序 wanted to stop reading after one transfer (say, a one-shot control request), it would `return;` at the end of `USB_ST_TRANSFERRED` instead of falling through.
+处理传输数据后的 `FALLTHROUGH` 将回调带入 `USB_ST_SETUP` 分支。这是连续运行通道的惯用模式：每次读取完成后，立即开始另一次读取。如果驱动程序想在一次传输后停止读取（比如一次性控制请求），它会在 `USB_ST_TRANSFERRED` 末尾 `return;` 而不是穿透。
 
-In `USB_ST_SETUP`, `usbd_xfer_set_帧_len` sets the length of 帧 zero to the maximum the channel can handle, and `usbd_transfer_submit` hands the transfer to the 框架. The 框架 will start the actual hardware operation and, when complete, call the 回调 again with either `USB_ST_TRANSFERRED` or `USB_ST_ERROR`.
+在 `USB_ST_SETUP` 中，`usbd_xfer_set_frame_len` 将帧零的长度设置为通道能处理的最大值，`usbd_transfer_submit` 将传输交给框架。框架将启动实际的硬件操作，完成时以 `USB_ST_TRANSFERRED` 或 `USB_ST_ERROR` 再次调用回调。
 
-The `default` case is where error handling happens. Two errors get special treatment. `USB_ERR_CANCELLED` is the signal that the transfer is being torn down, typically because the 设备 was unplugged or `usbd_transfer_unsetup` was called. The 回调 must not resubmit the transfer in this case; if it did, it could race with the teardown and potentially touch memory that is about to be freed. Breaking out of the switch without calling `usbd_transfer_submit` is the correct behaviour.
+`default` 情况是错误处理发生的地方。两个错误得到特殊处理。`USB_ERR_CANCELLED` 是传输正在被拆除的信号，通常是因为设备被拔出或调用了 `usbd_transfer_unsetup`。在这种情况下回调不能重新提交传输；如果它这样做，可能与拆除竞争并可能触碰即将被释放的内存。不调用 `usbd_transfer_submit` 直接跳出switch是正确的行为。
 
-`USB_ERR_STALLED` is the signal that the 端点 returned a STALL handshake, meaning the 设备 is refusing to accept more data until the host clears the stall. The call to `usbd_xfer_set_stall` schedules a clear-stall operation on the control 端点. After the clear-stall completes, the 框架 will call the 回调 again with `USB_ST_SETUP`, at which point the 驱动程序 can reissue the transfer. This logic is built into the 框架 so that every 驱动程序 gets the same correct behaviour with minimal code.
+`USB_ERR_STALLED` 是端点返回STALL握手的信号，意味着设备拒绝接受更多数据直到主机清除停滞。对 `usbd_xfer_set_stall` 的调用在控制端点上调度一个清除停滞操作。清除停滞完成后，框架将以 `USB_ST_SETUP` 再次调用回调，此时驱动程序可以重新发出传输。这个逻辑内置于框架中，使每个驱动程序以最少的代码获得相同的正确行为。
 
-For any other error, the 回调 falls through to `tr_setup` and attempts to resubmit the transfer. This is a simple retry policy. A more sophisticated 驱动程序 might count consecutive errors and give up after a threshold, or it might escalate by calling `usbd_transfer_unsetup` on itself. For many 驱动程序, the default retry loop is sufficient.
+对于任何其他错误，回调穿透到 `tr_setup` 并尝试重新提交传输。这是一个简单的重试策略。更复杂的驱动程序可能会计算连续错误并在达到阈值后放弃，或者可能通过调用 `usbd_transfer_unsetup` 来升级。对于许多驱动程序，默认的重试循环就足够了。
 
-### The Write Callback
+### 写回调
 
-The write 回调 has the same shape but its `USB_ST_SETUP` branch is more interesting, because it has to decide whether there is any data to write:
+写回调有相同的形状，但其 `USB_ST_SETUP` 分支更有趣，因为它必须决定是否有数据要写：
 
 ```c
 static void
@@ -1112,17 +1112,17 @@ tr_setup:
 }
 ```
 
-The main change is the logic at `tr_setup`. For a read, the 驱动程序 always wants another read armed, so the 回调 just sets the 帧 length and submits. For a write, the 驱动程序 only submits if there is something to send. The helper `myfirst_usb_dequeue_write` returns the number of bytes pulled from an internal transmit queue; if zero, the 回调 breaks out of the switch without submitting anything, which leaves the channel idle. When userspace later writes more data into the 设备, the 驱动程序 code that handles the `write()` system call queues the bytes and explicitly calls `usbd_transfer_start(sc->sc_xfer[MYFIRST_USB_BULK_DT_WR])`. That call fires an `USB_ST_SETUP` invocation of the 回调, which now finds data in the queue and submits it.
+主要的变化是 `tr_setup` 处的逻辑。对于读取，驱动程序总是想要另一个读取被武装起来，所以回调只设置帧长度并提交。对于写入，驱动程序只在有东西要发送时才提交。辅助函数 `myfirst_usb_dequeue_write` 返回从内部传输队列拉取的字节数；如果为零，回调不提交任何东西就跳出switch，这使通道保持空闲。当用户空间后来向设备写入更多数据时，处理 `write()` 系统调用的驱动程序代码将字节排队并显式调用 `usbd_transfer_start(sc->sc_xfer[MYFIRST_USB_BULK_DT_WR])`。该调用触发回调的 `USB_ST_SETUP` 调用，此时它在队列中找到数据并提交它。
 
-This interaction between the userspace I/O path and the transfer state machine is the heart of an interactive USB驱动程序. Reads are self-driving: once armed, they rearm themselves on every completion. Writes are demand-driven: they submit only when data is available and go idle otherwise. Both patterns run inside the same three-state machine; the difference is only in what happens at `USB_ST_SETUP`.
+用户空间I/O路径和传输状态机之间的这种交互是交互式USB驱动程序的核心。读取是自驱动的：一旦武装起来，它们在每次完成时重新武装自己。写入是需求驱动的：它们只在数据可用时提交，否则进入空闲。两种模式都在同一个三状态机内运行；区别只在于 `USB_ST_SETUP` 时发生什么。
 
-### Control Transfers
+### 控制传输
 
-Control transfers do not typically run on continuously-armed channels; they are usually issued one-shot, either synchronously from a system-call handler or as a one-shot 回调 triggered by some 驱动程序 event. The `struct usb_config` for a control channel has `type = UE_CONTROL` and otherwise looks similar to the bulk and interrupt configurations. The 缓冲区 size must be at least eight bytes to hold the setup 数据包, and the 回调 deals with two 帧: 帧 zero is the setup 数据包, and 帧 one is the optional data phase.
+控制传输通常不在连续武装的通道上运行；它们通常以一次性方式发出，要么从系统调用处理程序同步发出，要么作为由某个驱动程序事件触发的一次性回调。控制通道的 `struct usb_config` 有 `type = UE_CONTROL`，其他方面看起来与批量和中断配置相似。缓冲区大小必须至少八字节以容纳设置数据包，回调处理两个帧：帧零是设置数据包，帧一是可选的数据阶段。
 
-The typical one-shot use is to issue a vendor-specific request at 驱动程序-load time. The FTDI 串行驱动程序, for example, uses 控制传输 to set the 波特率 and line parameters every time the user configures the 串行端口. Because the control 回调 is scheduled by the 框架 just like any other 传输回调, the code pattern is identical. What differs is the construction of the setup 数据包 in the `USB_ST_SETUP` branch.
+典型的一次性用途是在驱动程序加载时发出供应商特定的请求。例如，FTDI串行驱动程序使用控制传输来设置波特率和线路参数，每次用户配置串行端口时都会使用。由于控制回调像任何其他传输回调一样由框架调度，代码模式是相同的。不同之处在于 `USB_ST_SETUP` 分支中设置数据包的构造。
 
-For a control-read transfer, the code looks something like this:
+对于控制读取传输，代码看起来像这样：
 
 ```c
 case USB_ST_SETUP: {
@@ -1144,9 +1144,9 @@ case USB_ST_SETUP: {
 }
 ```
 
-The `USETW` macro stores a sixteen-bit value in the request structure in the little-endian byte order USB requires. The `usbd_copy_in` helper copies from a 内核 缓冲区 into a USB 帧. The `usbd_xfer_set_帧_len` and `usbd_xfer_set_帧` calls tell the 框架 how many 帧 the transfer spans and how long each is. For a control-read, 帧 zero is the setup 数据包 (eight bytes) and 帧 one is the data phase; the 框架 transparently handles the status phase at the end.
+`USETW` 宏以USB要求的小端字节顺序将一个16位值存储在请求结构中。`usbd_copy_in` 辅助函数从内核缓冲区复制到USB帧。`usbd_xfer_set_frame_len` 和 `usbd_xfer_set_frames` 调用告诉框架传输跨越多少帧以及每帧多长。对于控制读取，帧零是设置数据包（八字节），帧一是数据阶段；框架透明地处理末尾的状态阶段。
 
-In the `USB_ST_TRANSFERRED` branch, the 驱动程序 reads the response out of 帧 one:
+在 `USB_ST_TRANSFERRED` 分支中，驱动程序从帧一读取响应：
 
 ```c
 case USB_ST_TRANSFERRED:
@@ -1156,13 +1156,13 @@ case USB_ST_TRANSFERRED:
     break;
 ```
 
-Control transfers are the right tool for configuration operations where latency and bandwidth do not matter but correctness and sequencing do. They are the wrong tool for streaming data; use bulk or 中断传输 for that.
+控制传输是配置操作的正确工具，其中延迟和带宽不重要但正确性和排序重要。它们是流数据的错误工具；请使用批量或中断传输。
 
-### Interrupt Transfers
+### 中断传输
 
-Interrupt transfers are conceptually the simplest of the four types. An interrupt-IN channel runs a continuous state machine that polls a single 端点 at regular intervals. Each time a 数据包 arrives from the 设备, the 回调 wakes up with `USB_ST_TRANSFERRED`. The 驱动程序 reads the 数据包, processes it (often by delivering it to userland), and falls through to rearm.
+中断传输在概念上是四种类型中最简单的。一个中断IN通道运行一个连续的状态机，定期轮询单个端点。每次设备的数据包到达时，回调以 `USB_ST_TRANSFERRED` 被唤醒。驱动程序读取数据包、处理它（通常通过传递给用户态），然后穿透以重新武装。
 
-The 回调 for our interrupt channel is nearly identical to the bulk-read 回调:
+我们的中断通道的回调几乎与批量读取回调相同：
 
 ```c
 static void
@@ -1195,70 +1195,70 @@ tr_setup:
 }
 ```
 
-The only meaningful difference from the bulk-read 回调 is that the 缓冲区 is smaller (interrupt 端点 数据包 are typically eight to sixty-four bytes) and the semantics of the data are usually "status update" rather than "stream payload." A USB HID 设备, for example, sends a sixty-four-byte report every few milliseconds describing key presses and mouse motions; an interrupt-IN channel polled continuously in this pattern is how the 内核 receives those reports.
+与批量读取回调唯一有意义的区别是缓冲区更小（中断端点数据包通常为八到六十四字节），数据的语义通常是"状态更新"而不是"流有效载荷"。例如，一个USB HID设备每隔几毫秒发送一个六十四字节的报告，描述按键和鼠标移动；以此模式连续轮询的中断IN通道是内核接收这些报告的方式。
 
-Interrupt-OUT channels work the same way but in reverse: the 回调 has to decide whether to send something at each `USB_ST_SETUP`, analogous to the bulk-write pattern.
+中断OUT通道以相同的方式工作但方向相反：回调必须在每个 `USB_ST_SETUP` 时决定是否发送什么东西，类似于批量写入模式。
 
-### Frame-Level Operations: What the Framework Gives You
+### 帧级操作：框架为你提供什么
 
-USB transfers are composed of 帧. A 批量传输 with a large 缓冲区 might be broken into multiple 数据包 by the hardware; the 框架 hides that detail and presents the transfer as a single operation. A 控制传输, on the other hand, has an explicit 帧 structure (setup, data, status). An 等时传输 has one 帧 per scheduled 数据包. The 框架 exposes this structure through a small number of helper functions:
+USB传输由帧组成。一个具有大缓冲区的批量传输可能被硬件分成多个数据包；框架隐藏了该细节并将传输呈现为单个操作。另一方面，控制传输有显式的帧结构（设置、数据、状态）。等时传输每个调度的数据包有一个帧。框架通过少量辅助函数暴露此结构：
 
-- `usbd_xfer_max_len(xfer)` returns the largest total length the channel can transfer in a single submit.
-- `usbd_xfer_set_帧_len(xfer, 帧, len)` sets the length of a specific 帧.
-- `usbd_xfer_set_帧(xfer, n)` sets the total number of 帧 in the transfer.
-- `usbd_xfer_get_帧(xfer, 帧)` returns a page-cache pointer for a specific 帧, which is what you pass to `usbd_copy_in` and `usbd_copy_out`.
-- `usbd_xfer_帧_len(xfer, 帧)` returns how many bytes were actually transferred in a given 帧 (for completions).
-- `usbd_xfer_max_帧len(xfer)` returns the maximum per-帧 length for the channel.
+- `usbd_xfer_max_len(xfer)` 返回通道在单次提交中可以传输的最大总长度。
+- `usbd_xfer_set_frame_len(xfer, frame, len)` 设置特定帧的长度。
+- `usbd_xfer_set_frames(xfer, n)` 设置传输中的总帧数。
+- `usbd_xfer_get_frame(xfer, frame)` 返回特定帧的页面缓存指针，这是你传递给 `usbd_copy_in` 和 `usbd_copy_out` 的。
+- `usbd_xfer_frame_len(xfer, frame)` 返回给定帧中实际传输了多少字节（用于完成）。
+- `usbd_xfer_max_frame_len(xfer)` 返回通道的最大每帧长度。
 
-For bulk and 中断传输, the vast majority of 驱动程序 only touch 帧 zero. For 控制传输, they touch 帧 zero and one. For 等时传输 (which we will not cover in this chapter), they loop over many 帧. The point is that the 框架 gives you complete control over the per-帧 data layout while hiding the hardware details that would otherwise make transfer scheduling a nightmare.
+对于批量和中断传输，绝大多数驱动程序只触碰帧零。对于控制传输，它们触碰帧零和帧一。对于等时传输（本章不会涉及），它们循环遍历多帧。关键点是框架给你对每帧数据布局的完全控制，同时隐藏了否则会使传输调度成为噩梦的硬件细节。
 
-### The `usbd_copy_in` and `usbd_copy_out` Helpers
+### `usbd_copy_in` 和 `usbd_copy_out` 辅助函数
 
-USB 缓冲区 are not plain C 缓冲区. They are allocated by the 框架 in a way that is addressable by the 主机控制器 hardware, which means they often live in DMA-accessible memory pages with platform-specific alignment requirements. The 框架 wraps these 缓冲区 in an opaque `struct usb_page_cache` object, and the 驱动程序 accesses them through two helpers:
+USB缓冲区不是普通的C缓冲区。它们由框架以一种可被主机控制器硬件寻址的方式分配，这意味着它们通常位于具有平台特定对齐要求的DMA可访问内存页面中。框架将这些缓冲区包装在一个不透明的 `struct usb_page_cache` 对象中，驱动程序通过两个辅助函数访问它们：
 
-- `usbd_copy_in(pc, offset, src, len)` copies `len` bytes from the plain C 缓冲区 `src` into the 框架-managed 缓冲区 at `offset`.
-- `usbd_copy_out(pc, offset, dst, len)` copies `len` bytes out of the 框架-managed 缓冲区 at `offset` into the plain C 缓冲区 `dst`.
+- `usbd_copy_in(pc, offset, src, len)` 将 `len` 字节从普通C缓冲区 `src` 复制到偏移 `offset` 处的框架管理缓冲区。
+- `usbd_copy_out(pc, offset, dst, len)` 将 `len` 字节从偏移 `offset` 处的框架管理缓冲区复制到普通C缓冲区 `dst`。
 
-You never dereference a `struct usb_page_cache *` directly. You never assume it points to a contiguous memory region. You always go through the helpers. This keeps the 驱动程序 portable across platforms with different DMA constraints, and it is the standard convention throughout `/usr/src/sys/dev/usb/`.
+你永远不要直接解引用 `struct usb_page_cache *`。你永远不要假设它指向连续的内存区域。你总是通过辅助函数。这使驱动程序在不同DMA约束的平台间可移植，这是 `/usr/src/sys/dev/usb/` 中的标准约定。
 
-If your 驱动程序 needs to fill a USB 缓冲区 with data from a mbuf chain or from a userland pointer, there are dedicated helpers for that too: `usbd_copy_in_mbuf`, `usbd_copy_from_mbuf`, and the `uiomove` interaction is handled through `usbd_m_copy_in` and related routines. Search the USB 框架 source for the right helper; there is almost certainly one that matches your need.
+如果你的驱动程序需要用来自mbuf链或用户态指针的数据填充USB缓冲区，也有专门的辅助函数：`usbd_copy_in_mbuf`、`usbd_copy_from_mbuf`，`uiomove` 交互通过 `usbd_m_copy_in` 和相关例程处理。在USB框架源代码中搜索合适的辅助函数；几乎肯定有一个匹配你的需求。
 
-### Starting, Stopping, and Querying Transfers
+### 启动、停止和查询传输
 
-Beyond the three 回调, the 驱动程序 interacts with transfer channels through a small number of control functions. The important ones are:
+除了三个回调之外，驱动程序通过少量控制函数与传输通道交互。重要的有：
 
-- `usbd_transfer_start(xfer)`: ask the 框架 to schedule a 回调 invocation in the `USB_ST_SETUP` state, even if the channel has been idle. Used when new data becomes available for a write channel.
-- `usbd_transfer_stop(xfer)`: stop the channel. Any in-flight transfer is cancelled and the 回调 is invoked with `USB_ST_ERROR` (with `USB_ERR_CANCELLED`). No new 回调 happen until the 驱动程序 calls `usbd_transfer_start` again.
-- `usbd_transfer_pending(xfer)`: returns true if a transfer is currently outstanding. Useful for deciding whether to submit a new one or defer.
-- `usbd_transfer_drain(xfer)`: 块 until any outstanding transfer completes and the channel is idle. Used in teardown paths that need to wait for in-flight I/O before continuing.
+- `usbd_transfer_start(xfer)`：要求框架在 `USB_ST_SETUP` 状态调度回调调用，即使通道一直空闲。当新数据可供写通道使用时使用。
+- `usbd_transfer_stop(xfer)`：停止通道。任何进行中的传输被取消，回调以 `USB_ST_ERROR`（带 `USB_ERR_CANCELLED`）被调用。在驱动程序再次调用 `usbd_transfer_start` 之前不会有新的回调。
+- `usbd_transfer_pending(xfer)`：如果传输当前未完成则返回true。用于决定是提交新的还是推迟。
+- `usbd_transfer_drain(xfer)`：阻塞直到任何未完成的传输完成且通道空闲。用于在继续之前需要等待进行中I/O的拆卸路径。
 
-These functions are safe to call while holding the 驱动程序's 互斥锁, and in fact most of them require it. The 框架 documentation and the existing 驱动程序 code show the expected usage patterns; when in doubt, grep for the function name in `/usr/src/sys/dev/usb/` and read how existing 驱动程序 use it.
+这些函数在持有驱动程序互斥锁时调用是安全的，事实上大多数都要求它。框架文档和现有的驱动程序代码展示了预期的使用模式；有疑问时，在 `/usr/src/sys/dev/usb/` 中grep函数名并阅读现有驱动程序如何使用它。
 
-### A Worked Example: Echo-Loop over USB
+### 完整示例：USB上的回环
 
-To make the transfer mechanics concrete, consider a small end-to-end scenario. The 驱动程序 exposes a `/dev/myfirst_usb0` entry that accepts writes and returns reads. A user process writes a string to the 设备; the 驱动程序 sends those bytes to the USB 设备 through the bulk-OUT channel. The 设备 bounces the bytes back through its bulk-IN 端点; the 驱动程序 receives them and hands them to any process currently 块ed in a `read()` on the `/dev` node. This is a useful exercise because it exercises both directions of the bulk pipeline and because it has a simple, observable success criterion: the string that goes in is the string that comes out.
+为了使传输机制具体化，考虑一个小的端到端场景。驱动程序暴露一个接受写入和返回读取的 `/dev/myfirst_usb0` 条目。用户进程向设备写入一个字符串；驱动程序通过批量OUT通道将这些字节发送到USB设备。设备通过其批量IN端点将字节弹回；驱动程序接收它们并将它们传递给当前在 `/dev` 节点上阻塞在 `read()` 中的任何进程。这是一个有用的练习，因为它锻炼了批量管道的两个方向，并且它有一个简单、可观察的成功标准：进去的字符串就是出来的字符串。
 
-The 驱动程序 needs a small transmit queue and a small receive queue, both protected by the softc 互斥锁. When userspace writes, the `d_write` handler acquires the 互斥锁, copies the bytes into the transmit queue, and calls `usbd_transfer_start(sc->sc_xfer[MYFIRST_USB_BULK_DT_WR])`. When userspace reads, the `d_read` handler acquires the 互斥锁, checks the receive queue; if empty, it sleeps on a channel related to the queue. The write 回调, running under the 互斥锁, dequeues bytes and submits the transfer. The read 回调, also under the 互斥锁, enqueues received bytes and wakes any 块ed reader.
+驱动程序需要一个小型传输队列和一个小型接收队列，两者都由softc互斥锁保护。当用户空间写入时，`d_write` 处理程序获取互斥锁、将字节复制到传输队列，并调用 `usbd_transfer_start(sc->sc_xfer[MYFIRST_USB_BULK_DT_WR])`。当用户空间读取时，`d_read` 处理程序获取互斥锁、检查接收队列；如果为空，它在与队列相关的通道上睡眠。写回调在互斥锁下运行，从队列中取出字节并提交传输。读回调也在互斥锁下运行，将接收到的字节入队并唤醒任何阻塞的读取者。
 
-The complete flow from userspace `write("hi")` to userspace `read()` seeing "hi" involves three threads of execution interleaved through the state machines:
+从用户空间 `write("hi")` 到用户空间 `read()` 看到 "hi" 的完整流程涉及三个通过状态机交织的执行线程：
 
-1. User thread runs `write()`. Driver enqueues "hi" on the TX queue. Driver calls `usbd_transfer_start`. User thread returns.
-2. Framework schedules the TX 回调 with `USB_ST_SETUP`. Callback dequeues "hi", copies it into 帧 zero, sets 帧 length to 2, submits. Callback returns.
-3. Hardware performs the bulk-OUT transaction. Device echoes "hi" on bulk-IN.
-4. Framework schedules the RX 回调 with `USB_ST_TRANSFERRED` (because an earlier `USB_ST_SETUP` had armed a read). Callback reads "hi" from 帧 zero into the RX queue, wakes any 块ed reader, falls through to re-arm the read, submits. Callback returns.
-5. User thread, if it was 块ed in `read()`, wakes up. The `d_read` handler copies "hi" out of the RX queue into userspace. User thread returns.
+1. 用户线程运行 `write()`。驱动程序将 "hi" 入队到TX队列。驱动程序调用 `usbd_transfer_start`。用户线程返回。
+2. 框架以 `USB_ST_SETUP` 调度TX回调。回调从队列取出 "hi"、将其复制到帧零、设置帧长度为2、提交。回调返回。
+3. 硬件执行批量OUT事务。设备在批量IN上回显 "hi"。
+4. 框架以 `USB_ST_TRANSFERRED` 调度RX回调（因为之前的 `USB_ST_SETUP` 已经武装了一个读取）。回调从帧零读取 "hi" 到RX队列、唤醒任何阻塞的读取者、穿透以重新武装读取、提交。回调返回。
+5. 用户线程，如果它在 `read()` 中阻塞，被唤醒。`d_read` 处理程序将 "hi" 从RX队列复制到用户空间。用户线程返回。
 
-At each step, the 互斥锁 is held exactly where it needs to be, the state machine moves cleanly between `USB_ST_SETUP` and `USB_ST_TRANSFERRED`, and the 驱动程序 does not have to think about 数据包 boundaries, DMA mappings, or hardware scheduling. The 框架 handles all of that.
+在每一步，互斥锁恰好被持有在它需要的地方，状态机在 `USB_ST_SETUP` 和 `USB_ST_TRANSFERRED` 之间干净地移动，驱动程序不必考虑数据包边界、DMA映射或硬件调度。框架处理了所有这些。
 
-### Putting the Whole Echo-Loop Driver Together
+### 将整个回环驱动程序组合起来
 
-To make the echo-loop description concrete, let us walk through a complete skeleton for `myfirst_usb`. What follows is not a copy of the real 驱动程序 files in `examples/`; it is a narrative presentation of how the pieces fit. The full code is in the examples directory.
+为了使回环描述具体化，让我们遍历 `myfirst_usb` 的完整骨架。以下不是 `examples/` 中真实驱动程序文件的副本；它是各部分如何组合的叙述性呈现。完整代码在示例目录中。
 
-The 驱动程序 has one C source file, `myfirst_usb.c`, and a small header `myfirst_usb.h`. The header declares the softc structure, the constants for the transfer enumeration, and the prototypes for internal helper functions. The source file contains the 匹配表, the transfer configuration array, the 回调 functions, the character-设备 methods, the New总线 探测/附加/分离, and the registration macros.
+驱动程序有一个C源文件 `myfirst_usb.c` 和一个小头文件 `myfirst_usb.h`。头文件声明softc结构、传输枚举的常量和内部辅助函数的原型。源文件包含匹配表、传输配置数组、回调函数、字符设备方法、Newbus probe/attach/detach和注册宏。
 
-The softc is as we described earlier: a USB 设备 pointer, a 互斥锁, the transfer array, a 字符设备 pointer, an 接口 index, a flags byte, and two internal 环形缓冲区 for RX and TX queued data. Each 环形缓冲区 is a fixed-size array (say, 4096 bytes) plus head and tail indices, protected by the 互斥锁.
+softc如我们之前描述的：一个USB设备指针、一个互斥锁、传输数组、字符设备指针、接口索引、标志字节和两个用于RX和TX排队数据的内部环形缓冲区。每个环形缓冲区是一个固定大小的数组（比如4096字节）加上头和尾索引，由互斥锁保护。
 
-The 匹配表 contains one entry:
+匹配表包含一个条目：
 
 ```c
 static const STRUCT_USB_HOST_ID myfirst_usb_devs[] = {
@@ -1266,11 +1266,11 @@ static const STRUCT_USB_HOST_ID myfirst_usb_devs[] = {
 };
 ```
 
-The 0x16c0/0x05dc VID/PID pair is the Van Oosting Technologies Incorporated / OBDEV generic test VID/PID, which is free to use for prototyping.
+0x16c0/0x05dc VID/PID对是Van Oosting Technologies Incorporated / OBDEV通用测试VID/PID，可以免费用于原型设计。
 
-The transfer configuration array is the three-channel array from Section 3. The 回调 are the bulk-read, bulk-write, and interrupt-read patterns we walked through.
+传输配置数组是第3节中的三通道数组。回调是我们遍历过的批量读取、批量写入和中断读取模式。
 
-The bulk-read 回调's `USB_ST_TRANSFERRED` branch calls a helper:
+批量读取回调的 `USB_ST_TRANSFERRED` 分支调用一个辅助函数：
 
 ```c
 static void
@@ -1300,9 +1300,9 @@ myfirst_usb_rx_enqueue(struct myfirst_usb_softc *sc,
 }
 ```
 
-This is a ring-缓冲区 enqueue with wrap-around handling. The `usbd_copy_out` helper is used to move bytes from the USB 帧 into the 环形缓冲区. If the 环形缓冲区 is full, bytes are dropped. A real 驱动程序 would likely either apply USB-level 流控制 (stop arming new reads) or grow the 缓冲区; for the lab, dropping is acceptable.
+这是一个带有环绕处理的环形缓冲区入队操作。`usbd_copy_out` 辅助函数用于将字节从 USB 帧移动到环形缓冲区。如果环形缓冲区已满，则丢弃字节。真正的驱动程序可能会应用 USB 级别的流控制（停止武装新读取）或增大缓冲区；对于实验而言，丢弃是可以接受的。
 
-The bulk-write 回调's helper to dequeue data is the mirror image:
+批量写回调的出队辅助函数是它的镜像：
 
 ```c
 static unsigned int
@@ -1331,7 +1331,7 @@ myfirst_usb_tx_dequeue(struct myfirst_usb_softc *sc,
 }
 ```
 
-The character-设备 methods are straightforward. Open checks that the 设备 is not already open, sets the open flag, and arms the read channel:
+字符设备方法很直接。Open 检查设备是否未打开，设置打开标志，并武装读通道：
 
 ```c
 static int
@@ -1355,7 +1355,7 @@ myfirst_usb_open(struct cdev *dev, int flags, int devtype, struct thread *td)
 }
 ```
 
-Close clears the open flag and stops the read channel:
+Close 清除打开标志并停止读通道：
 
 ```c
 static int
@@ -1374,7 +1374,7 @@ myfirst_usb_close(struct cdev *dev, int flags, int devtype, struct thread *td)
 }
 ```
 
-Read 块 until data is available, then copies bytes from the 环形缓冲区 to userspace:
+Read 阻塞直到数据可用，然后将字节从环形缓冲区复制到用户空间：
 
 ```c
 static int
@@ -1419,9 +1419,9 @@ myfirst_usb_read(struct cdev *dev, struct uio *uio, int flags)
 }
 ```
 
-Notice the pattern: the 互斥锁 is held while manipulating the 环形缓冲区, but it is released around the `uiomove` call, because `uiomove` can sleep (to fault in user pages) and sleeping while holding a 互斥锁 is forbidden. The 互斥锁 is reacquired after `uiomove` returns.
+注意这个模式：操作环形缓冲区时持有互斥锁，但在 `uiomove` 调用周围释放它，因为 `uiomove` 可能睡眠（用于缺页处理），而持有互斥锁时睡眠是被禁止的。`uiomove` 返回后重新获取互斥锁。
 
-Write is the mirror: copy bytes from user to TX 缓冲区, then kick the write channel:
+Write 是镜像操作：将字节从用户空间复制到 TX 缓冲区，然后激活写通道：
 
 ```c
 static int
@@ -1467,95 +1467,95 @@ myfirst_usb_write(struct cdev *dev, struct uio *uio, int flags)
 }
 ```
 
-Two things are worth noticing in write. First, when the TX 缓冲区 is full, the write handler sleeps on `sc_tx_count`; the write 回调's `USB_ST_TRANSFERRED` branch calls `wakeup(&sc_tx_count)` after draining some bytes, which wakes the sleeping writer. Second, the write handler calls `usbd_transfer_start` on every chunk it enqueues. This is safe (starting an already-running channel is a no-op) and it ensures the write 回调 is nudged even if the channel had gone idle.
+Write 中有两点值得注意。第一，当 TX 缓冲区满时，写处理程序在 `sc_tx_count` 上睡眠；写回调的 `USB_ST_TRANSFERRED` 分支在排空一些字节后调用 `wakeup(&sc_tx_count)`，唤醒睡眠的写入者。第二，写处理程序在入队的每个块上都调用 `usbd_transfer_start`。这是安全的（启动已在运行的通道是无操作），并且确保即使通道已空闲，写回调也会被触发。
 
-With these four cdev methods and the three 传输回调, you have a complete minimum-viable USB echo 驱动程序. The full source is approximately three hundred lines: short enough to fit on a single screen, concrete enough to exercise the real API.
+有了这四个 cdev 方法和三个传输回调，你就有了一个完整的最小可用 USB echo 驱动程序。完整源码大约三百行：短到可以放在一个屏幕上，具体到可以练习真实的 API。
 
-### Choosing Between `usb_fifo` and a Custom `cdevsw`
+### 在 `usb_fifo` 和自定义 `cdevsw` 之间选择
 
-When a USB驱动程序 needs to expose a `/dev` entry to userland, FreeBSD offers two approaches. The first is the `usb_fifo` 框架, a generic byte-stream abstraction that gives you `/dev/ugenN.M.epM` style nodes with read, write, poll, and a small ioctl 接口. You declare a `struct usb_fifo_methods` with open, close, start-read, start-write, stop-read, and stop-write 回调, and the 框架 handles the cdev plumbing and the queueing. This is the path of least resistance; `uhid(4)` and `ucom(4)` both use it.
+当 USB 驱动程序需要向用户空间暴露 `/dev` 条目时，FreeBSD 提供了两种方式。第一种是 `usb_fifo` 框架，一个通用的字节流抽象，提供 `/dev/ugenN.M.epM` 风格的节点，支持 read、write、poll 和小型 ioctl 接口。你声明一个 `struct usb_fifo_methods`，包含 open、close、start-read、start-write、stop-read 和 stop-write 回调，框架处理 cdev 管道和队列。这是阻力最小的路径；`uhid(4)` 和 `ucom(4)` 都使用它。
 
-The second approach is a custom `cdevsw`, the same pattern you practised in Chapter 24. This gives you total control over the user 接口 at the cost of writing more code. It is appropriate when the 驱动程序 needs a very specific ioctl surface, when the read/write semantics do not fit a byte stream (for example, a message-oriented protocol), or when the 驱动程序 already fits poorly into the `usb_fifo` model.
+第二种方式是自定义 `cdevsw`，与你在第24章练习的模式相同。这让你完全控制用户接口，代价是编写更多代码。当驱动程序需要非常特定的 ioctl 接口、当读/写语义不适合字节流（例如面向消息的协议）时，或者当驱动程序已经不太适合 `usb_fifo` 模型时，这是合适的选择。
 
-For the running example we have built, a custom `cdevsw` is the right choice because we wrote the 附加 method that calls `make_dev` and the 分离 method that calls `destroy_dev`, which is exactly what a custom `cdevsw` requires. For a 驱动程序 that exposes a byte stream (a serial adapter, say), `usb_fifo` is simpler. When you write your next USB驱动程序, look at both options and pick the one whose 接口 matches your problem.
+对于我们构建的示例，自定义 `cdevsw` 是正确的选择，因为我们编写了调用 `make_dev` 的附加方法和调用 `destroy_dev` 的分离方法，这正是自定义 `cdevsw` 所需要的。对于暴露字节流的驱动程序（例如串行适配器），`usb_fifo` 更简单。当你编写下一个 USB 驱动程序时，查看两个选项，选择其接口匹配你问题的那一个。
 
-### Error Handling and Retry Policy
+### 错误处理和重试策略
 
-The retry loop that our bulk-read 回调 uses, "on any error, rearm and try again," is a reasonable default for ro总线t 驱动程序. But it is not the only policy, and sometimes it is the wrong one.
+我们的批量读回调使用的重试循环，"在任何错误上重新武装并重试"，对于健壮的驱动程序来说是一个合理的默认值。但这不是唯一的策略，有时它是错误的。
 
-For a 设备 that might genuinely go away mid-transfer (a USB adapter whose physical connection has been removed before the 框架 has had a chance to notice), rearming indefinitely is a waste; the transfers will keep failing until 分离 is called. Adding a small retry counter and giving up after, say, five consecutive errors, keeps the log from filling with noise.
+对于可能在传输中途真正消失的设备（在框架有机会注意到之前物理连接已被移除的 USB 适配器），无限期重新武装是浪费的；传输将持续失败直到调用分离。添加一个小的重试计数器，在连续五次错误后放弃，可以防止日志被噪音填满。
 
-For a 设备 that implements a strict request-response protocol, an error might invalidate the entire session. In that case, the 回调 should not rearm; instead, it should mark the 驱动程序 as "in error" and let the user close and reopen the 设备 to reset.
+对于实现严格请求-响应协议的设备，一个错误可能使整个会话失效。在这种情况下，回调不应重新武装；而应将驱动程序标记为"出错"，让用户关闭并重新打开设备以重置。
 
-For a 设备 that supports stall-and-clear as a normal flow-control mechanism, the `usbd_xfer_set_stall` path is in the happy path, not the error path. Some class protocols use stalls to signal "I am not ready right now"; the 框架's automatic clear-stall machinery handles this transparently.
+对于支持停滞和清除作为正常流控制机制的设备，`usbd_xfer_set_stall` 路径在正常路径中，而不是错误路径中。一些类协议使用停滞来发出"我现在没准备好"的信号；框架的自动清除停滞机制透明地处理这一点。
 
-Your choice of retry policy should match the real behaviour of the 设备 you are writing for. When in doubt, start with the simple "rearm on error" default, observe what happens when you plug and unplug the 设备 repeatedly, and refine from there.
+你选择的重试策略应与你要编写的设备的实际行为匹配。如有疑问，从简单的"出错时重新武装"默认值开始，观察反复插拔设备时会发生什么，然后据此改进。
 
-### Timeouts and Their Consequences
+### 超时及其后果
 
-A timeout on a USB transfer is not just a safety net against hardware stalls; it is an explicit statement about how long the 驱动程序 is willing to wait for an operation to complete before treating it as a failure. Choosing a timeout is a design decision that interacts with many other parts of the 驱动程序, and getting it right requires thinking through several scenarios.
+USB 传输上的超时不仅是针对硬件停滞的安全网；它是关于驱动程序愿意等待操作完成多长时间后再将其视为失败的明确声明。选择超时是一个设计决策，与驱动程序的许多其他部分交互，正确把握需要思考几个场景。
 
-The configuration field `timeout` in `struct usb_config` is measured in milliseconds. A value of zero means "no timeout"; the transfer will wait indefinitely. A positive value means "if the transfer has not completed after this many milliseconds, cancel it and deliver a timeout error to the 回调."
+`struct usb_config` 中的 `timeout` 配置字段以毫秒为单位。零值表示"无超时"；传输将无限期等待。正值表示"如果传输在这许多毫秒后仍未完成，取消它并向回调传递超时错误。"
 
-For a read channel on a bulk 端点, the usual choice is zero. Reads on bulk channels are waiting for the 设备 to have something to say, and if the 设备 is silent for minutes, that is not necessarily an error. A timeout would force the 驱动程序 to rearm the read every few seconds, which wastes time and produces noise in the log.
+对于批量端点上的读通道，通常选择是零。批量通道上的读取在等待设备有话要说，如果设备沉默几分钟，那不一定是错误。超时会强制驱动程序每几秒重新武装读取，这浪费时间并在日志中产生噪音。
 
-For a write channel, the usual choice is a modest positive value like 5000 (five seconds). If the 设备 fails to drain its FIFO in that time, something is wrong; rather than 块 an indefinite-length write, the 驱动程序 returns an error to userland, which can retry if it wishes.
+对于写通道，通常选择是适度的正值，如 5000（五秒）。如果设备在那段时间内未能排空其 FIFO，说明出了问题；驱动程序不是阻塞一个无限长的写入，而是向用户空间返回错误，用户空间可以在需要时重试。
 
-For an interrupt-IN channel polling for status updates, the usual choice is either zero (like a bulk read) or a timeout that matches the expected polling interval from the 端点 描述符's `bInterval` field. Matching `bInterval` gives the 驱动程序 an explicit "I should have heard from the 设备 by now" signal.
+对于轮询状态更新的中断输入通道，通常选择是零（像批量读取一样）或与端点描述符的 `bInterval` 字段中的预期轮询间隔匹配的超时。匹配 `bInterval` 给驱动程序一个明确的"我现在应该已经收到设备的消息了"信号。
 
-For a 控制传输, timeouts matter most, because 控制传输 are how the 驱动程序 configures the 设备, and a 设备 that does not respond to configuration is wedged. A timeout of 500 to 2000 milliseconds is common. If the 设备 does not respond to a configuration request in a few seconds, the 驱动程序 should assume something is wrong.
+对于控制传输，超时最重要，因为控制传输是驱动程序配置设备的方式，而不响应配置的设备是卡住的。500 到 2000 毫秒的超时很常见。如果设备在几秒内不响应配置请求，驱动程序应假定出了问题。
 
-What happens when a timeout fires? The 框架 calls the 回调 with `USB_ERR_TIMEOUT` as the error. The 回调 typically treats this as a transient failure and rearms (for repeating channels) or returns an error to the caller (for one-shot operations). A repeating read channel that keeps timing out is probably talking to a 设备 that is not responding; after a few consecutive timeouts, it may be worth escalating by calling `usbd_transfer_unsetup` or by logging a more visible warning.
+超时触发时会发生什么？框架以 `USB_ERR_TIMEOUT` 作为错误调用回调。回调通常将此视为瞬时失败并重新武装（对于重复通道）或向调用者返回错误（对于一次性操作）。持续超时的重复读通道可能正在与不响应的设备通信；在连续几次超时后，可能值得通过调用 `usbd_transfer_unsetup` 或记录更明显的警告来升级。
 
-One subtle interaction is worth mentioning: if the transfer has a timeout and the 驱动程序 also sets `pipe_bof` (pipe 块ed on failure), a timeout will 块 the pipe until the 驱动程序 explicitly clears the 块. This is usually what you want, because the pipe may be in an inconsistent state, and clearing the 块 (by submitting a fresh setup, or by calling `usbd_transfer_start`) is a good point to log what happened and decide what to do next.
+有一个微妙的交互值得一提：如果传输有超时且驱动程序还设置了 `pipe_bof`（管道失败时阻塞），超时将阻塞管道，直到驱动程序显式清除阻塞。这通常是你想要的，因为管道可能处于不一致状态，而清除阻塞（通过提交新的设置，或调用 `usbd_transfer_start`）是记录发生了什么并决定下一步行动的好时机。
 
-### What Goes Wrong When Transfer Setup Fails
+### 传输设置失败时会出现什么问题
 
-The `usbd_transfer_setup` call can fail for several reasons. Understanding each is useful both for debugging your own 驱动程序 and for reading the FreeBSD source when you encounter failures.
+`usbd_transfer_setup` 调用可能因几个原因失败。理解每一个原因对于调试你自己的驱动程序以及在你遇到失败时阅读 FreeBSD 源代码都很有用。
 
-**Endpoint mismatch.** If the configuration array asks for an 端点 with a specific type/direction pair that does not exist on the 接口, the call fails with `USB_ERR_NO_PIPE`. This usually means the 匹配表 matched a 设备 that has a different 描述符 layout than the 驱动程序 expected; it is a bug in the 驱动程序.
+**端点不匹配。** 如果配置数组请求一个在接口上不存在的具有特定类型/方向对的端点，调用将以 `USB_ERR_NO_PIPE` 失败。这通常意味着匹配表匹配了一个具有不同描述符布局的设备，与驱动程序预期不符；这是驱动程序中的一个错误。
 
-**Unsupported transfer type.** If the configuration specifies `UE_ISOCHRONOUS` on a 主机控制器 that does not support 等时传输, or if the bandwidth reservation cannot be satisfied, the call fails. Isochronous is the most complex transfer type and the most likely to have platform-specific limitations.
+**不支持的传输类型。** 如果配置在不支持等时传输的主机控制器上指定了 `UE_ISOCHRONOUS`，或者带宽预留无法满足，调用将失败。等时传输是最复杂的传输类型，也是最有可能具有平台特定限制的。
 
-**Out of memory.** The 框架 allocates DMA-capable 缓冲区 for the channels. If memory is low, the allocation fails. This is rare on modern systems but can happen on embedded platforms with tight memory budgets.
+**内存不足。** 框架为通道分配支持 DMA 的缓冲区。如果内存不足，分配将失败。这在现代系统上很少见，但在内存预算紧张的嵌入式平台上可能发生。
 
-**Missing or invalid attributes.** If the configuration has a 缓冲区 size of zero, or a negative 帧 count, or an invalid flag combination, the call fails. Check the configuration against the declarations in `/usr/src/sys/dev/usb/usbdi.h`.
+**缺少或无效的属性。** 如果配置的缓冲区大小为零、帧计数为负数或标志组合无效，调用将失败。对照 `/usr/src/sys/dev/usb/usbdi.h` 中的声明检查配置。
 
-**Power management states.** If the 设备 has been suspended or is in a low-power state, some transfer setup requests will fail. This is mainly relevant for 驱动程序 that handle USB selective suspend.
+**电源管理状态。** 如果设备已挂起或处于低功耗状态，一些传输设置请求将失败。这主要与处理 USB 选择性挂起的驱动程序相关。
 
-When `usbd_transfer_setup` fails, the error code is an `usb_error_t` value, not a standard errno. The definitions are in `/usr/src/sys/dev/usb/usbdi.h`. The function `usbd_errstr` converts an error code to a printable string; use it in your `设备_printf` to make diagnostic messages informative.
+当 `usbd_transfer_setup` 失败时，错误码是 `usb_error_t` 值，而不是标准的 errno。定义在 `/usr/src/sys/dev/usb/usbdi.h` 中。函数 `usbd_errstr` 将错误码转换为可打印字符串；在你的 `device_printf` 中使用它来使诊断消息信息丰富。
 
-### A Detail About `pipe_bof`
+### 关于 `pipe_bof` 的细节
 
-We mentioned `pipe_bof` (pipe 块ed on failure) as a flag in the transfer configuration, but the motivation for it deserves a closer look. USB 端点 are conceptually single-threaded from the 设备's perspective. When the host submits a bulk-OUT 数据包, the 设备 must process that 数据包 before accepting another. If the 数据包 fails, the 设备 may be in an indeterminate state, and the next 数据包 should not be sent until the 驱动程序 has had a chance to resynchronise.
+我们在传输配置中提到 `pipe_bof`（管道失败时阻塞）作为一个标志，但它的动机值得更仔细地审视。从设备的角度来看，USB 端点在概念上是单线程的。当主机提交一个批量输出数据包时，设备必须先处理该数据包才能接受另一个。如果数据包失败，设备可能处于不确定状态，在驱动程序有机会重新同步之前不应该发送下一个数据包。
 
-`pipe_bof` tells the 框架 to pause the pipe when a transfer fails. The next `usbd_transfer_submit` will not actually start a hardware operation; instead, the 框架 waits until the 驱动程序 explicitly calls `usbd_transfer_start` on the channel, which acts as a "resume" signal. This lets the 驱动程序 do a clear-stall or otherwise resynchronise before the next transfer begins.
+`pipe_bof` 告诉框架在传输失败时暂停管道。下一次 `usbd_transfer_submit` 实际上不会启动硬件操作；相反，框架会等待，直到驱动程序显式调用通道上的 `usbd_transfer_start`，这充当一个"恢复"信号。这让驱动程序在下一次传输开始之前执行清除停滞或其他重新同步操作。
 
-Without `pipe_bof`, the 框架 would immediately submit the next transfer after a failure, which might run into the same failure before the 驱动程序 has had a chance to react.
+没有 `pipe_bof`，框架会在失败后立即提交下一次传输，这可能在驱动程序有机会反应之前就遇到相同的失败。
 
-Setting `pipe_bof = 1` is the safe default for most 驱动程序. Clearing it is appropriate for 驱动程序 that want to keep a pipeline full even through occasional errors (for example, audio 驱动程序 where a brief glitch is preferable to a synchronous resynchronisation).
+将 `pipe_bof = 1` 设置为大多数驱动程序的安全默认值。清除它适用于希望在即使偶有错误的情况下也保持管道满载的驱动程序（例如，短暂故障优于同步重新同步的音频驱动程序）。
 
-### `short_xfer_ok` and Data-Length Semantics
+### `short_xfer_ok` 和数据长度语义
 
-The `short_xfer_ok` flag is another configuration option whose meaning is worth spelling out. USB 批量传输 do not have an inherent end-of-message marker. If the host has a 缓冲区 of 512 bytes and the 设备 only has 100 bytes to send, what should happen? There are two possible answers.
+`short_xfer_ok` 标志是另一个值得详细说明的配置选项。USB 批量传输没有固有的消息结束标记。如果主机有一个 512 字节的缓冲区而设备只有 100 字节要发送，应该发生什么？有两种可能的答案。
 
-With `short_xfer_ok` clear (the default), a transfer that completes with less data than requested is treated as an error. The 框架 delivers `USB_ERR_SHORT_XFER` to the 回调, and the 驱动程序 must decide whether to retry, ignore, or escalate.
+当 `short_xfer_ok` 清除时（默认），以少于请求数据量完成的传输被视为错误。框架向回调传递 `USB_ERR_SHORT_XFER`，驱动程序必须决定是重试、忽略还是升级。
 
-With `short_xfer_ok` set, a short transfer is treated as success. The 回调 gets `USB_ST_TRANSFERRED` with `actlen` set to the actual number of bytes received. This is almost always what you want for bulk-IN on message-oriented protocols, where the 设备 decides how much data to send.
+当 `short_xfer_ok` 设置时，短传输被视为成功。回调获得 `USB_ST_TRANSFERRED`，`actlen` 设置为实际接收到的字节数。对于面向消息的协议上的批量输入，这几乎总是你想要的，因为设备决定发送多少数据。
 
-There is a corresponding flag for outgoing transfers: `force_short_xfer`. If set, a transfer whose data happens to be an exact multiple of the 端点's maximum 数据包 size will be padded with a zero-length 数据包 at the end to signal "end of message." USB treats a zero-length 数据包 as a valid transaction, and many protocols use it as an explicit boundary marker. The FTDI 驱动程序 sets this flag on its write channel, for example, because the FTDI protocol expects a trailing short 数据包.
+对于传出传输有一个对应的标志：`force_short_xfer`。如果设置，数据恰好是端点最大数据包大小整数倍的传输将在末尾填充一个零长度数据包，以表示"消息结束"。USB 将零长度数据包视为有效事务，许多协议将其用作显式边界标记。例如，FTDI 驱动程序在其写通道上设置了这个标志，因为 FTDI 协议期望一个尾随短数据包。
 
-Knowing which flag is appropriate requires knowing the protocol the 设备 implements. When you write a 驱动程序 for a 设备 documented with a public protocol specification, check the specification for how it handles boundaries. When you write a 驱动程序 for a poorly-documented 设备, set `short_xfer_ok` on reads (you can always count the bytes), and test both settings of `force_short_xfer` on writes to see which the 设备 accepts.
+知道哪个标志合适需要了解设备实现的协议。当你为有公开协议规范的设备编写驱动程序时，检查规范关于如何处理边界的说明。当你为文档不完善的设备编写驱动程序时，在读取上设置 `short_xfer_ok`（你总是可以计数字节），并在写入上测试 `force_short_xfer` 的两种设置，看设备接受哪种。
 
-### Locking Rules Around Transfers
+### 关于传输的锁定规则
 
-The USB 框架 imposes two locking rules that are essential to get right.
+USB 框架强制两个必须正确掌握的锁定规则。
 
-First, the 互斥锁 you pass to `usbd_transfer_setup` is held by the 框架 around every invocation of the 回调. You do not need to acquire it inside the 回调; it is already held. You also must not release it inside the 回调; doing so breaks the 框架's assumption and can cause random failures.
+第一，你传递给 `usbd_transfer_setup` 的互斥锁在每次调用回调时由框架持有。你不需要在回调内部获取它；它已经被持有。你也不得在回调内部释放它；这样做会破坏框架的假设，并可能导致随机故障。
 
-Second, every call from 驱动程序 code (not from the 回调) to one of `usbd_transfer_start`, `usbd_transfer_stop`, `usbd_transfer_submit`, `usbd_transfer_drain`, and `usbd_transfer_pending` must be made with the 互斥锁 held. This is because these functions read and write fields inside the transfer object that the 回调 also touches, and the 互斥锁 is what serialises access.
+第二，从驱动程序代码（不是从回调）到 `usbd_transfer_start`、`usbd_transfer_stop`、`usbd_transfer_submit`、`usbd_transfer_drain` 和 `usbd_transfer_pending` 的每次调用都必须在持有互斥锁的情况下进行。这是因为这些函数读取和写入传输对象内部回调也触及的字段，而互斥锁正是序列化访问的手段。
 
-Practically, this means most 驱动程序 code that interacts with transfers looks like:
+实际上，这意味着大多数与传输交互的驱动程序代码看起来像这样：
 
 ```c
 mtx_lock(&sc->sc_mtx);
@@ -1563,7 +1563,7 @@ usbd_transfer_start(sc->sc_xfer[MYFIRST_USB_BULK_DT_WR]);
 mtx_unlock(&sc->sc_mtx);
 ```
 
-or in longer critical sections:
+或者在更长的临界区中：
 
 ```c
 mtx_lock(&sc->sc_mtx);
@@ -1575,49 +1575,49 @@ if (!usbd_transfer_pending(sc->sc_xfer[MYFIRST_USB_BULK_DT_WR]))
 mtx_unlock(&sc->sc_mtx);
 ```
 
-Drivers that violate these rules occasionally appear to work but fail intermittently on load, under heavy I/O, or during 分离. Getting the locking right from the start saves many hours of debugging later.
+违反这些规则的驱动程序偶尔看起来工作正常，但在负载、高 I/O 或分离期间间歇性失败。从一开始就正确掌握锁定可以节省以后许多小时的调试时间。
 
-### 总结 Section 3
+### 第3节总结
 
-Section 3 has shown how data flows through a USB驱动程序. A configuration array declares the channels, `usbd_transfer_setup` allocates them, the 回调 drive them through the three-state machine, and `usbd_transfer_unsetup` tears them down. The 框架 abstracts away the hardware details: DMA 缓冲区, 帧 scheduling, 端点 arbitration, stall handling. The 驱动程序's job is to write 回调 that handle completion and to arrange the flow of data through the 回调.
+第3节展示了数据如何在 USB 驱动程序中流动。配置数组声明通道，`usbd_transfer_setup` 分配它们，回调通过三状态机驱动它们，`usbd_transfer_unsetup` 拆除它们。框架抽象掉了硬件细节：DMA 缓冲区、帧调度、端点仲裁、停滞处理。驱动程序的工作是编写处理完成的回调，并安排数据通过回调流动。
 
-Three themes are worth carrying forward. First, the three-state state machine (`USB_ST_SETUP`, `USB_ST_TRANSFERRED`, `USB_ST_ERROR`) is the same in every channel, regardless of transfer type. Learning to read a USB 回调 means learning to parse this state machine; once you know it, every 回调 in every USB驱动程序 in the tree is legible. Second, the `struct usb_page_cache` abstraction is the only safe way to move data into and out of USB 缓冲区. Never bypass `usbd_copy_in` and `usbd_copy_out`. Third, the locking discipline around `usbd_transfer_start`, `_stop`, and `_submit` is not optional; every call from 驱动程序 code must be made under the 互斥锁.
+有三个主题值得铭记。第一，三状态状态机（`USB_ST_SETUP`、`USB_ST_TRANSFERRED`、`USB_ST_ERROR`）在每个通道中都是相同的，无论传输类型如何。学会阅读 USB 回调就是学会解析这个状态机；一旦你掌握了它，树中每个 USB 驱动程序的每个回调都是可读的。第二，`struct usb_page_cache` 抽象是在 USB 缓冲区内外移动数据的唯一安全方式。永远不要绕过 `usbd_copy_in` 和 `usbd_copy_out`。第三，围绕 `usbd_transfer_start`、`_stop` 和 `_submit` 的锁定纪律是不可选的；从驱动程序代码发出的每次调用都必须在持有互斥锁的情况下进行。
 
-With Sections 1 through 3 in hand, you have a complete mental model of USB驱动程序 writing: the concepts, the skeleton, and the data pipeline. Section 4 now shifts to the serial side of 第6部分. The UART subsystem is older, simpler in some ways, more constrained in others, and its idioms are different from USB's. But many of the same habits carry over: match against what you support, 附加 in phases that can be cleanly reversed, drive the hardware through a state machine, and respect the locking.
+掌握了第1到第3节，你就拥有了 USB 驱动程序编写的完整思维模型：概念、骨架和数据管道。第4节现在转向第6部分的串行侧。UART 子系统更旧，在某些方面更简单，在其他方面更受限，其惯用语与 USB 不同。但许多相同的习惯延续下来：匹配你支持的内容、可以干净地逆向的阶段化附加、通过状态机驱动硬件、以及尊重锁定纪律。
 
-> **Take a breath.** We have now worked through the USB half of the chapter: the host and 设备 roles, the 描述符 tree, the four transfer types, the 探测/附加/分离 skeleton, and the three-state `USB_ST_SETUP`/`USB_ST_TRANSFERRED`/`USB_ST_ERROR` 回调 machine that every USB驱动程序 runs. The rest of the chapter turns to the serial side: the `uart(4)` 框架 with its `ns8250` reference 驱动程序, integration with the TTY layer and `termios`, the `ucom(4)` bridge used by USB-to-serial adapters, and the tools and labs that let you test both kinds of 驱动程序 without real hardware. If you want to close the book and come back, this is a natural pause.
+> **休息一下。**我们现在已经完成了本章的USB部分：主机和设备角色、描述符树、四种传输类型、probe/attach/detach骨架以及每个USB驱动程序运行的三状态 `USB_ST_SETUP`/`USB_ST_TRANSFERRED`/`USB_ST_ERROR` 回调机。本章的其余部分转向串行方面：带有其 `ns8250` 参考驱动程序的 `uart(4)` 框架、与TTY层和 `termios` 的集成、USB转串行适配器使用的 `ucom(4)` 桥接，以及让你在没有真实硬件的情况下测试两种驱动程序的工具和实验。如果你想合上书稍后再来，这是一个自然的暂停点。
 
-## 第4节： Writing a Serial UART Driver
+## 第4节：编写串行（UART）驱动程序
 
-### From USB to UART: A Shift of Landscape
+### 从USB到UART：场景的转换
 
-Sections 2 and 3 gave you a complete USB驱动程序. The 框架 there was modern in every sense: 热插拔, DMA-aware, message-oriented, richly abstracted. Section 4 now turns to `uart(4)`, FreeBSD's 框架 for driving Universal Asynchronous Receiver/Transmitters. The landscape is different. Many UART chips are older than USB itself, and the 框架's design reflects that. There is no 热插拔 (a 串行端口 is usually soldered to the board). There is no DMA for most parts (the chip has a small FIFO you poll or an interrupt you handle). There is no 描述符 hierarchy (the chip does not advertise its capabilities; you know what you built against). And there is no notion of transfer channels; there is just the port, into which bytes go and out of which bytes come.
+第2节和第3节给了你一个完整的USB驱动程序。那里的框架在每个意义上都是现代的：热插拔、DMA感知、面向消息、丰富抽象。第4节现在转向 `uart(4)`，FreeBSD用于驱动通用异步收发器的框架。场景是不同的。许多UART芯片比USB本身还要老，框架的设计反映了这一点。没有热插拔（串行端口通常焊接在板上）。大多数部分没有DMA（芯片有一个你轮询的小型FIFO或一个你处理的中断）。没有描述符层次结构（芯片不广告其能力；你知道你针对什么构建的）。没有传输通道的概念；只有端口，字节进去，字节出来。
 
-What the 框架 does provide is a disciplined split of responsibilities between three layers. At the bottom sits your 驱动程序, which knows how the chip's 寄存器 work, how its interrupts fire, how its FIFOs behave, and what platform-specific resources (IRQ line, I/O port range, clock source) it needs. In the middle sits the `uart(4)` 框架 itself, which handles registration, baud-rate configuration calculations, 缓冲区ing, TTY integration, and the scheduling of read and write work. At the top sits the TTY layer, which presents the port to userland as `/dev/ttyuN` and `/dev/cuauN` and handles terminal semantics: line editing, signal generation, control characters, and the vast vocabulary of `termios` knobs that `stty(1)` exposes.
+框架确实提供的是三层之间职责的有纪律的分工。底部是你的驱动程序，它知道芯片的寄存器如何工作、其中断如何触发、其FIFO如何行为以及它需要什么平台特定的资源（IRQ线、I/O端口范围、时钟源）。中间是 `uart(4)` 框架本身，处理注册、波特率配置计算、缓冲、TTY集成以及读写工作的调度。顶部是TTY层，它将端口呈现给用户态为 `/dev/ttyuN` 和 `/dev/cuauN` 并处理终端语义：行编辑、信号生成、控制字符以及 `stty(1)` 暴露的庞大 `termios` 旋钮词汇。
 
-You do not write the TTY layer. You do not write most of the `uart(4)` 框架. Your job, when you write a UART 驱动程序, is to implement a small set of hardware-specific methods that the 框架 calls when it needs to do something at the 注册 level. The 框架 then wires those methods into the rest of the 内核's serial machinery for free.
+你不编写TTY层。你不编写 `uart(4)` 框架的大部分。当你编写UART驱动程序时，你的工作是实现一小组硬件特定的方法，框架在需要在寄存器级别做某事时调用这些方法。框架然后将这些方法免费连接到内核其余的串行机制中。
 
-This section walks through that wiring. It covers the layout of the `uart(4)` 框架, the structures and methods you have to fill in, the canonical `ns8250` 驱动程序 as a concrete reference, and the integration with the TTY layer. It ends with the related `ucom(4)` 框架, which is how USB-to-serial bridges expose themselves to userland using the same TTY 接口 as a real UART.
+本节遍历这种连接。它涵盖 `uart(4)` 框架的布局、你必须填充的结构和方法、作为具体参考的经典 `ns8250` 驱动程序以及与TTY层的集成。最后以相关的 `ucom(4)` 框架结束，这是USB转串行桥接器使用与真正UART相同的TTY接口向用户态暴露自己的方式。
 
-### Where the `uart(4)` Framework Lives
+### `uart(4)` 框架位于哪里
 
-The 框架 itself lives in `/usr/src/sys/dev/uart/`. If you list that directory, you see a handful of 框架 files and a family of hardware-specific 驱动程序.
+框架本身位于 `/usr/src/sys/dev/uart/`。如果你列出该目录，你会看到少量框架文件和一系列硬件特定的驱动程序。
 
-The 框架 files are:
+框架文件有：
 
-- `/usr/src/sys/dev/uart/uart.h`: the top-level header that defines the 框架's public API.
-- `/usr/src/sys/dev/uart/uart_总线.h`: the structures for new总线 integration and the per-port softc.
-- `/usr/src/sys/dev/uart/uart_core.c`: the 附加ment logic, the interrupt dispatcher, the polling loop, the link between `uart(4)` and `tty(4)`.
-- `/usr/src/sys/dev/uart/uart_tty.c`: the `ttydevsw` implementation that maps `uart(4)` operations onto `tty(4)` operations.
-- `/usr/src/sys/dev/uart/uart_cpu.h`, `uart_dev_*.c`: platform glue and console registration.
+- `/usr/src/sys/dev/uart/uart.h`：定义框架公共API的顶级头文件。
+- `/usr/src/sys/dev/uart/uart_bus.h`：用于Newbus集成和每个端口softc的结构。
+- `/usr/src/sys/dev/uart/uart_core.c`：附加逻辑、中断分派器、轮询循环、`uart(4)` 和 `tty(4)` 之间的链接。
+- `/usr/src/sys/dev/uart/uart_tty.c`：将 `uart(4)` 操作映射到 `tty(4)` 操作的 `ttydevsw` 实现。
+- `/usr/src/sys/dev/uart/uart_cpu.h`、`uart_dev_*.c`：平台粘合和控制台注册。
 
-The hardware-specific 驱动程序 are files of the form `uart_dev_NAME.c` and occasionally `uart_dev_NAME.h`. The most important of these is `uart_dev_ns8250.c`, which implements the ns8250 family (including the 16450, 16550, 16550A, 16650, 16750, and many compatibles). Because the 16550A is effectively the standard UART for PC-style 串行端口s, this one 驱动程序 handles the majority of actual serial hardware in the world. When you want to learn how a real FreeBSD UART 驱动程序 looks, this is the file to open.
+硬件特定的驱动程序是 `uart_dev_NAME.c` 形式的文件，偶尔有 `uart_dev_NAME.h`。其中最重要的是 `uart_dev_ns8250.c`，它实现了ns8250系列（包括16450、16550、16550A、16650、16750和许多兼容芯片）。因为16550A实际上是PC风格串行端口的标准UART，这一个驱动程序处理了世界上大多数实际的串行硬件。当你想学习真正的FreeBSD UART驱动程序是什么样子时，这就是要打开的文件。
 
-Other 驱动程序 in the directory handle chips that are not 16550-compatible: the Intel MID variant, the PL011 ARM UART used on Raspberry Pi and other ARM boards, the NXP i.MX UART, the Sun Microsystems Z8530, and so on. Each one follows the same pattern: fill in a `struct uart_class` and a `struct uart_ops`, 注册 with the 框架, and implement the hardware access methods.
+目录中的其他驱动程序处理不兼容16550的芯片：Intel MID变体、Raspberry Pi和其他ARM板上使用的PL011 ARM UART、NXP i.MX UART、Sun Microsystems Z8530等。每一个都遵循相同的模式：填充一个 `struct uart_class` 和一个 `struct uart_ops`，向框架注册，并实现硬件访问方法。
 
-### The `uart_class` Structure
+### `uart_class` 结构
 
-Every UART 驱动程序 begins by declaring a `struct uart_class`, which is the hardware 描述符 that the 框架 uses to identify the chip family. The definition lives in `/usr/src/sys/dev/uart/uart_总线.h`. The structure looks like this (paraphrased; the real declaration has a few more fields):
+每个UART驱动程序首先声明一个 `struct uart_class`，这是框架用来标识芯片系列的硬件描述符。定义位于 `/usr/src/sys/dev/uart/uart_bus.h`。结构看起来像这样（简化版；真实声明有更多字段）：
 
 ```c
 struct uart_class {
@@ -1629,17 +1629,17 @@ struct uart_class {
 };
 ```
 
-The `KOBJ_CLASS_FIELDS` macro pulls in the kobj machinery that Chapter 23 introduced (in the context of New总线). A `uart_class` is, at the 内核's abstract-object level, a kobj class whose instances are `uart_softc`. This is how the 框架 can call into 驱动程序-specific methods without needing an `if` ladder: the method dispatch is done by kobj lookup.
+`KOBJ_CLASS_FIELDS` 宏引入了第23章在Newbus上下文中介绍的kobj机制。`uart_class` 在内核的抽象对象层面是一个kobj类，其实例是 `uart_softc`。这就是框架如何能够调用驱动程序特定的方法而无需if阶梯：方法分派通过kobj查找完成。
 
-`uc_ops` is a pointer to the operations structure (coming next), which lists the chip-specific methods.
+`uc_ops` 是指向操作结构（接下来介绍）的指针，它列出了芯片特定的方法。
 
-`uc_range` is how many bytes of 注册 address space the chip uses. For an ns16550-compatible UART, this is 8.
+`uc_range` 是芯片使用的寄存器地址空间的字节数。对于ns16550兼容的UART，这是8。
 
-`uc_rclk` is the reference clock frequency in hertz. The 框架 uses this to compute baud-rate divisors. For a PC-style UART, the reference clock is usually 1,843,200 hertz (a specific multiple of the standard 波特率s).
+`uc_rclk` 是以赫兹为单位的参考时钟频率。框架用它来计算波特率除数。对于PC风格的UART，参考时钟通常是1,843,200赫兹（标准波特率的特定倍数）。
 
-`uc_rshift` is the 注册 address shift. On some 总线es, UART 寄存器 are spaced at intervals other than one byte (for example, every four bytes on some memory-mapped designs). A shift of zero means tight packing; a shift of two means each logical 注册 occupies four bytes of address space.
+`uc_rshift` 是寄存器地址移位。在某些总线上，UART寄存器以一字节以外的间隔排列（例如，在某些内存映射设计上每四字节一个）。移位为零意味着紧密排列；移位为二意味着每个逻辑寄存器占用四字节的地址空间。
 
-For our running example, the class declaration looks like this:
+对于我们的运行示例，类声明看起来像这样：
 
 ```c
 static struct uart_class myfirst_uart_class = {
@@ -1653,11 +1653,11 @@ static struct uart_class myfirst_uart_class = {
 };
 ```
 
-The first three positional arguments are the `KOBJ_CLASS_FIELDS` entries: a name, a method table, and a per-instance size. The named fields are the UART-specific ones. For a 驱动程序 targeting 16550-compatible chips, these values are the conventional defaults.
+前三个位置参数是 `KOBJ_CLASS_FIELDS` 条目：名称、方法表和每个实例的大小。命名字段是UART特定的。对于针对16550兼容芯片的驱动程序，这些值是传统的默认值。
 
-### The `uart_ops` Structure
+### `uart_ops` 结构
 
-The `struct uart_ops` is where the real hardware-specific code lives. It is a table of function pointers that the 框架 calls at specific moments. The definition lives in `/usr/src/sys/dev/uart/uart_cpu.h`:
+`struct uart_ops` 是真正的硬件特定代码所在的地方。它是一个函数指针表，框架在特定时刻调用。定义位于 `/usr/src/sys/dev/uart/uart_cpu.h`：
 
 ```c
 struct uart_ops {
@@ -1670,29 +1670,29 @@ struct uart_ops {
 };
 ```
 
-Each operation takes a `struct uart_bas *` as its first argument. The "bas" stands for "总线 address space"; it is the 框架's abstraction for access to the chip's 寄存器. A 驱动程序 does not know or care whether the chip is in I/O space or in memory-mapped space; it just calls `uart_getreg(bas, offset)` and `uart_setreg(bas, offset, value)` (declared in `/usr/src/sys/dev/uart/uart.h`), and the 框架 routes the access correctly.
+每个操作以 `struct uart_bas *` 作为第一个参数。"bas"代表"总线地址空间"；它是框架对芯片寄存器访问的抽象。驱动程序不知道也不关心芯片是在I/O空间还是在内存映射空间；它只调用 `uart_getreg(bas, offset)` 和 `uart_setreg(bas, offset, value)`（在 `/usr/src/sys/dev/uart/uart.h` 中声明），框架正确路由访问。
 
-Let us go through the six operations in turn.
+让我们逐一看看这六个操作。
 
-`探测` is called when the 框架 needs to know whether a chip of this class is present at a given address. The 驱动程序 typically pokes a 注册, reads it back, and returns zero if the readback matches (suggesting the chip is really there) or a nonzero errno otherwise. For an ns16550, the 探测 writes a test pattern to the scratch 注册 and reads it back.
+`probe` 在框架需要知道给定地址处是否存在该类的芯片时被调用。驱动程序通常写入一个寄存器、读回它，如果读回匹配则返回零（表明芯片确实在那里），否则返回非零errno。对于ns16550，探测向暂存寄存器写入测试模式并读回。
 
-`init` is called to initialise the chip to a known state. The arguments after the bas are `baudrate`, `databits`, `stopbits`, and `奇偶校验`. The 驱动程序 computes the divisor, writes the divisor-latch-access bit, writes the divisor, clears the divisor-latch, sets the line control 注册 for the requested data/stop/奇偶校验 configuration, enables the FIFOs, and enables the chip's interrupts. The exact 注册 sequence for a 16550 is several dozen lines of code and is documented in the chip's data sheet.
+`init` 被调用以将芯片初始化为已知状态。bas之后的参数是 `baudrate`、`databits`、`stopbits` 和 `parity`。驱动程序计算除数、写入除数锁存访问位、写入除数、清除除数锁存、为请求的数据/停止/奇偶校验配置设置线路控制寄存器、启用FIFO并启用芯片的中断。16550的确切寄存器序列有几十行代码，记录在芯片的数据手册中。
 
-`term` is called to shut down the chip. It typically disables interrupts, flushes the FIFOs, and leaves the chip in a safe state.
+`term` 被调用以关闭芯片。它通常禁用中断、刷新FIFO并将芯片留在安全状态。
 
-`putc` sends a single character. This is used by the low-level console path and by polling-based diagnostic output. The 驱动程序 总线y-waits on the transmitter-holding-注册-empty flag, then writes the byte to the transmit 注册.
+`putc` 发送单个字符。这用于低级控制台路径和基于轮询的诊断输出。驱动程序忙等待发送保持寄存器空闲标志，然后将字节写入发送寄存器。
 
-`rxready` returns nonzero if at least one byte is available to read. The 驱动程序 reads the line status 注册 and checks the data-ready bit.
+`rxready` 如果至少有一个字节可读则返回非零。驱动程序读取线路状态寄存器并检查数据就绪位。
 
-`getc` reads a single character. Used by the low-level console for input. The 驱动程序 总线y-waits on the data-ready flag (or the caller ensures `rxready` just returned true), then reads the receive 注册.
+`getc` 读取单个字符。由低级控制台用于输入。驱动程序忙等待数据就绪标志（或调用者确保 `rxready` 刚返回true），然后读取接收寄存器。
 
-These six methods are the entire hardware-specific surface for a UART 驱动程序 at the low level. Everything else (interrupt handling, 缓冲区ing, TTY integration, 热插拔 of PCIe UARTs, console selection) is provided by the 框架. A new UART 驱动程序 is, in effect, a six-function implementation plus a handful of declarations.
+这六个方法是UART驱动程序在低级别的整个硬件特定接口。其他一切（中断处理、缓冲、TTY集成、PCIe UART的热插拔、控制台选择）都由框架提供。一个新的UART驱动程序实际上就是一个六函数实现加上少量声明。
 
-### A Closer Look at `ns8250`
+### 近距离查看 `ns8250`
 
-The ns8250 驱动程序 at `/usr/src/sys/dev/uart/uart_dev_ns8250.c` is the best place to see these methods concretely. It is a mature, production-grade 驱动程序 that handles every variant of the 8250/16450/16550/16550A family. The 注册 definitions it uses (from `/usr/src/sys/dev/ic/ns16550.h`) are the same ones every UART-related header in the PC world uses. When you read this 驱动程序, you are reading, in effect, the reference implementation of a 16550 驱动程序 for FreeBSD.
+位于 `/usr/src/sys/dev/uart/uart_dev_ns8250.c` 的ns8250驱动程序是具体看到这些方法的最佳位置。它是一个成熟的、生产级的驱动程序，处理8250/16450/16550/16550A系列的每个变体。它使用的寄存器定义（来自 `/usr/src/sys/dev/ic/ns16550.h`）与PC世界中每个UART相关头文件使用的相同。当你阅读这个驱动程序时，你实际上在阅读FreeBSD的16550驱动程序的参考实现。
 
-The put-character implementation is instructive for its simplicity:
+发送字符的实现因其简单性而富有教学意义：
 
 ```c
 static void
@@ -1711,13 +1711,13 @@ ns8250_putc(struct uart_bas *bas, int c)
 }
 ```
 
-The loop polls the line status 注册 (LSR) for the transmitter-holding-注册-empty (THRE) flag. When it is set, the transmit holding 注册 is ready to accept a byte. The 驱动程序 writes the byte to the data 注册 (REG_DATA) and then polls again for the transmitter-empty (TEMT) flag to ensure the byte has been shifted out before returning.
+循环轮询线路状态寄存器（LSR）的发送保持寄存器空闲（THRE）标志。当它被设置时，发送保持寄存器准备好接受一个字节。驱动程序将字节写入数据寄存器（REG_DATA），然后再次轮询发送器空闲（TEMT）标志以确保字节在返回之前已被移出。
 
-The `uart_barrier` call is a memory barrier that ensures the write to the data 注册 is visible to the hardware before subsequent reads. On platforms with weak memory ordering, missing this barrier would cause intermittent data loss.
+`uart_barrier` 调用是一个内存屏障，确保对数据寄存器的写入在后续读取之前对硬件可见。在弱内存排序的平台上，缺少此屏障会导致间歇性数据丢失。
 
-The `DELAY(4)` yields four microseconds per iteration, and the `limit` counter is 250,000. Together, they give a one-second timeout before the loop gives up. For a real UART, 250,000 iterations is a cap that should never be reached in normal operation; it is a safety net for the pathological case where the chip is in an unexpected state.
+`DELAY(4)` 每次迭代产生四微秒的延迟，`limit` 计数器为250,000。它们一起在循环放弃之前给出一个一秒的超时。对于真正的UART，250,000次迭代是一个正常操作中永远不应该达到的上限；它是芯片处于意外状态时的安全网。
 
-The 探测 is equally direct:
+探测同样直接：
 
 ```c
 static int
@@ -1733,135 +1733,136 @@ ns8250_probe(struct uart_bas *bas)
 }
 ```
 
-Bits 4 and 5 of the Interrupt Identification Register (IIR) are defined as always-zero for every variant of the 16550 family. If those bits read as one, this is not a real 16550 注册, and the 探测 rejects the address.
+中断标识寄存器（IIR）的第4位和第5位在16550系列的所有变体中均被定义为始终为零。如果这些位读取为1，说明这不是一个真正的16550寄存器，探测函数将拒绝该地址。
 
-You could read the whole 驱动程序 in an afternoon. What you would come away with is a clear mental model: the methods are narrow, the 框架 is large, and the real engineering is in handling the quirks of specific chip revisions (a FIFO bug in the 16550 predecessor, an erratum in some PC chipsets, a signal-detect issue on certain Oxford 设备). A new UART 驱动程序 for a well-behaved chip is genuinely a small file.
+你可以在一个下午读完整个驱动程序。你会获得一个清晰的心智模型：方法是精简的，框架是庞大的，真正的工程在于处理特定芯片版本的怪癖（16550前身的FIFO缺陷、某些PC芯片组的勘误、特定Oxford设备的信号检测问题）。为一个行为良好的芯片编写新的UART驱动程序确实只需要一个小文件。
 
-### The `uart_softc` and How the Framework Uses It
+### `uart_softc` 以及框架如何使用它
 
-Each instance of a UART 驱动程序 has a `struct uart_softc`, defined in `/usr/src/sys/dev/uart/uart_总线.h`. The 框架 allocates one per 附加ed port. Its important fields include a pointer to the `uart_bas` that describes the port's 注册 layout, the I/O resources (the IRQ, the memory range or I/O port range), the TTY 设备 附加ed to this port, the current line parameters, and two byte 缓冲区 (RX and TX) that the 框架 uses internally. The 驱动程序 does not usually allocate its own softc; it uses the 框架's `uart_softc`, with the hardware-specific extensions added through kobj class inheritance.
+每个UART驱动程序实例都有一个 `struct uart_softc`，定义在 `/usr/src/sys/dev/uart/uart_bus.h` 中。框架为每个已附加的端口分配一个实例。其重要字段包括一个指向 `uart_bas` 的指针（描述端口的寄存器布局）、I/O资源（IRQ、内存范围或I/O端口范围）、附加到此端口的TTY设备、当前线路参数，以及框架内部使用的两个字节缓冲区（RX和TX）。驱动程序通常不分配自己的softc；它使用框架的 `uart_softc`，通过kobj类继承添加硬件特定的扩展。
 
-When the 框架 receives an interrupt from a UART, it calls a 框架-internal function that reads the interrupt-identification 注册, decides what kind of work the chip has requested (transmit-ready, receive-data-available, line-status, modem-status), and dispatches to the appropriate handler. The handlers pull data out of the chip's RX FIFO into the 框架's RX 环形缓冲区, or push data from the 框架's TX 环形缓冲区 into the chip's TX FIFO, or update state variables in response to modem-signal changes. The 中断处理程序 returns, and the TTY layer consumes the 环形缓冲区 at its own pace through the 框架's put-character and get-character paths.
+当框架收到来自UART的中断时，它会调用一个框架内部函数，该函数读取中断标识寄存器，判断芯片请求了哪种类型的工作（发送就绪、接收数据可用、线路状态、调制解调器状态），并分发到相应的处理程序。处理程序将数据从芯片的RX FIFO拉入框架内部的RX环形缓冲区，或者将数据从框架的TX环形缓冲区推入芯片的TX FIFO，或者更新状态变量以响应调制解调器信号变化。中断处理程序返回后，TTY层通过框架的put-character和get-character路径按自己的节奏消费环形缓冲区中的数据。
 
-This is why the 驱动程序's `uart_ops` table is so small. The high-volume work (moving bytes between the chip and the 环形缓冲区) is handled by shared 框架 code that reads the chip's 寄存器 through `uart_getreg` and `uart_setreg`. The 驱动程序 only needs to expose the low-level primitives; the composition is done for it.
+这就是为什么驱动程序的 `uart_ops` 表如此之小。大量的工作（在芯片和环形缓冲区之间移动字节）由共享的框架代码处理，该代码通过 `uart_getreg` 和 `uart_setreg` 读写芯片的寄存器。驱动程序只需要暴露底层原语；组合工作已经为它完成了。
 
-### Integration with the TTY Layer
+### 与TTY层集成
 
-Above the `uart(4)` 框架 sits the TTY layer, defined in `/usr/src/sys/kern/tty.c` and friends. A UART port in FreeBSD appears to userland as two `/dev` nodes:
+在 `uart(4)` 框架之上是TTY层，定义在 `/usr/src/sys/kern/tty.c` 及相关文件中。FreeBSD中的UART端口对用户态表现为两个 `/dev` 节点：
 
-- `/dev/ttyuN`: the callin node. Opening it 块 until a carrier detect signal is asserted (which models an incoming call on a modem). It is used for 设备 that answer, not initiate, connections.
-- `/dev/cuauN`: the callout node. Opening it does not wait for carrier detect. It is used for 设备 that initiate connections, or for developers who want to talk to a 串行端口 without pretending it is a modem.
+- `/dev/ttyuN`：呼入节点。打开它会阻塞，直到载波检测信号被置位（这模拟了调制解调器上的来电）。它用于应答而非发起连接的设备。
+- `/dev/cuauN`：呼出节点。打开它不会等待载波检测。它用于发起连接的设备，或者开发者想要与串行端口通信而不需要假装它是调制解调器的情况。
 
-The distinction is historical, dating from the era when 串行端口s were genuinely connected to analog modems with separate "someone is calling" and "I am initiating a call" semantics. FreeBSD preserves the distinction because some embedded and industrial workflows still rely on it, and because the implementation cost is minimal once the TTY layer's "two sides of the same port" pattern is in place.
+这种区别是历史性的，可以追溯到串行端口真正连接到模拟调制解调器的时代，那时有独立的"有人来电"和"我正在拨号"语义。FreeBSD保留了这种区别，因为一些嵌入式和工业工作流仍然依赖它，而且一旦TTY层的"同一端口两侧"模式就位，实现成本是微乎其微的。
 
-The TTY layer calls into the `uart(4)` 框架 through a `ttydevsw` structure whose methods map neatly onto UART operations. The important entries include:
+TTY层通过 `ttydevsw` 结构体调用 `uart(4)` 框架，其方法与UART操作直接对应。重要的条目包括：
 
-- `tsw_open`: called when userland opens the port. The 框架 enables interrupts, powers on the chip, and applies the default `termios`.
-- `tsw_close`: called when the last userland reference is released. The 框架 drains the TX 缓冲区, disables interrupts (unless the port is also a console), and puts the chip in an idle state.
-- `tsw_ioctl`: called for ioctls the TTY layer does not handle itself. Most UART-specific ioctls are handled by the 框架.
-- `tsw_param`: called when `termios` changes. The 框架 reprograms the chip's 波特率, 数据位, 停止位, 奇偶校验, and 流控制.
-- `tsw_outwakeup`: called when there is new data to transmit. The 框架 enables the transmit-ready interrupt if it was disabled; on the next IRQ, the 框架 pushes bytes from the 环形缓冲区 into the chip.
+- `tsw_open`：当用户态打开端口时调用。框架启用中断、给芯片上电并应用默认的 `termios`。
+- `tsw_close`：当最后一个用户态引用被释放时调用。框架排空TX缓冲区、禁用中断（除非端口同时也是控制台）并将芯片置于空闲状态。
+- `tsw_ioctl`：用于TTY层自身不处理的ioctl调用。大多数UART特定的ioctl由框架处理。
+- `tsw_param`：当 `termios` 改变时调用。框架重新编程芯片的波特率、数据位、停止位、奇偶校验和流控制。
+- `tsw_outwakeup`：当有新数据需要发送时调用。框架启用发送就绪中断（如果之前被禁用）；在下一次IRQ时，框架将字节从环形缓冲区推入芯片。
 
-You do not usually have to write any of these. The 框架 in `uart_tty.c` implements them once for every UART 驱动程序. Your 驱动程序's only contribution is the six methods in `uart_ops`.
+你通常不需要编写这些方法中的任何一个。`uart_tty.c` 中的框架为每个UART驱动程序实现了一次。你的驱动程序唯一的贡献是 `uart_ops` 中的六个方法。
 
-### The `termios` Interface in Practice
+### 实践中的 `termios` 接口
 
-When a user runs `stty 115200` on a 串行端口, the following chain of calls happens:
+当用户在串行端口上运行 `stty 115200` 时，会发生以下调用链：
 
-1. `stty(1)` opens the port and issues a `TIOCSETA` ioctl carrying the new `struct termios`.
-2. The 内核 TTY layer receives the ioctl and updates its internal copy of the port's termios.
-3. The TTY layer calls `tsw_param` on the port's `ttydevsw`, passing the new termios.
-4. The `uart(4)` 框架's `uart_param` implementation looks at the termios fields (`c_ispeed`, `c_ospeed`, `c_cflag` with its `CSIZE`, `CSTOPB`, `PARENB`, `PARODD`, `CRTSCTS` sub-bits) and calls the 驱动程序's `init` method with the corresponding raw values.
-5. The 驱动程序's `init` method computes the divisor, writes the line-control 注册, reconfigures the FIFO, and returns.
+1. `stty(1)` 打开端口并发出一个携带新 `struct termios` 的 `TIOCSETA` ioctl。
+2. 内核TTY层接收该ioctl并更新其内部端口termios副本。
+3. TTY层在端口的 `ttydevsw` 上调用 `tsw_param`，传递新的termios。
+4. `uart(4)` 框架的 `uart_param` 实现查看termios字段（`c_ispeed`、`c_ospeed`、`c_cflag` 及其 `CSIZE`、`CSTOPB`、`PARENB`、`PARODD`、`CRTSCTS` 子位），并使用对应的原始值调用驱动程序的 `init` 方法。
+5. 驱动程序的 `init` 方法计算分频器、写入线路控制寄存器、重新配置FIFO并返回。
 
-None of this requires the 驱动程序 to know about termios. The translation from termios bits to raw integers is done by the 框架. The 驱动程序 sees only the raw values: baudrate in bits per second, databits (usually 5 through 8), stopbits (1 or 2), and a 奇偶校验 code.
+这一切都不需要驱动程序了解termios。从termios位到原始整数的转换由框架完成。驱动程序只看到原始值：以比特/秒为单位的波特率、数据位（通常5到8）、停止位（1或2）以及奇偶校验代码。
 
-This separation is what lets FreeBSD run the same `uart(4)` 框架 on top of radically different chips. A 16550 驱动程序 and a PL011 驱动程序 both implement the same six `uart_ops` methods. The termios-to-raw translation happens once, in 框架 code, for every chip family.
+这种分离使得FreeBSD能够在截然不同的芯片上运行相同的 `uart(4)` 框架。16550驱动程序和PL011驱动程序都实现了相同的六个 `uart_ops` 方法。termios到原始值的转换在每个芯片系列中只发生一次，在框架代码中完成。
 
-### Flow Control at the Register Level
+### 寄存器级别的流控制
 
-Hardware 流控制 is typically driven by two signals on the UART: CTS (clear to send) and RTS (request to send). When CTS is asserted by the remote side, it is telling the local transmitter "I am ready for more data." When the local side asserts RTS, it is telling the remote transmitter the same thing. When either signal is not asserted, the corresponding transmitter pauses.
+硬件流控制通常由UART上的两个信号驱动：CTS（清除发送）和RTS（请求发送）。当远端置位CTS时，它告诉本地发送方"我准备好接收更多数据了"。当本地端置位RTS时，它告诉远端发送方同样的事情。当任一信号未被置位时，相应的发送方暂停。
 
-In a 16550, RTS is driven by a bit in the modem control 注册 (MCR), and CTS is read from a bit in the modem status 注册 (MSR). The 框架 exposes 流控制 through termios (`CRTSCTS` flag), through ioctls (`TIOCMGET`, `TIOCMSET`, `TIOCMBIS`, `TIOCMBIC`), and through automatic responses to FIFO fill levels.
+在16550中，RTS由调制解调器控制寄存器（MCR）中的一个位驱动，CTS从调制解调器状态寄存器（MSR）中的一个位读取。框架通过termios（`CRTSCTS` 标志）、通过ioctl（`TIOCMGET`、`TIOCMSET`、`TIOCMBIS`、`TIOCMBIC`）以及通过对FIFO填充级别的自动响应来暴露流控制。
 
-When the receive FIFO fills past a threshold, the 驱动程序 deasserts RTS to ask the remote side to stop transmitting. When the FIFO drains below a different threshold, the 驱动程序 reasserts RTS. When the modem-status-interrupt fires because CTS changed, the 中断处理程序 enables or disables the transmit path accordingly. All of this is 框架 logic; the 驱动程序 only exposes the 注册-level primitives.
+当接收FIFO填充超过阈值时，驱动程序撤销RTS以请求远端停止发送。当FIFO排空到另一个阈值以下时，驱动程序重新置位RTS。当因CTS变化而触发调制解调器状态中断时，中断处理程序相应地启用或禁用发送路径。所有这些都是框架逻辑；驱动程序只需要暴露寄存器级别的原语。
 
-Software 流控制 (XON/XOFF) is handled entirely in the TTY layer, by inserting and interpreting the XON (0x11) and XOFF (0x13) bytes in the data stream. The UART 驱动程序 has no role in it.
+软件流控制（XON/XOFF）完全由TTY层处理，通过在数据流中插入和解释XON（0x11）和XOFF（0x13）字节来实现。UART驱动程序在其中不承担任何角色。
 
-### The Interrupt Handler Path in Detail
+### 中断处理程序路径详解
 
-Beyond the six `uart_ops` methods, a real UART 驱动程序 usually implements an 中断处理程序. The 框架 provides a generic one in `uart_core.c` that works for the vast majority of chips, but the 驱动程序 can supply its own for chips with unusual behaviour. To understand what the 框架's generic handler does, and when you might want to override it, it helps to trace the handler's path.
+除了六个 `uart_ops` 方法之外，实际的UART驱动程序通常还实现一个中断处理程序。框架在 `uart_core.c` 中提供了一个通用中断处理程序，适用于绝大多数芯片，但驱动程序可以为具有异常行为的芯片提供自己的处理程序。要理解框架的通用处理程序做了什么，以及何时需要覆盖它，跟踪处理程序的路径会很有帮助。
 
-When the hardware interrupt fires, the 框架's ISR reads the interrupt identification 注册 (IIR) through `uart_getreg`. The IIR encodes which of four conditions triggered the interrupt: line-status (a framing error or overrun occurred), received-data-available (at least one byte is in the receive FIFO), transmitter-holding-注册-empty (the TX FIFO wants more data), or modem-status (a modem signal changed state).
+当硬件中断触发时，框架的ISR通过 `uart_getreg` 读取中断标识寄存器（IIR）。IIR编码了四种触发中断的条件之一：线路状态（发生了帧错误或溢出）、接收数据可用（接收FIFO中至少有一个字节）、发送保持寄存器空闲（TX FIFO需要更多数据）或调制解调器状态（调制解调器信号状态改变）。
 
-For line-status interrupts, the 框架 logs a warning (or increments a counter) and continues.
+对于线路状态中断，框架记录警告（或递增计数器）并继续。
 
-For received-data-available, the 框架 reads bytes out of the chip's RX FIFO one at a time, pushing each into the 驱动程序's internal RX 环形缓冲区. The loop continues until the receive-data-available flag clears. Once the 环形缓冲区 has bytes, the 框架 signals the TTY layer's input path, which will pull bytes out as the consumer is ready.
+对于接收数据可用中断，框架逐字节从芯片的RX FIFO中读出数据，将每个字节推入框架内部的RX环形缓冲区。循环持续到接收数据可用标志清除为止。一旦环形缓冲区有数据，框架向TTY层的输入路径发出信号，TTY层将在消费者就绪时拉取字节。
 
-For transmitter-holding-注册-empty, the 框架 pulls bytes out of its internal TX 环形缓冲区 and pushes them into the chip's TX FIFO one at a time. The loop continues until the TX FIFO is full or the 环形缓冲区 is empty. Once the 环形缓冲区 is empty, the 框架 disables the transmit interrupt so the chip does not keep firing; the next `tsw_outwakeup` call (from the TTY layer, when there is new data) will reenable it.
+对于发送保持寄存器空闲中断，框架从其内部TX环形缓冲区拉取字节并逐个推入芯片的TX FIFO。循环持续到TX FIFO满或环形缓冲区空为止。一旦环形缓冲区为空，框架禁用发送中断，以免芯片持续触发；下一次 `tsw_outwakeup` 调用（来自TTY层，当有新数据时）将重新启用它。
 
-For modem-status changes, the 框架 updates its internal modem-signal state and signals the TTY layer if the change is significant (for example, CTS deassertion when hardware 流控制 is enabled).
+对于调制解调器状态变化，框架更新其内部调制解调器信号状态，并在变化显著时（例如，启用硬件流控制时CTS被撤销）向TTY层发出信号。
 
-This is all done in interrupt context with the 驱动程序's 互斥锁 held. The 互斥锁 is a spin 互斥锁 (`MTX_SPIN`) for UART 驱动程序, because taking a sleepable 互斥锁 in an 中断处理程序 is forbidden. The 框架's helpers know this and use appropriate primitives.
+所有这些都在中断上下文中完成，并持有驱动程序的互斥锁。对于UART驱动程序，互斥锁是自旋互斥锁（`MTX_SPIN`），因为在中断处理程序中获取可睡眠的互斥锁是被禁止的。框架的辅助函数知道这一点，并使用适当的原语。
 
-When might a 驱动程序 want to override the generic handler? Three situations come to mind.
+驱动程序何时需要覆盖通用处理程序？有三种情况值得考虑。
 
-First, if the chip has unusual FIFO semantics. Some chips do not clear their interrupt identification 寄存器 in the obvious way; you have to drain the FIFO completely, or you have to read a specific 注册 to acknowledge. If your chip's data sheet describes such a quirk, you override the handler with chip-specific logic.
+第一种，芯片具有异常的FIFO语义。某些芯片不以常规方式清除其中断标识寄存器；你必须完全排空FIFO，或者必须读取特定寄存器来确认。如果你的芯片数据手册描述了这样的怪癖，你需要用芯片特定的逻辑覆盖处理程序。
 
-Second, if the chip has DMA support you want to use. The 框架's generic handler is PIO (programmed I/O): one byte per 注册 access. A chip with a DMA engine could move many bytes per interrupt, significantly reducing CPU overhead at high 波特率s. Implementing DMA requires chip-specific code.
+第二种，你想使用芯片的DMA支持。框架的通用处理程序是PIO（编程I/O）方式：每次寄存器访问处理一个字节。带有DMA引擎的芯片可以在每次中断中移动多个字节，在高波特率下显著降低CPU开销。实现DMA需要芯片特定的代码。
 
-Third, if the chip has hardware timestamping or other advanced features. Some embedded UARTs can timestamp individual received bytes with microsecond precision, which is invaluable for industrial protocols. The 框架 does not know about this, so the 驱动程序 must implement it.
+第三种，芯片具有硬件时间戳或其他高级功能。某些嵌入式UART可以以微秒精度为每个接收到的字节打时间戳，这对工业协议来说极其宝贵。框架不知道这些功能，因此驱动程序必须自行实现。
 
-For typical hardware, the generic handler is correct and performant. Do not override it without a specific reason.
+对于典型的硬件，通用处理程序是正确且高效的。没有特定的理由不要覆盖它。
 
-### The TX and RX Ring Buffers
+### TX 和 RX 环形缓冲区
 
-The `uart(4)` 框架 keeps two 环形缓冲区 inside each port's softc. These are separate from any 缓冲区ing on the chip itself: even if the chip has a 64-byte FIFO, the 框架 has its own 环形缓冲区 of some configurable size (typically 4 KB for each direction) that sit between the chip and the TTY layer.
+`uart(4)` 框架在每个端口的softc中维护两个环形缓冲区。它们与芯片本身的缓冲是分开的：即使芯片有64字节的FIFO，框架也有自己的可配置大小的环形缓冲区（通常每个方向4 KB），位于芯片和TTY层之间。
 
-The purpose of these 环形缓冲区 is to absorb bursts. Suppose the consumer of data is slow (a 总线y userland process), and the producer (the remote serial 设备) is pushing data at 115200 baud. Without a 环形缓冲区, the chip's 64-byte FIFO would fill up in about 6 milliseconds, and bytes would be lost. With a 4 KB 环形缓冲区, the 缓冲区 can absorb a 350-millisecond burst at 115200 baud, which is enough for userland to catch up in almost every realistic scenario.
+这些环形缓冲区的目的是吸收突发数据。假设数据消费者很慢（一个繁忙的用户态进程），而生产者（远端串行设备）以115200波特率推送数据。没有环形缓冲区的话，芯片的64字节FIFO将在约6毫秒内填满，字节将会丢失。有了4 KB的环形缓冲区，缓冲区可以在115200波特率下吸收350毫秒的突发数据，这在几乎所有的实际场景中都足以让用户态跟上。
 
-The sizes of these 环形缓冲区 are not generally configurable per-驱动程序; they are baked into the 框架. The 环形缓冲区 implementation is in `uart_core.c` and uses the same kind of head/tail pointer arithmetic as the 环形缓冲区 in our USB echo 驱动程序.
+这些环形缓冲区的大小通常不能按驱动程序配置；它们是固定在框架中的。环形缓冲区的实现在 `uart_core.c` 中，使用与我们USB echo驱动程序中环形缓冲区相同的头/尾指针算术。
 
-When the TTY layer asks for bytes (through `ttydisc_rint`), the 框架 moves bytes out of the RX ring into the TTY layer's own input queue, which has its own 缓冲区ing and line-discipline processing (canonical mode, echo, signal generation, and so on). When userland writes bytes, they arrive at the 框架's `tsw_outwakeup` path and are moved into the TX ring; the 框架's transmit-empty 中断处理程序 pushes them from the ring into the chip.
+当TTY层请求字节时（通过 `ttydisc_rint`），框架将字节从RX环形缓冲区移到TTY层自己的输入队列中，该队列有自己的缓冲和线路规程处理（规范模式、回显、信号生成等）。当用户态写入字节时，它们到达框架的 `tsw_outwakeup` 路径并被移入TX环形缓冲区；框架的发送空中断处理程序将它们从环形缓冲区推入芯片。
 
-This arrangement has a nice property: the 驱动程序, the 框架, and the TTY layer are all loosely coupled. The 驱动程序 only knows about the chip. The 框架 only knows about 寄存器 and 环形缓冲区. The TTY layer only knows about 缓冲区ing and line discipline. Each layer can be tested and reasoned about independently.
+这种安排有一个很好的特性：驱动程序、框架和TTY层都是松耦合的。驱动程序只了解芯片。框架只了解寄存器和环形缓冲区。TTY层只了解缓冲和线路规程。每一层都可以独立测试和推理。
 
-### Debugging Serial Drivers
+### 串行驱动程序的调试
 
-When a 串行驱动程序 does not work, the symptoms can be confusing. Bytes go in, bytes come out, but the two do not match. The clock ticks, but the characters look like gibberish. The port opens, but writes return zero bytes. This section lists the diagnostic techniques that help.
+当串行驱动程序不工作时，症状可能令人困惑。字节进去了，字节出来了，但两者不匹配。时钟在走，但字符看起来像乱码。端口打开了，但写入返回零字节。本节列出了有助于诊断的技术。
 
-**Log aggressively at 附加.** Use `设备_printf(dev, "附加ed at %x, IRQ %d\n", ...)` to verify the address and IRQ your 驱动程序 ended up with. If the address is wrong, no I/O will work; if the IRQ is wrong, no interrupts will fire. Attach messages are the first line of defence.
+**在附加时积极记录日志。** 使用 `device_printf(dev, "attached at %x, IRQ %d\n", ...)` 来验证驱动程序最终获得的地址和IRQ。如果地址错误，所有I/O都不会工作；如果IRQ错误，所有中断都不会触发。附加消息是第一道防线。
 
-**Use `sysctl dev.uart.0.*` to inspect port state.** The `uart(4)` 框架 exports many per-port knobs and statistics through sysctl. Reading them shows the current 波特率, the number of bytes transmitted, the number of overruns, the modem signal state, and more. If `tx` is incrementing but `rx` is not, the transmitter works but the receiver does not; if both are zero, nothing is happening at all.
+**使用 `sysctl dev.uart.0.*` 检查端口状态。** `uart(4)` 框架通过sysctl导出许多每端口的参数和统计信息。读取它们可以看到当前的波特率、已传输的字节数、溢出次数、调制解调器信号状态等。如果 `tx` 在递增但 `rx` 没有，说明发送器工作但接收器不工作；如果两者都为零，说明什么都没有发生。
 
-**Probe the hardware with `kgdb`.** If you have a 内核 crash dump or the ability to 附加 a 内核 debugger, you can inspect the `uart_softc` directly and read its 注册 values. This is invaluable when the chip is in a confused state that the software abstraction hides.
+**使用 `kgdb` 探测硬件。** 如果你有内核崩溃转储或能够附加内核调试器，你可以直接检查 `uart_softc` 并读取其寄存器值。当芯片处于软件抽象所隐藏的混乱状态时，这极其宝贵。
 
-**Compare against a working 驱动程序.** If your modification broke something, bisect the change against the upstream `ns8250.c`. The difference will be small, and once you identify it, the fix is usually clear.
+**与工作的驱动程序进行比较。** 如果你的修改破坏了什么，将变更与上游的 `ns8250.c` 进行二分法比较。差异通常很小，一旦识别出来，修复通常是显而易见的。
 
-**Use `dd` for small, repeatable tests.** Instead of `cu` for debugging, use `dd if=/dev/zero of=/dev/cuau0 bs=1 count=100` to write exactly 100 bytes. Then `dd if=/dev/cuau0 of=output.bin bs=1 count=100` to read exactly 100 bytes (with a suitable timeout or a second open). This isolates timing and character-encoding issues that interactive `cu` might mask.
+**使用 `dd` 进行小型、可重复的测试。** 不要用 `cu` 来调试，而是用 `dd if=/dev/zero of=/dev/cuau0 bs=1 count=100` 来精确写入100个字节。然后用 `dd if=/dev/cuau0 of=output.bin bs=1 count=100` 来精确读取100个字节（需要有合适的超时或第二次打开）。这可以隔离交互式 `cu` 可能掩盖的时序和字符编码问题。
 
-**Check the hardware 流控制 pins.** Many flow-control bugs are hardware, not software. Use a break-out board, a multimeter, or an oscilloscope to verify that DTR, RTS, CTS, and DSR are at the voltages you expect. If one is stuck floating, the chip's behaviour is undefined.
+**检查硬件流控制引脚。** 许多流控制错误是硬件问题而非软件问题。使用分线板、万用表或示波器来验证DTR、RTS、CTS和DSR是否处于你期望的电压。如果其中一个引脚悬空，芯片的行为是未定义的。
 
-**Compare behaviour under `nmdm(4)`.** If your userland tool works with `nmdm(4)` but not with your 驱动程序, the bug is in the 驱动程序. If it fails with both, the bug is in the tool.
+**在 `nmdm(4)` 下比较行为。** 如果你的用户态工具在 `nmdm(4)` 下工作正常但在你的驱动程序下不行，那么错误在驱动程序中。如果两者都失败，错误在工具中。
 
-These techniques apply equally to `uart(4)` 驱动程序 and `ucom(4)` 驱动程序. The difference is that `uart(4)` problems often come down to 注册 manipulation (did you set the divisor correctly?), while `ucom(4)` problems often come down to USB transfers (did the 控制传输 to set the 波特率 actually succeed?). The debugging tools (USB: `usbconfig`, transfer statistics; UART: `sysctl`, chip 寄存器) are different, but the investigative mindset is the same.
+这些技术同样适用于 `uart(4)` 驱动程序和 `ucom(4)` 驱动程序。区别在于 `uart(4)` 问题通常归结为寄存器操作（分频器设置正确吗？），而 `ucom(4)` 问题通常归结为USB传输（设置波特率的控制传输真的成功了吗？）。调试工具不同（USB：`usbconfig`、传输统计；UART：`sysctl`、芯片寄存器），但调查思路是相同的。
 
-### Writing a UART Driver Yourself
 
-Putting the pieces together, a minimal UART 驱动程序 for an imaginary 注册-compatible chip would be organised like this:
+### 自己编写UART驱动程序
 
-1. Define 注册 offsets and bit positions in a local header.
-2. Implement the six `uart_ops` methods: `探测`, `init`, `term`, `putc`, `rxready`, `getc`.
-3. Declare a `struct uart_ops` initialised with those six methods.
-4. Declare a `struct uart_class` initialised with the ops and the hardware parameters (range, reference clock, 注册 shift).
-5. Implement the 中断处理程序 if the chip needs more than the 框架's default dispatch.
-6. Register the 驱动程序 with New总线 using the standard macros.
+将各个部分组合起来，一个用于假想的寄存器兼容芯片的最小UART驱动程序的组织方式如下：
 
-Most new UART 驱动程序 in the tree are small. Oxford single-port PCIe UARTs, for example, are a few hundred lines because they are fundamentally 16550-compatible and only need a thin layer of PCI-specific 附加 code. Complex ones like the Z8530 are larger because the chip has a more complicated programming model; the 驱动程序 size tracks the chip's complexity, not the 框架's.
+1. 在本地头文件中定义寄存器偏移量和位位置。
+2. 实现六个 `uart_ops` 方法：`probe`、`init`、`term`、`putc`、`rxready`、`getc`。
+3. 声明一个用这六个方法初始化的 `struct uart_ops`。
+4. 声明一个用操作集和硬件参数（范围、参考时钟、寄存器移位）初始化的 `struct uart_class`。
+5. 如果芯片需要超出框架默认分发的功能，则实现中断处理程序。
+6. 使用标准宏将驱动程序注册到Newbus。
 
-### Looking at `myfirst_uart.c` in Skeleton Form
+内核树中大多数新的UART驱动程序都很小。例如，Oxford单端口PCIe UART只有几百行代码，因为它们基本上是16550兼容的，只需要一层薄薄的PCI特定附加代码。复杂的芯片如Z8530则更大，因为芯片有更复杂的编程模型；驱动程序的大小跟踪的是芯片的复杂度，而非框架的复杂度。
 
-For our running example, the skeleton of a minimal UART 驱动程序 looks like this:
+### 查看 `myfirst_uart.c` 的骨架形式
+
+对于我们的运行示例，一个最小UART驱动程序的骨架如下：
 
 ```c
 #include <sys/param.h>
@@ -1913,17 +1914,17 @@ struct uart_class myfirst_uart_class = {
 };
 ```
 
-The inclusion of `uart_if.h` is notable: that header is generated at build time by the kobj machinery from the 接口 definition in `/usr/src/sys/dev/uart/uart_if.m`. It declares the method prototypes that the 框架 expects 驱动程序 to implement. When you write a new 驱动程序, you depend on this header.
+包含 `uart_if.h` 值得注意：该头文件在构建时由kobj机制从 `/usr/src/sys/dev/uart/uart_if.m` 中的接口定义生成。它声明了框架期望驱动程序实现的方法原型。当你编写新驱动程序时，你需要依赖这个头文件。
 
-The six methods themselves are straightforward once you have the chip's programming manual open. `init` computes the divisor from `uc_rclk` and the 波特率, writes the line control 注册 for the databits/stopbits/奇偶校验 combination, enables FIFOs, and sets the interrupt enable 注册 to the desired mask. `term` inverts `init`. `putc`, `getc`, and `rxready` each do a single-注册 access plus a spin on the status 注册.
+打开芯片的编程手册后，这六个方法本身很简单。`init` 从 `uc_rclk` 和波特率计算分频器，为数据位/停止位/奇偶校验组合写入线路控制寄存器，启用FIFO，并将中断使能寄存器设置为所需的掩码。`term` 是 `init` 的逆操作。`putc`、`getc` 和 `rxready` 各自进行一次单寄存器访问加上对状态寄存器的轮询。
 
-A complete implementation of all six methods for a 16550-compatible chip is about three hundred lines. For a chip with quirks, it might grow to five hundred or more. The `ns8250` 驱动程序 is longer than most because it handles errata and variant detection for dozens of real chips, but the core logic of its six methods is still the standard pattern.
+16550兼容芯片的所有六个方法的完整实现大约三百行。对于有怪癖的芯片，可能会增长到五百行或更多。`ns8250` 驱动程序比大多数都长，因为它处理数十种实际芯片的勘误和变体检测，但其六个方法的核心逻辑仍然是标准模式。
 
-### The `ucom(4)` Framework: USB-to-Serial Bridges
+### `ucom(4)` 框架：USB转串口桥接
 
-Not every 串行端口 is a real UART on the system 总线. Many are USB adapters: a PL2303, a CP2102, an FTDI FT232, a CH340G. These chips expose a 串行端口 over USB, and FreeBSD's approach to supporting them is a small 框架 called `ucom(4)`. It lives in `/usr/src/sys/dev/usb/serial/`, alongside the 驱动程序 for each chip family.
+并非每个串行端口都是系统总线上的真正UART。许多是USB适配器：PL2303、CP2102、FTDI FT232、CH340G。这些芯片通过USB暴露一个串行端口，FreeBSD支持它们的方法是一个叫做 `ucom(4)` 的小型框架。它位于 `/usr/src/sys/dev/usb/serial/`，与每个芯片系列的驱动程序并排。
 
-`ucom(4)` is distinct from `uart(4)`. It does not use `uart_ops`, it does not use `uart_bas`, and it does not use the 环形缓冲区 inside `uart_core.c`. What it does is provide a TTY abstraction on top of USB transfers. A `ucom(4)` client declares itself through a `struct ucom_回调`:
+`ucom(4)` 与 `uart(4)` 不同。它不使用 `uart_ops`，不使用 `uart_bas`，也不使用 `uart_core.c` 中的环形缓冲区。它所做的是在USB传输之上提供TTY抽象。`ucom(4)` 客户端通过 `struct ucom_callback` 声明自己：
 
 ```c
 struct ucom_callback {
@@ -1950,209 +1951,209 @@ struct ucom_callback {
 };
 ```
 
-The methods divide into three groups. Configuration methods (names prefixed with `ucom_cfg_`) are called to change the state of the underlying chip: set DTR, set RTS, change the 波特率, and so on. These methods run in the 框架's configuration thread, which is designed for making synchronous USB control requests. Flow methods (`ucom_start_read`, `ucom_start_write`, `ucom_stop_read`, `ucom_stop_write`) are called to enable or disable the data path on the underlying USB channels. The pre-methods (`ucom_pre_open`, `ucom_pre_param`) run on the caller's context before the 框架 schedules a configuration task, which is where a 驱动程序 validates userland-supplied arguments and returns an errno if they are unacceptable. The `ucom_ioctl` method translates chip-specific userland ioctls that the 框架 does not handle into USB requests.
+这些方法分为三组。配置方法（名称以 `ucom_cfg_` 为前缀）用于改变底层芯片的状态：设置DTR、设置RTS、更改波特率等。这些方法在框架的配置线程中运行，该线程专为发起同步USB控制请求而设计。流方法（`ucom_start_read`、`ucom_start_write`、`ucom_stop_read`、`ucom_stop_write`）用于启用或禁用底层USB通道上的数据路径。前置方法（`ucom_pre_open`、`ucom_pre_param`）在框架调度配置任务之前在调用者的上下文中运行，这是驱动程序验证用户态提供的参数并在不可接受时返回errno的地方。`ucom_ioctl` 方法将框架不处理的芯片特定用户态ioctl转换为USB请求。
 
-A USB-to-串行驱动程序's job is to implement these 回调 in terms of USB transfers. When `ucom_cfg_param` is called with a new 波特率, the 驱动程序 issues a vendor-specific 控制传输 that programs the chip's baud-rate 注册. When `ucom_start_read` is called, the 驱动程序 starts a bulk-IN channel that delivers incoming bytes. When `ucom_start_write` is called, the 驱动程序 starts a bulk-OUT channel that flushes outgoing bytes.
+USB转串行驱动程序的任务是以USB传输的方式实现这些回调。当 `ucom_cfg_param` 被调用并传入新的波特率时，驱动程序发出一个厂商特定的控制传输来编程芯片的波特率寄存器。当 `ucom_start_read` 被调用时，驱动程序启动一个批量输入通道来传送传入的字节。当 `ucom_start_write` 被调用时，驱动程序启动一个批量输出通道来冲刷传出的字节。
 
-The FTDI 驱动程序 at `/usr/src/sys/dev/usb/serial/uftdi.c` is the concrete reference. Its `ucom_cfg_param` implementation translates the termios fields into the FTDI's proprietary baud-rate divisor format (which is weird, because FTDI chips use a sub-integer divisor scheme that is almost but not quite standard 16550) and issues a 控制传输 to `bRequest = FTDI_SIO_SET_BAUD_RATE`. Its `ucom_start_read` starts the bulk-IN channel that reads from the FTDI's RX FIFO. Its `ucom_start_write` starts the bulk-OUT channel that writes to the FTDI's TX FIFO.
+位于 `/usr/src/sys/dev/usb/serial/uftdi.c` 的FTDI驱动程序是具体的参考。其 `ucom_cfg_param` 实现将termios字段转换为FTDI专有的波特率分频器格式（这很奇怪，因为FTDI芯片使用一种几乎是但不完全是标准16550的子整数分频方案），并向 `bRequest = FTDI_SIO_SET_BAUD_RATE` 发出控制传输。其 `ucom_start_read` 启动从FTDI的RX FIFO读取的批量输入通道。其 `ucom_start_write` 启动向FTDI的TX FIFO写入的批量输出通道。
 
-From userland's perspective, a `ucom(4)` 设备 looks identical to a `uart(4)` 设备. Both appear as `/dev/ttyuN` and `/dev/cuauN`. Both respond to `stty`, `cu`, `tip`, `minicom`, and every other serial tool. Both support the same termios flags. The distinction only matters to a 驱动程序 writer.
+从用户态的角度看，`ucom(4)` 设备与 `uart(4)` 设备看起来完全相同。两者都显示为 `/dev/ttyuN` 和 `/dev/cuauN`。两者都响应 `stty`、`cu`、`tip`、`minicom` 以及所有其他串行工具。两者都支持相同的termios标志。这种区别只对驱动程序编写者有意义。
 
-### Reading `uftdi.c` As a Complete Example
+### 阅读 `uftdi.c` 作为完整示例
 
-FTDI chips (FT232R, FT232H, FT2232H, and many others) are the most widely deployed USB-to-serial chips in the embedded world. If you ever work with microcontrollers, evaluation boards, 3D printers, or industrial sensors, you will encounter FTDI hardware. FreeBSD has supported FTDI since 4.x, and the current 驱动程序 lives in `/usr/src/sys/dev/usb/serial/uftdi.c`. At roughly three thousand lines, it is not short, but most of that length is devoted to the large 匹配表 (FTDI products are legion) and to chip-variant quirks (every few years FTDI adds a new FIFO size, a new baud-rate divisor scheme, or a new 注册). The pedagogically interesting core is a few hundred lines, and reading it is a direct reward for the conceptual work of Section 4.
+FTDI芯片（FT232R、FT232H、FT2232H 以及许多其他型号）是嵌入式世界中部署最广泛的USB转串口芯片。如果你曾经使用过微控制器、评估板、3D打印机或工业传感器，你一定会遇到FTDI硬件。FreeBSD从4.x版本开始支持FTDI，当前驱动程序位于 `/usr/src/sys/dev/usb/serial/uftdi.c`。大约三千行代码，不算短，但大部分篇幅用于大型匹配表（FTDI产品众多）和芯片变体的怪癖处理（每隔几年FTDI就会增加新的FIFO大小、新的波特率分频方案或新的寄存器）。教学上有趣的核心只有几百行，阅读它是第4节概念工作的直接回报。
 
-When you open the file, the first thing to notice is the enormous 匹配表. FTDI assigns OEM-specific USB IDs to their customers, so the 匹配表 includes not just FTDI's own VID/PID pairs but also hundreds of VIDs and PIDs from companies that embed FTDI chips in their products. Sparkfun, Pololu, Olimex, Adafruit, various industrial vendors: every one has at least one entry in the uftdi 匹配表. The `STRUCT_USB_HOST_ID` array is a few hundred entries long, grouped with comments indicating which product family each cluster belongs to.
+打开文件时，首先注意到的是巨大的匹配表。FTDI为其客户分配OEM特定的USB ID，因此匹配表不仅包括FTDI自己的VID/PID对，还包括在其产品中嵌入FTDI芯片的公司的数百个VID和PID。Sparkfun、Pololu、Olimex、Adafruit以及各种工业厂商：每家在uftdi匹配表中都至少有一个条目。`STRUCT_USB_HOST_ID` 数组有几百个条目长，按注释分组，标明每个集群属于哪个产品系列。
 
-The softc comes next. An FTDI softc includes the USB 设备 pointer, a 互斥锁, the transfer array for the bulk-IN and bulk-OUT channels (FTDI 设备 use bulk for data, not interrupt), a `struct ucom_super_softc` for the `ucom(4)` layer, a `struct ucom_softc` for the per-port state, and FTDI-specific fields: the current baud-rate divisor, the current line control 注册 contents, the current modem control 注册 contents, and a few flags for the variant family (FT232, FT2232, FT232H, and so on). Each variant requires slightly different code for some operations, so the 驱动程序 keeps a variant identifier in the softc and branches on it in the operations that differ.
+接下来是softc。FTDI softc包括USB设备指针、一个互斥锁、批量输入和批量输出通道的传输数组（FTDI设备使用批量传输而非中断传输传输数据）、用于 `ucom(4)` 层的 `struct ucom_super_softc`、用于每端口状态的 `struct ucom_softc`，以及FTDI特定的字段：当前波特率分频器、当前线路控制寄存器内容、当前调制解调器控制寄存器内容，以及变体系列（FT232、FT2232、FT232H等）的几个标志。每个变体在某些操作上需要略有不同的代码，因此驱动程序在softc中保持一个变体标识符，并在不同的操作中进行分支。
 
-The transfer configuration array is where the FTDI 驱动程序's interaction with the USB 框架 is declared. It declares two channels: `UFTDI_BULK_DT_RD` for incoming data and `UFTDI_BULK_DT_WR` for outgoing. Each is a `UE_BULK` transfer with a moderate 缓冲区 size (the FTDI default is 64 bytes for low-speed and 512 bytes for full-speed, and the 驱动程序 picks the right size at 附加 based on the chip variant). The 回调 are `uftdi_read_回调` and `uftdi_write_回调`, and they follow the three-state pattern exactly as described in Section 3.
+传输配置数组声明了FTDI驱动程序与USB框架的交互。它声明了两个通道：用于传入数据的 `UFTDI_BULK_DT_RD` 和用于传出数据的 `UFTDI_BULK_DT_WR`。每个都是 `UE_BULK` 传输，具有适度的缓冲区大小（FTDI默认低速为64字节，全速为512字节，驱动程序在附加时根据芯片变体选择正确的大小）。回调是 `uftdi_read_callback` 和 `uftdi_write_callback`，它们完全遵循第3节中描述的三状态模式。
 
-The `ucom_回调` structure is the next important 块. It wires the FTDI 驱动程序 into the `ucom(4)` 框架. The methods it provides include `uftdi_cfg_param` (called when the 波特率 or byte format changes), `uftdi_cfg_set_dtr` (called to assert or deassert DTR), `uftdi_cfg_set_rts` (same for RTS), `uftdi_cfg_open` and `uftdi_cfg_close` (called when a userland process opens or closes the 设备), and `uftdi_start_read`, `uftdi_start_write`, `uftdi_stop_read`, `uftdi_stop_write` (called to enable or disable the data channels). Each configuration method translates a high-level operation into a USB 控制传输 to the FTDI chip.
+`ucom_callback` 结构是下一个重要的块。它将FTDI驱动程序接入 `ucom(4)` 框架。它提供的方法包括 `uftdi_cfg_param`（在波特率或字节格式更改时调用）、`uftdi_cfg_set_dtr`（在置位或撤销DTR时调用）、`uftdi_cfg_set_rts`（对RTS相同）、`uftdi_cfg_open` 和 `uftdi_cfg_close`（在用户态进程打开或关闭设备时调用），以及 `uftdi_start_read`、`uftdi_start_write`、`uftdi_stop_read`、`uftdi_stop_write`（在启用或禁用数据通道时调用）。每个配置方法将高级操作转换为对FTDI芯片的USB控制传输。
 
-The baud-rate programming is one of the most instructive parts of the 驱动程序, because FTDI chips use a peculiar divisor scheme. Rather than the clean integer divisors a 16550 UART uses, FTDI supports a fractional divisor where the numerator is an integer and the denominator is computed from two bits that select one-eighth, one-quarter, three-eighths, one-half, or five-eighths. The function `uftdi_encode_baudrate` takes a requested 波特率 and the chip's reference clock and computes the closest valid divisor. It handles the edge cases (very low 波特率s, very high 波特率s on newer chips, standard rates like 115200 which are exactly representable, nonstandard rates like 31250 used by MIDI). The resulting sixteen-bit value is passed to `uftdi_set_baudrate`, which issues a 控制传输 to the FTDI's baud-rate 注册.
+波特率编程是驱动程序中最有教学意义的部分之一，因为FTDI芯片使用一种特殊的分频方案。与16550 UART使用的简洁整数分频器不同，FTDI支持分数分频器，其中分子是整数，分母由两个选择八分之一、四分之一、八分之三、二分之一或八分之五的位计算得出。函数 `uftdi_encode_baudrate` 接受请求的波特率和芯片的参考时钟，计算最接近的有效分频器。它处理边缘情况（极低波特率、较新芯片上的极高波特率、可精确表示的标准速率如115200、MIDI使用的非标准速率如31250）。得到的十六位值传递给 `uftdi_set_baudrate`，后者向FTDI的波特率寄存器发出控制传输。
 
-The line control 注册 (数据位, 停止位, 奇偶校验) is programmed through a similar sequence: the termios structure arrives at `uftdi_cfg_param`, the 驱动程序 extracts the relevant bits, encodes them into the FTDI's line-control format, and issues a 控制传输.
+线路控制寄存器（数据位、停止位、奇偶校验）通过类似的序列编程：termios结构到达 `uftdi_cfg_param`，驱动程序提取相关位，将它们编码为FTDI的线路控制格式，并发出控制传输。
 
-The modem control signals (DTR, RTS) are programmed through `uftdi_cfg_set_dtr` and `uftdi_cfg_set_rts`. These are the simplest transfers: a control-out with no payload, which the chip interprets as "set DTR to X" or "set RTS to Y."
+调制解调器控制信号（DTR、RTS）通过 `uftdi_cfg_set_dtr` 和 `uftdi_cfg_set_rts` 编程。这些是最简单的传输：一个没有有效载荷的控制输出，芯片将其解释为"设置DTR为X"或"设置RTS为Y"。
 
-The data path is in the two 回调. `uftdi_read_回调` handles the bulk-IN channel. On `USB_ST_TRANSFERRED`, it extracts the received bytes from the USB 帧 (ignoring the first two bytes, which are FTDI status bytes) and feeds them into the `ucom(4)` layer for delivery to userland. On `USB_ST_SETUP`, it rearms the read for another 缓冲区. `uftdi_write_回调` handles the bulk-OUT channel. On `USB_ST_SETUP`, it asks the `ucom(4)` layer for more data, copies it into a USB 帧, and submits the transfer. On `USB_ST_TRANSFERRED`, it rearms to check for more data.
+数据路径在两个回调中。`uftdi_read_callback` 处理批量输入通道。在 `USB_ST_TRANSFERRED` 时，它从USB帧中提取接收到的字节（忽略前两个字节，它们是FTDI状态字节），并将它们送入 `ucom(4)` 层以传递给用户态。在 `USB_ST_SETUP` 时，它重新准备读取另一个缓冲区。`uftdi_write_callback` 处理批量输出通道。在 `USB_ST_SETUP` 时，它向 `ucom(4)` 层请求更多数据，将其复制到USB帧中并提交传输。在 `USB_ST_TRANSFERRED` 时，它重新准备以检查是否有更多数据。
 
-Reading through `uftdi.c` with Section 4 vocabulary in hand, you can see how the entire `ucom(4)` 框架 pattern is instantiated for a specific chip. The FTDI-specific logic (baud-rate encoding, line-control encoding, modem-control setting) is isolated into helper functions. The 框架 integration is handled by the `ucom_回调` structure. The data flow is handled by the two 批量传输. If you were writing a 驱动程序 for a different USB-to-serial chip, you would copy this structure and change the chip-specific parts.
+带着第4节的词汇阅读 `uftdi.c`，你可以看到整个 `ucom(4)` 框架模式是如何为特定芯片实例化的。FTDI特定的逻辑（波特率编码、线路控制编码、调制解调器控制设置）被隔离到辅助函数中。框架集成由 `ucom_callback` 结构处理。数据流由两个批量传输处理。如果你要为不同的USB转串口芯片编写驱动程序，你会复制这个结构并更改芯片特定的部分。
 
-The existence of this 驱动程序 explains something that might otherwise be puzzling. Why did FreeBSD add `ucom(4)` as a separate 框架 rather than as part of `uart(4)`? Because the entire data-path machinery of a `uart(4)` 驱动程序 (中断处理程序s, 环形缓冲区, 注册 accesses) has no analogue in a USB-to-serial world. The FTDI chip's "FIFO" is an on-chip 缓冲区 that the 驱动程序 cannot directly access; it can only send bulk 数据包 to the chip and receive them back. The `uart(4)` machinery would be unused overhead. By having `ucom(4)` as a separate 框架 with its own data-path abstractions, FreeBSD can make a USB-to-串行驱动程序 like `uftdi` weigh just a few hundred lines of core logic rather than wrap an unnecessary layer of 16550 emulation.
+这个驱动程序的存在解释了一个可能令人困惑的问题。为什么FreeBSD将 `ucom(4)` 作为一个单独的框架添加，而不是作为 `uart(4)` 的一部分？因为 `uart(4)` 驱动程序的整个数据路径机制（中断处理程序、环形缓冲区、寄存器访问）在USB转串行世界中没有对应物。FTDI芯片的"FIFO"是一个驱动程序无法直接访问的片上缓冲区；它只能向芯片发送批量数据包并接收返回的数据包。`uart(4)` 的机制将是未使用的开销。通过将 `ucom(4)` 作为具有自己数据路径抽象的独立框架，FreeBSD可以使像 `uftdi` 这样的USB转串行驱动程序只有几百行核心逻辑，而不是包裹一层不必要的16550模拟。
 
-When you finish reading `uftdi.c`, open `uplcom.c` (the Prolific PL2303 驱动程序) and `uslcom.c` (the Silicon Labs CP210x 驱动程序) in sequence. They follow the same structure with different chip-specific details. After reading all three, you will have a working understanding of how a USB-to-串行驱动程序 is organised in FreeBSD, and you will be ready to write one for any chip you encounter.
+读完 `uftdi.c` 后，依次打开 `uplcom.c`（Prolific PL2303驱动程序）和 `uslcom.c`（Silicon Labs CP210x驱动程序）。它们遵循相同的结构，但具有不同的芯片特定细节。读完这三个之后，你将对USB转串行驱动程序在FreeBSD中如何组织有一个实用的理解，并准备好为任何你遇到的芯片编写驱动程序。
 
-### Choosing Between `uart(4)` and `ucom(4)`
+### 在 `uart(4)` 和 `ucom(4)` 之间选择
 
-The choice is mechanical. If the chip sits on the system 总线 (PCI, ISA, a platform I/O port, a memory-mapped SoC peripheral), you write a `uart(4)` 驱动程序. If the chip sits on USB and exposes a serial 接口, you write a `ucom(4)` 驱动程序.
+选择是机械性的。如果芯片位于系统总线（PCI、ISA、平台I/O端口、内存映射的SoC外设）上，你编写 `uart(4)` 驱动程序。如果芯片位于USB上并暴露一个串行接口，你编写 `ucom(4)` 驱动程序。
 
-The two 框架 do not mix. You cannot take a `uart(4)` 驱动程序 and plug it into USB, and you cannot take a `ucom(4)` 驱动程序 and 附加 it to PCIe. They are independent implementations of the same user-visible abstraction (a TTY port), but with very different internals.
+这两个框架不能混合使用。你不能拿一个 `uart(4)` 驱动程序插入USB，也不能拿一个 `ucom(4)` 驱动程序附加到PCIe。它们是同一用户可见抽象（TTY端口）的独立实现，但内部结构截然不同。
 
-Beginners sometimes ask why the two 框架 exist at all, instead of a unified serial 框架 with a pluggable transport layer. The answer is historical: `uart(4)` was rewritten in its modern form in the early 2000s to replace the older `sio(4)` 驱动程序, and at that time USB serial support was a set of ad-hoc 驱动程序. When USB serial support was unified, the natural approach was to add a thin TTY-integration layer (`ucom(4)`) rather than retrofit `uart(4)`. The two are now independent because decoupling them has been stable and useful. A unification effort would be a significant project with modest payoff.
+初学者有时会问为什么存在两个框架，而不是一个带有可插拔传输层的统一串行框架。答案是历史性的：`uart(4)` 在2000年代初以其现代形式重写以替代更老的 `sio(4)` 驱动程序，那时USB串行支持是一组临时的驱动程序。当USB串行支持被统一时，自然的方法是添加一个薄的TTY集成层（`ucom(4)`）而不是改造 `uart(4)`。两者现在是独立的，因为解耦它们一直是稳定且有用的。统一工作将是一个回报有限的大型项目。
 
-For your purposes as a beginning 驱动程序 writer, the rule is simple. If you are writing a 驱动程序 for a chip that lives on your motherboard's 串行端口s or on a PCIe card, use `uart(4)`. If you are writing a 驱动程序 for a USB dongle that pretends to be a 串行端口, use `ucom(4)`. The reference 驱动程序 for each case (`ns8250` for `uart(4)`, `uftdi` for `ucom(4)`) are the right places to learn the details.
+作为初学驱动程序编写者，规则很简单。如果你要为位于主板串行端口或PCIe卡上的芯片编写驱动程序，使用 `uart(4)`。如果你要为假装是串行端口的USB适配器编写驱动程序，使用 `ucom(4)`。每种情况的参考驱动程序（`uart(4)` 的 `ns8250`，`ucom(4)` 的 `uftdi`）是学习细节的正确起点。
 
-### Differences Between Chip Variants
+### 芯片变体之间的差异
 
-Working with real UART hardware quickly teaches you that "16550-compatible" is a spectrum, not a fixed specification. Here are the variants you are most likely to encounter and the differences that matter.
+使用真正的UART硬件很快就会教你，"16550兼容"是一个谱系，而非固定的规格说明。以下是你最可能遇到的变体以及它们之间重要的差异。
 
-**8250.** The original, from the late 1970s. Has no FIFO; every received byte must be collected by the CPU before the next arrives. Software for 16550A will usually work, with reduced performance.
+**8250。** 1970年代末的原始版本。没有FIFO；每个接收到的字节必须在下一个到达之前被CPU收集。为16550A编写的软件通常可以工作，但性能降低。
 
-**16450.** Like 8250 but with some 注册 improvements and slightly more reliable behaviour. Still no FIFO.
+**16450。** 类似8250，但有一些寄存器改进和更可靠的行为。仍然没有FIFO。
 
-**16550.** Introduced a 16-byte FIFO, but the original 16550 had buggy FIFO behaviour. Software should detect this and refuse to use the FIFO in the bad case.
+**16550。** 引入了16字节FIFO，但原始16550有缺陷性的FIFO行为。软件应该检测到这一点并拒绝在有缺陷的情况下使用FIFO。
 
-**16550A.** Fixed the FIFO bugs. This is the canonical "16550" that every PC 串行驱动程序 targets. Reliable, widely compatible.
+**16550A.** 修复了FIFO缺陷。这是每个PC串行驱动程序所针对的规范"16550"。可靠，广泛兼容。
 
-**16550AF.** Further revisions for clocking and margin. For software purposes, identical to 16550A.
+**16550AF。** 时钟和裕量的进一步修订。从软件角度看，与16550A相同。
 
-**16650.** Extended the FIFO to 32 bytes and added automatic hardware 流控制. Mostly 16550A-compatible.
+**16650。** 将FIFO扩展到32字节并添加了自动硬件流控制。大部分兼容16550A。
 
-**16750.** Extended the FIFO to 64 bytes. Some chips with this label also have additional autobaud and high-speed modes. Software must decide whether to enable the extended FIFO.
+**16750。** 将FIFO扩展到64字节。一些标有此型号的芯片还具有额外的自动波特率检测和高速模式。软件必须决定是否启用扩展FIFO。
 
-**16950 (Oxford Semiconductor).** A 128-byte FIFO, additional flow-control features, and support for unusual 波特率s through a modified divisor scheme. Often seen on high-performance PCIe serial cards.
+**16950（Oxford Semiconductor）。** 128字节FIFO、额外的流控制功能，以及通过修改的分频方案支持非标准波特率。常见于高性能PCIe串行卡。
 
-**UART-compatible SoC controllers.** Many embedded processors have built-in UARTs that are 注册-compatible with 16550 but with quirks: some have different clock rates, some have different 注册 offsets, some have DMA support, some have different interrupt semantics. The `ns8250` 驱动程序 in FreeBSD 探测 for these variants during 附加 and adjusts its behaviour accordingly.
+**UART兼容的SoC控制器。** 许多嵌入式处理器具有与16550寄存器兼容但带有怪癖的内置UART：一些有不同的时钟频率，一些有不同的寄存器偏移，一些有DMA支持，一些有不同的中断语义。FreeBSD中的 `ns8250` 驱动程序在附加期间探测这些变体并相应地调整其行为。
 
-The `ns8250` 驱动程序's 探测 logic reads several 寄存器 to determine which variant is present. It checks the IIR bits we saw earlier, reads the FIFO control 注册 to see what FIFO size is reported, checks for 16650/16750/16950 identification markers, and records the result in a variant field in the softc. The body of the 驱动程序 then branches on this field at a few places where the variants differ.
+`ns8250` 驱动程序的探测逻辑读取多个寄存器来确定存在哪个变体。它检查我们之前看到的IIR位，读取FIFO控制寄存器查看报告的FIFO大小，检查16650/16750/16950标识标记，并将结果记录在softc的变体字段中。驱动程序的主体然后在该字段上进行分支，在变体不同的几个地方进行处理。
 
-When you write a 驱动程序 for a new UART, decide upfront whether you want to target a single variant or a family. Targeting a single variant is simpler but limits the hardware you can support. Targeting a family requires variant detection logic like `ns8250`'s.
+当你为新的UART编写驱动程序时，预先决定你是要针对单个变体还是一个系列。针对单个变体更简单，但限制了你能够支持的硬件。针对一个系列需要像 `ns8250` 那样的变体检测逻辑。
 
-### The Console Path
+### 控制台路径
 
-FreeBSD can use a 串行端口 as the console. This is especially useful for embedded systems that do not have a display, for servers that do not have a keyboard and monitor, and for 内核 debugging (so that `printf` output goes somewhere visible even when the display 驱动程序 is broken).
+FreeBSD可以使用串行端口作为控制台。这对于没有显示器的嵌入式系统、没有键盘和显示器的服务器以及内核调试特别有用（这样即使显示驱动程序坏了，`printf` 输出也能去到一个可见的地方）。
 
-The console path is tightly integrated with `uart(4)`. A UART that is designated as the console is 探测d early in boot, before most of the 内核 is initialised. The console's putc and getc methods are used to emit boot messages and to read boot-time keyboard input. Only after the full 内核 is up does the UART get 附加ed to the TTY layer in the normal way.
+控制台路径与 `uart(4)` 紧密集成。被指定为控制台的UART在启动早期、内核大部分初始化之前就被探测。控制台的putc和getc方法用于发出启动消息和读取启动时的键盘输入。只有在整个内核启动完成后，UART才以正常方式附加到TTY层。
 
-Two mechanisms select which port is the console. The boot loader can set a variable (typically `console=comconsole`) in the environment, which the 内核 reads at startup. Alternatively, the 内核 can be configured at build time with a specific port as the console (via `options UART_EARLY_CONSOLE` in a 内核 configuration file).
+有两种机制选择哪个端口作为控制台。引导加载程序可以在环境中设置一个变量（通常是 `console=comconsole`），内核在启动时读取它。或者，可以在构建时通过内核配置文件中的 `options UART_EARLY_CONSOLE` 将特定端口配置为控制台。
 
-When a port is the console, it stays active across 驱动程序 unload and 分离. You cannot unload `uart` or disable the console port without losing console output. This constraint is enforced in the `uart(4)` 框架 and is usually invisible to 驱动程序 writers (you do not need to special-case the console port), but it is worth knowing about in case you see console-related oddities during testing.
+当一个端口是控制台时，它在驱动程序卸载和分离过程中保持活动。你不能在不丢失控制台输出的情况下卸载 `uart` 或禁用控制台端口。这个约束在 `uart(4)` 框架中强制执行，通常对驱动程序编写者不可见（你不需要特殊处理控制台端口），但值得了解，以防在测试期间看到与控制台相关的异常。
 
-### Comparing UART Drivers Across Architectures
+### 跨架构比较UART驱动程序
 
-One of FreeBSD's strengths is that the same `uart(4)` 框架 works across multiple architectures. An `x86_64` laptop with a 16550 on a PCIe card, an `aarch64` Raspberry Pi with a PL011 on-chip UART, and a `riscv64` development board with a SiFive-specific UART all expose the same TTY 接口 to userland. Only the 驱动程序 differs.
+FreeBSD的一个优势是相同的 `uart(4)` 框架可以在多种架构上工作。一台带有PCIe卡上16550的 `x86_64` 笔记本电脑、一台带有PL011片上UART的 `aarch64` 树莓派，以及一块带有SiFive特定UART的 `riscv64` 开发板，都向用户态暴露相同的TTY接口。不同的只是驱动程序。
 
-Here is a quick survey of the UART 驱动程序 in FreeBSD 14.3:
+以下是FreeBSD 14.3中UART驱动程序的快速概览：
 
-- `uart_dev_ns8250.c`: the 16550 family for x86 and many other platforms.
-- `uart_dev_pl011.c`: the ARM PrimeCell PL011 UART, used on Raspberry Pi and many ARM SoCs.
-- `uart_dev_imx.c`: the NXP i.MX UART, used on i.MX-based ARM boards.
-- `uart_dev_z8530.c`: the Zilog Z8530, historically used on SPARC workstations.
-- `uart_dev_ti8250.c`: a TI variant of the 16550 with additional features.
-- `uart_dev_pl011.c` (sbsa variant): the SBSA-standardised ARM UART for server-class ARM hardware.
-- `uart_dev_snps.c`: the Synopsys DesignWare UART, used on many RISC-V boards.
+- `uart_dev_ns8250.c`：x86和许多其他平台的16550系列。
+- `uart_dev_pl011.c`：ARM PrimeCell PL011 UART，用于树莓派和许多ARM SoC。
+- `uart_dev_imx.c`：NXP i.MX UART，用于基于i.MX的ARM板。
+- `uart_dev_z8530.c`：Zilog Z8530，历史上用于SPARC工作站。
+- `uart_dev_ti8250.c`：带有额外功能的16550 TI变体。
+- `uart_dev_pl011.c`（sbsa变体）：用于服务器级ARM硬件的SBSA标准化ARM UART。
+- `uart_dev_snps.c`：Synopsys DesignWare UART，用于许多RISC-V板。
 
-Open any two of these and compare their `uart_ops` implementations side by side. The structure is identical: six methods, each pointing at a function that reads or writes chip-specific 寄存器. The chip-specific details differ, but the 框架's API is the same.
+打开其中任意两个，并排比较它们的 `uart_ops` 实现。结构是相同的：六个方法，每个指向一个读写芯片特定寄存器的函数。芯片特定的细节不同，但框架的API是相同的。
 
-This is the payoff of the layered design. A new UART 驱动程序 is a contained project: a few hundred lines of code, reusing all the 缓冲区ing and TTY integration from the 框架. If FreeBSD had to reimplement 缓冲区ing for every UART, the system would be much larger and much harder to verify.
+这就是分层设计的回报。新的UART驱动程序是一个有限范围的项目：几百行代码，重用框架的所有缓冲和TTY集成。如果FreeBSD必须为每个UART重新实现缓冲，系统会大得多，也难验证得多。
 
-### What About the USB CDC ACM Standard?
+### 那么USB CDC ACM标准呢？
 
-USB has a standard class for serial 设备, called CDC ACM (Communication Device Class, Abstract Control Model). Chips that implement CDC ACM advertise themselves with a specific class/subclass/protocol triple at the 接口 level, and they can be driven by a single generic 驱动程序 rather than a vendor-specific one. FreeBSD's generic CDC ACM 驱动程序 is `u3g.c` in `/usr/src/sys/dev/usb/serial/`, and it is also built on top of `ucom(4)`.
+USB有一个用于串行设备的标准类别，称为CDC ACM（通信设备类，抽象控制模型）。实现CDC ACM的芯片在接口级别以特定的类/子类/协议三元组来宣告自己，它们可以由一个通用驱动程序驱动，而不需要厂商特定的驱动程序。FreeBSD的通用CDC ACM驱动程序是 `/usr/src/sys/dev/usb/serial/` 中的 `u3g.c`，它也是建立在 `ucom(4)` 之上的。
 
-Many modern USB serial chips implement CDC ACM, so the generic 驱动程序 just works for them without a vendor-specific file. Others (like FTDI) use proprietary protocols that require a vendor-specific 驱动程序. The class/subclass/protocol triple in the 接口 描述符 is what tells you which case you are in; `usbconfig -d ugenN.M dump_all_config_desc` will show it.
+许多现代USB串行芯片实现了CDC ACM，因此通用驱动程序无需厂商特定的文件即可工作。其他芯片（如FTDI）使用专有协议，需要厂商特定的驱动程序。接口描述符中的类/子类/协议三元组告诉你属于哪种情况；`usbconfig -d ugenN.M dump_all_config_desc` 会显示它。
 
-When you are shopping for a USB serial adapter for development work, prefer chips that implement CDC ACM. They are cheaper, more portable, and do not require proprietary 驱动程序. FTDI chips are historically dominant in embedded development because of their reliability, and FreeBSD supports them well, but a modern CP2102 or CH340G running in CDC ACM mode is equally usable.
+当你为开发工作选购USB串行适配器时，优先选择实现CDC ACM的芯片。它们更便宜、更便携，不需要专有驱动程序。FTDI芯片因其可靠性在嵌入式开发中历史上占主导地位，FreeBSD对它们的支持也很好，但现代的CP2102或CH340G在CDC ACM模式下运行同样可用。
 
-### 总结 Section 4
+### 第4节总结
 
-Section 4 has given you a complete picture of how 串行驱动程序 work in FreeBSD. You have seen the layering: `uart(4)` at the 框架 level, `ttydevsw` at the TTY integration level, `uart_ops` at the hardware level. You have seen the distinction between `uart(4)` for 总线-附加ed UARTs and `ucom(4)` for USB-to-serial bridges, and the practical rule for deciding which to use. You have seen, at a high level, the six hardware methods a UART 驱动程序 implements, the configuration 回调 a USB-to-串行驱动程序 implements, and how the TTY layer sits on top of both with one uniform 接口 to userland.
+第4节为你提供了串行驱动程序在FreeBSD中如何工作的完整图景。你看到了分层：框架层的 `uart(4)`、TTY集成层的 `ttydevsw`、硬件层的 `uart_ops`。你看到了总线附加UART使用 `uart(4)` 与USB转串口桥接使用 `ucom(4)` 的区别，以及决定使用哪个的实用规则。你从高层次看到了UART驱动程序实现的六个硬件方法、USB转串行驱动程序实现的配置回调，以及TTY层如何以统一的接口位于两者之上。
 
-The level of depth in this section is necessarily lighter than the USB-side sections, because 串行驱动程序 in FreeBSD are more specialised than USB驱动程序 and you are more likely to read an existing one (or modify one) than to write a brand-new one from scratch. If you do find yourself writing a new UART 驱动程序 for a custom board, the path is clear: open `ns8250` in one window, open your chip's data sheet in another, and write the six methods one by one.
+本节的深度必然比USB侧的章节浅一些，因为FreeBSD中的串行驱动程序比USB驱动程序更专业化，你更有可能阅读或修改现有的驱动程序，而不是从头开始编写一个全新的。如果你确实要为定制板编写新的UART驱动程序，路径很清楚：在一个窗口打开 `ns8250`，在另一个窗口打开你芯片的数据手册，逐一编写六个方法。
 
-Two key takeaways 帧 Section 5. First, testing 串行驱动程序 does not require real hardware. FreeBSD ships a `nmdm(4)` null-modem 驱动程序 that creates pairs of virtual TTYs you can wire together, letting you exercise termios changes, 流控制, and data flow without plugging in anything. Second, testing USB驱动程序 without hardware is harder but not impossible: you can use QEMU with USB redirection to test against real 设备 through a VM, or you can use FreeBSD's USB gadget mode to make one machine present itself as a USB 设备 to another. Section 5 covers both. The goal is to enable a development loop that does not depend on cable-handling and on plugging things in and out.
+通向第5节的两个关键要点。首先，测试串行驱动程序不需要真正的硬件。FreeBSD附带一个 `nmdm(4)` 空调制解调器驱动程序，可以创建成对的虚拟TTY供你连接在一起，让你无需插入任何东西就能测试termios更改、流控制和数据流。其次，在没有硬件的情况下测试USB驱动程序更难但并非不可能：你可以使用带有USB重定向的QEMU通过虚拟机测试真实设备，或者你可以使用FreeBSD的USB gadget模式让一台机器作为USB设备呈现给另一台机器。第5节涵盖这两者。目标是实现一个不依赖于处理线缆和插拔的开发循环。
 
-## 第5节： Testing USB和串行驱动程序 Without Real Hardware
+## 第5节：不使用真实硬件测试USB和串行驱动程序
 
-### Why This Section Exists
+### 为什么有这一节
 
-A beginning 驱动程序 writer often gets stuck at the same obstacle. They write a 驱动程序, compile it, want to try it, and discover they do not have the hardware, the hardware is behaving badly, the hardware is on the wrong machine, or the iteration loop of "change code, plug it in, see what happens, unplug it, change code again" is painfully slow and unreliable. Section 5 addresses this directly. FreeBSD provides several mechanisms that let you exercise 驱动程序 code paths without physical hardware, and knowing these mechanisms will save you hours of frustration.
+初学驱动程序编写者经常卡在同一个障碍上。他们编写了驱动程序、编译了它、想要尝试，然后发现他们没有硬件、硬件行为异常、硬件在错误的机器上，或者 "change code, plug it in, see what happens, unplug it, change code again" 的迭代循环缓慢且不可靠。第5节直接解决了这个问题。FreeBSD提供了几种机制让你无需物理硬件就能测试驱动程序代码路径，了解这些机制将为你节省数小时的挫败感。
 
-The goal is not to pretend hardware is present when it is not. The goal is to give you tools that cover the parts of 驱动程序 development where hardware is incidental, so that when you do plug in real hardware, you already know your code path logic is correct and you are only validating the physical interaction. Debugging a 注册-level quirk is faster when you know that your locking, your state machines, and your user 接口 are already sound.
+目标不是在硬件不存在时假装它存在。目标是为你提供工具来覆盖驱动程序开发中硬件是附带的部分，这样当你确实插入真实硬件时，你已经知道你的代码路径逻辑是正确的，只需要验证物理交互。当你知道你的锁定、状态机和用户接口已经正确时，调试寄存器级别的怪癖会更快。
 
-This section covers four such mechanisms: the `nmdm(4)` null-modem 驱动程序 for serial testing, basic userland tools for exercising TTYs (`cu`, `tip`, `stty`, `comcontrol`), QEMU with USB redirection for USB驱动程序 testing, and FreeBSD's USB gadget mode for presenting one machine as a USB 设备 to another. It ends with a short discussion of techniques that do not require any special tooling: unit tests at the functional layer, logging discipline, and assertion-driven development.
+本节涵盖四种这样的机制：用于串行测试的 `nmdm(4)` 空调制解调器驱动程序、用于操作TTY的基本用户态工具（`cu`、`tip`、`stty`、`comcontrol`）、用于USB驱动程序测试的带USB重定向的QEMU，以及FreeBSD的USB gadget模式（让一台机器作为USB设备呈现给另一台机器）。最后简要讨论不需要任何特殊工具的技术：功能层的单元测试、日志规范和断言驱动开发。
 
-### The `nmdm(4)` Null-Modem Driver
+### `nmdm(4)` 空调制解调器驱动程序
 
-`nmdm(4)` is a 内核模块 that creates pairs of linked virtual TTYs. When you write to one side, it comes out the other side, exactly as if you had connected two real 串行端口s with a null-modem cable. The 驱动程序 is in `/usr/src/sys/dev/nmdm/nmdm.c`, and it is loaded with:
+`nmdm(4)` 是一个内核模块，创建成对的链接虚拟TTY。当你写入一侧时，它会从另一侧出来，就像你用空调制解调器电缆连接了两个真正的串行端口一样。驱动程序位于 `/usr/src/sys/dev/nmdm/nmdm.c`，使用以下命令加载：
 
 ```console
 # kldload nmdm
 ```
 
-Once loaded, you can instantiate pairs on demand simply by opening them. Run:
+加载后，你可以通过简单地打开它们来按需创建对。运行：
 
 ```console
 # cu -l /dev/nmdm0A
 ```
 
-This opens the `A` side of pair `0`. On another terminal, run:
+这打开了第0对的 `A` 侧。在另一个终端上运行：
 
 ```console
 # cu -l /dev/nmdm0B
 ```
 
-Whatever you type into one `cu` session will appear in the other. You have now created a pair of virtual TTYs, with no hardware involved. You can change 波特率s with `stty` and the change will be noticed on both sides. You can assert DTR and CTS through ioctls and see the effect on the other side.
+你在任一 `cu` 会话中输入的内容都会出现在另一个会话中。你现在创建了一对虚拟TTY，无需任何硬件。你可以使用 `stty` 更改波特率，更改将在两侧都生效。你可以通过ioctl置位DTR和CTS并在另一侧看到效果。
 
-The utility of `nmdm(4)` for 驱动程序 development is twofold. First, if you are writing a TTY-layer user (say, a 驱动程序 that spawns a shell on a virtual TTY, or a userland program that implements a protocol over a TTY), you can test it end-to-end against `nmdm(4)` without any hardware. Second, if you are writing a `ucom(4)` or `uart(4)` 驱动程序, you can compare its behaviour to `nmdm(4)`'s behaviour by running the same userland test against both. If your 驱动程序 misbehaves where `nmdm(4)` does not, the bug is in your 驱动程序; if both misbehave, the bug is probably in your userland test.
+`nmdm(4)` 对驱动程序开发的用处有两个方面。首先，如果你正在编写一个TTY层用户（例如，一个在虚拟TTY上生成shell的驱动程序，或一个在TTY上实现协议的用户态程序），你可以端到端地针对 `nmdm(4)` 进行测试，无需任何硬件。其次，如果你正在编写 `ucom(4)` 或 `uart(4)` 驱动程序，你可以通过在两者上运行相同的用户态测试来比较其行为与 `nmdm(4)` 的行为。如果你的驱动程序在 `nmdm(4)` 正常的地方行为异常，错误在你的驱动程序中；如果两者都异常，错误可能在你的用户态测试中。
 
-A small caveat: `nmdm(4)` does not simulate 波特率 delays. Whatever you write comes out the other side at memory speed. This is usually what you want (you do not want to wait through a real 9600-baud transmission for a hundred-kilobyte test payload), but it does mean that timing-sensitive protocols cannot be tested with `nmdm(4)` alone.
+一个小注意事项：`nmdm(4)` 不模拟波特率延迟。你写入的任何内容都以内存速度从另一侧出来。这通常是你想要的（你不想等待真正的9600波特率传输来完成一百千字节的测试有效载荷），但这确实意味着时序敏感的协议不能仅用 `nmdm(4)` 测试。
 
-### The `cu(1)`, `tip(1)`, and `stty(1)` Toolbox
+### `cu(1)`、`tip(1)` 和 `stty(1)` 工具箱
 
-Whether you are using `nmdm(4)`, a real UART, or a USB-to-serial dongle, the userland tools you use to interact with a TTY are the same. The most important three are `cu(1)`, `tip(1)`, and `stty(1)`.
+无论你使用 `nmdm(4)`、真正的UART还是USB转串口适配器，与TTY交互的用户态工具都是相同的。最重要的三个是 `cu(1)`、`tip(1)` 和 `stty(1)`。
 
-`cu` is the classic "call up" program. It opens a TTY, puts the terminal into raw mode, and lets you type bytes to the port and see bytes coming back. To open a port at a specific 波特率:
+`cu` 是经典的 "call up" 程序。它打开一个TTY，将终端置于原始模式，让你向端口输入字节并看到返回的字节。要以特定波特率打开端口：
 
 ```console
 # cu -l /dev/cuau0 -s 115200
 ```
 
-The `-l` argument specifies the 设备, and `-s` specifies the 波特率. `cu` supports a handful of escape sequences (all starting with `~`) for exiting, sending files, and similar operations; `~.` is the standard "exit" escape and `~?` lists the others.
+`-l` 参数指定设备，`-s` 指定波特率。`cu` 支持一些转义序列（都以 `~` 开头）用于退出、发送文件和类似操作；`~.` 是标准的 "exit" 转义序列，`~?` 列出其他转义序列。
 
-`tip` is a related tool with similar semantics but a different configuration mechanism. `tip` reads `/etc/remote` for named connection entries and can take a name argument rather than a 设备 path. For most purposes, `cu` and `tip` are interchangeable; `cu` is more convenient for one-off use.
+`tip` 是一个相关工具，具有类似的语义但不同的配置机制。`tip` 读取 `/etc/remote` 获取命名的连接条目，可以接受名称参数而非设备路径。在大多数情况下，`cu` 和 `tip` 可以互换使用；`cu` 更便于一次性使用。
 
-`stty` prints or changes the termios parameters of a TTY. Run `stty -a -f /dev/ttyu0` to see every termios flag on the port. Run `stty 115200 -f /dev/ttyu0` to set the 波特率. Run `stty cs8 -parenb -cstopb -f /dev/ttyu0` to set eight 数据位, no 奇偶校验, one stop bit (the most common configuration in modern embedded work). The manual page is extensive, and the flags map almost directly onto the bits of `c_cflag`, `c_iflag`, `c_lflag`, and `c_oflag` in the `termios` struct.
+`stty` 打印或更改TTY的termios参数。运行 `stty -a -f /dev/ttyu0` 查看端口上的每个termios标志。运行 `stty 115200 -f /dev/ttyu0` 设置波特率。运行 `stty cs8 -parenb -cstopb -f /dev/ttyu0` 设置八个数据位、无奇偶校验、一个停止位（现代嵌入式工作中最常见的配置）。手册页很详细，这些标志几乎直接映射到 `termios` 结构中 `c_cflag`、`c_iflag`、`c_lflag` 和 `c_oflag` 的位。
 
-Using these three tools together gives you a flexible way to poke at your 驱动程序 from userland. You can change settings with `stty`, open the port with `cu`, send and receive bytes, close the port, check the state with `stty` again, and repeat. If your 驱动程序's `tsw_param` implementation has a bug, `stty` will expose it: the settings you set will not read back correctly, or the port will behave differently than requested.
+将这三个工具一起使用为你提供了一种灵活的方式来从用户态测试你的驱动程序。你可以用 `stty` 更改设置、用 `cu` 打开端口、发送和接收字节、关闭端口、再用 `stty` 检查状态，然后重复。如果你的驱动程序的 `tsw_param` 实现有错误，`stty` 会暴露它：你设置的设置将不能正确读回，或者端口的行为与请求的不同。
 
-### The `comcontrol(8)` Utility
+### `comcontrol(8)` 工具
 
-`comcontrol` is a specialised utility for 串行端口s. It sets port-specific parameters that are not exposed through termios. The two most important are the `drainwait` and the specific-RS-485 options. For beginner 驱动程序 testing, the more common use is inspecting port state: `comcontrol /dev/ttyu0` shows the current modem signals (DTR, RTS, CTS, DSR, CD, RI) and the current `drainwait`. You can also set the signals:
+`comcontrol` 是一个专门用于串行端口的工具。它设置不通过termios暴露的端口特定参数。两个最重要的是 `drainwait` 和特定的RS-485选项。对于初学者的驱动程序测试，更常见的用途是检查端口状态：`comcontrol /dev/ttyu0` 显示当前的调制解调器信号（DTR、RTS、CTS、DSR、CD、RI）和当前的 `drainwait`。你也可以设置信号：
 
 ```console
 # comcontrol /dev/ttyu0 dtr rts
 ```
 
-sets DTR and RTS. This is useful for testing flow-control handling without writing a custom program.
+设置DTR和RTS。这对于在不编写自定义程序的情况下测试流控制处理很有用。
 
-### The `usbconfig(8)` Utility
+### `usbconfig(8)` 工具
 
-On the USB side, `usbconfig(8)` is the Swiss Army knife. You used it at the end of Section 1 to inspect a 设备's 描述符. Several other subcommands are useful during 驱动程序 development:
+在USB方面，`usbconfig(8)` 是瑞士军刀。你在第1节末尾使用它检查设备的描述符。在驱动程序开发期间还有几个有用的子命令：
 
-- `usbconfig list`: list all 附加ed USB 设备.
-- `usbconfig -d ugenN.M dump_all_config_desc`: print every 描述符 for a 设备.
-- `usbconfig -d ugenN.M dump_设备_quirks`: print any quirks applied by the USB 框架.
-- `usbconfig -d ugenN.M dump_stats`: print per-transfer statistics.
-- `usbconfig -d ugenN.M suspend`: put the 设备 into the USB suspend state.
-- `usbconfig -d ugenN.M resume`: wake it up.
-- `usbconfig -d ugenN.M reset`: physically reset the 设备.
+- `usbconfig list`：列出所有已附加的USB设备。
+- `usbconfig -d ugenN.M dump_all_config_desc`：打印设备的每个描述符。
+- `usbconfig -d ugenN.M dump_device_quirks`：打印USB框架应用的任何怪癖。
+- `usbconfig -d ugenN.M dump_stats`：打印每传输统计。
+- `usbconfig -d ugenN.M suspend`：将设备置于USB挂起状态。
+- `usbconfig -d ugenN.M resume`：唤醒它。
+- `usbconfig -d ugenN.M reset`：物理重置设备。
 
-The `reset` command is particularly useful during development. A 驱动程序 under test can easily leave a 设备 in a confused state; `usbconfig reset` puts the 设备 back to the just-plugged-in condition without requiring a physical unplug.
+`reset` 命令在开发期间特别有用。测试中的驱动程序很容易让设备处于混乱状态；`usbconfig reset` 将设备恢复到刚插入的状态，而不需要物理拔出。
 
-### Testing USB Drivers with QEMU
+### 使用QEMU测试USB驱动程序
 
-QEMU, the generic CPU emulator, has strong USB support. You can run a FreeBSD guest inside QEMU and redirect real host USB 设备 into the guest. This is the single most useful technique for USB驱动程序 development, because it lets you test against real hardware while retaining all the iteration speed of working inside a VM.
+QEMU是通用CPU模拟器，具有强大的USB支持。你可以在QEMU内运行FreeBSD客户机，并将真实的主机USB设备重定向到客户机中。这是USB驱动程序开发中最有用的技术，因为它让你在保持虚拟机内工作迭代速度的同时测试真实硬件。
 
-On a FreeBSD host, install QEMU from ports:
+在FreeBSD主机上，从ports安装QEMU：
 
 ```console
 # pkg install qemu
 ```
 
-Install a FreeBSD guest image into a disk file (the mechanics are covered in Chapter 4 and Appendix A). When you boot the guest, add USB redirection options:
+将FreeBSD客户机镜像安装到磁盘文件中（具体步骤在第4章和附录A中介绍）。启动客户机时，添加USB重定向选项：
 
 ```console
 qemu-system-x86_64 \
@@ -2162,56 +2163,56 @@ qemu-system-x86_64 \
   -device usb-host,bus=xhci.0,vendorid=0x0403,productid=0x6001
 ```
 
-The `-设备 nec-usb-xhci` line adds a USB 3.0 controller to the guest. The `-设备 usb-host` line 附加 a specific USB 设备 from the host (identified by vendor and product) to that controller. When the guest boots, the 设备 appears on the guest's USB 总线 and can be enumerated by the guest's 内核.
+`-device nec-usb-xhci` 行向客户机添加了一个USB 3.0控制器。`-device usb-host` 行将主机中的一个特定USB设备（由供应商和产品标识符标识）附加到该控制器。当客户机启动时，该设备出现在客户机的USB总线上，并可由客户机的内核枚举。
 
-This setup gives you the full iteration loop inside the VM. You can load your 驱动程序, unload it, reload a rebuilt version, all without physically handling any cables. You can use serial console or networking to interact with the VM. You can snapshot the VM state before a risky test and revert if the test panics.
+这个设置为你提供了虚拟机内的完整迭代循环。你可以加载驱动程序、卸载它、重新加载重建的版本，所有这些都不需要物理处理任何线缆。你可以使用串行控制台或网络与虚拟机交互。你可以在有风险的测试之前快照虚拟机状态，如果测试崩溃则恢复。
 
-The main limitation is USB isochronous support, which is less stable across emulators. For bulk, interrupt, and 控制传输 (the three types most 驱动程序 use), QEMU USB redirection is reliable enough to be your primary development environment.
+主要限制是USB等时传输支持，在不同模拟器之间稳定性较差。对于批量、中断和控制传输（大多数驱动程序使用的三种类型），QEMU USB重定向足够可靠，可以作为你的主要开发环境。
 
-### FreeBSD USB Gadget Mode
+### FreeBSD USB Gadget模式
 
-If QEMU is not available and you have two FreeBSD machines, there is another option: `usb_template(4)` and the dual-role USB support on some hardware let you make one machine present itself as a USB 设备 to another. The host machine sees a normal USB peripheral; the gadget machine is actually running the 设备 side of the USB protocol.
+如果QEMU不可用且你有两台FreeBSD机器，还有另一个选择：`usb_template(4)` 和某些硬件上的双角色USB支持可以让你让一台机器作为USB设备呈现给另一台机器。主机看到的是一个普通的USB外设；gadget机器实际上在运行USB协议的设备端。
 
-This is an advanced topic and the hardware support is variable. On x86 platforms with USB-on-the-Go-capable chipsets, on some ARM boards, and on specific embedded configurations, the setup works. On most desktop hardware, it does not. The gory details are in `/usr/src/sys/dev/usb/template/` and in the `usb_template(4)` manual page.
+这是一个高级主题，硬件支持情况各异。在具有USB-on-the-Go功能芯片组的x86平台、某些ARM板和特定嵌入式配置上，设置有效。在大多数桌面硬件上，它不起作用。详细信息在 `/usr/src/sys/dev/usb/template/` 和 `usb_template(4)` 手册页中。
 
-If you have the hardware to use this technique, it is the closest thing to a full end-to-end USB驱动程序 test without physical peripherals. If you do not, do not pursue it for a learning project; use QEMU instead.
+如果你有硬件可以使用这种技术，这是在没有物理外设的情况下最接近完整端到端USB驱动程序测试的方法。如果没有，不要在学习项目中使用它；改用QEMU。
 
-### Techniques That Do Not Require Special Tooling
+### 不需要特殊工具的技术
 
-Beyond the 框架 above, there are several techniques that rely only on good 驱动程序 design.
+除了上述框架之外，还有几种仅依赖于良好驱动程序设计的技术。
 
-First, design your 驱动程序 so that the hardware-independent parts can be unit-tested in userland. If your 驱动程序 has a protocol parser, a state machine, or a checksum calculator, factor those into functions that take plain C 缓冲区 and return plain C results. You can then compile those functions into a userland test program and run them against known inputs. This catches many bugs before they reach the 内核.
+第一，设计你的驱动程序使硬件无关的部分可以在用户态进行单元测试。如果你的驱动程序有协议解析器、状态机或校验和计算器，将它们提取为接受普通C缓冲区并返回普通C结果的函数。然后你可以将这些函数编译到用户态测试程序中，用已知输入运行它们。这可以在bug到达内核之前捕获许多错误。
 
-Second, log aggressively during development and quietly in production. The `DLOG_RL` macro from 第25章 is your friend: it lets you emit frequent diagnostic messages during development, with a sysctl to suppress them in production. Rate-limiting prevents log storms if something goes wrong.
+第二，在开发期间积极记录日志，在生产环境中保持安静。第25章的 `DLOG_RL` 宏是你的朋友：它让你在开发期间频繁发出诊断消息，在生产环境中通过sysctl抑制它们。速率限制可以在出问题时防止日志风暴。
 
-Third, use assertions for invariants. `KASSERT(cond, ("message", args...))` will panic the 内核 if `cond` is false, but only in `INVARIANTS` 内核s. You can run your 驱动程序 in an `INVARIANTS` 内核 during development and in a production 内核 later, without changing the code. The Chapter 20 discussion of `INVARIANTS` is the reference.
+第三，为不变量使用断言。`KASSERT(cond, ("message", args...))` 会在 `cond` 为假时导致内核崩溃，但仅在 `INVARIANTS` 内核中。你可以在开发期间在 `INVARIANTS` 内核中运行驱动程序，之后在生产内核中运行，无需更改代码。第20章对 `INVARIANTS` 的讨论是参考。
 
-Fourth, be rigorous about concurrency testing. Use `INVARIANTS` plus `WITNESS` (which tracks lock ordering) during development. If your 驱动程序 has a locking bug that almost always works but occasionally deadlocks, `WITNESS` will catch it on the first occurrence.
+第四，对并发测试要严格。在开发期间使用 `INVARIANTS` 加上 `WITNESS`（跟踪锁顺序）。如果你的驱动程序有一个几乎总是有效但偶尔会死锁的锁错误，`WITNESS` 会在第一次发生时捕获它。
 
-Fifth, write a simple userland client for your 驱动程序 and use it as part of your development loop. Even a ten-line program that opens the 设备, writes a known string, reads a known response, and checks the result is enormously useful. You can run it in a loop during stress testing, you can run it with `ktrace -f cmd` to get a trace of system calls, and you can run it under a debugger if something surprises you.
+第五，为你的驱动程序编写一个简单的用户态客户端，并将其作为开发循环的一部分。即使是一个十行的程序，打开设备、写入已知字符串、读取已知响应并检查结果，也非常有用。你可以在压力测试期间循环运行它，你可以用 `ktrace -f cmd` 获取系统调用追踪，如果有什么出乎意料的情况，你可以在调试器下运行它。
 
-### A Walkthrough of QEMU USB Redirection
+### QEMU USB重定向演练
 
-QEMU's USB support is the single most useful tool for USB驱动程序 development, so a more detailed walkthrough is in order. Suppose you want to develop a 驱动程序 for a specific FT232 adapter. Your host is a FreeBSD 14.3 machine, and you want to run your 驱动程序 on a guest FreeBSD 14.3 VM inside QEMU.
+QEMU的USB支持是USB驱动程序开发中最有用的工具，因此值得进行更详细的演练。假设你要为特定的FT232适配器开发驱动程序。你的主机是FreeBSD 14.3机器，你想在QEMU内的FreeBSD 14.3虚拟机上运行你的驱动程序。
 
-First, install QEMU and create a guest disk image:
+首先，安装QEMU并创建客户机磁盘镜像：
 
 ```console
 # pkg install qemu
 # truncate -s 16G guest.img
 ```
 
-Install FreeBSD into the image. The exact procedure is covered in Appendix A, but the short version is: boot a FreeBSD installer ISO as the CD-ROM, install onto the disk image, reboot.
+在镜像中安装FreeBSD。具体步骤在附录A中介绍，简短版本是：将FreeBSD安装ISO作为CD-ROM启动，安装到磁盘镜像，重启。
 
-Once the guest is installed, locate the host USB 设备 you want to redirect. Plug in the FT232 and note the vendor and 产品IDs from `usbconfig list`:
+客户机安装完成后，找到你想要重定向的主机USB设备。插入FT232并从 `usbconfig list` 记录厂商和产品ID：
 
 ```text
 ugen0.3: <FTDI FT232R USB UART> at usbus0
 ```
 
-`usbconfig -d ugen0.3 dump_设备_desc` will show `idVendor = 0x0403` and `idProduct = 0x6001`.
+`usbconfig -d ugen0.3 dump_device_desc` 将显示 `idVendor = 0x0403` 和 `idProduct = 0x6001`。
 
-Now start QEMU with USB redirection:
+现在启动带有USB重定向的QEMU：
 
 ```console
 qemu-system-x86_64 \
@@ -2224,9 +2225,9 @@ qemu-system-x86_64 \
   -net user -net nic
 ```
 
-The `-设备 nec-usb-xhci` line adds a USB 3.0 controller to the VM. The `-设备 usb-host` line redirects the matching host 设备 into the VM. When the VM boots, the FT232 will appear as if it were plugged directly into the VM's USB port.
+`-device nec-usb-xhci` 行向虚拟机添加了一个USB 3.0控制器。`-device usb-host` 行将匹配的主机设备重定向到虚拟机中。当虚拟机启动时，FT232就像直接插入虚拟机的USB端口一样出现。
 
-Inside the VM, run `dmesg` and look for the USB 附加:
+在虚拟机内运行 `dmesg` 查找USB附加信息：
 
 ```text
 uhub0: 4 ports with 4 removable, self powered
@@ -2234,27 +2235,27 @@ uftdi0 on usbus0
 uftdi0: <FTDI FT232R USB UART, class 255/0, rev 2.00/6.00, addr 2> on usbus0
 ```
 
-Your 驱动程序 (whether `uftdi` or your own work-in-progress) will see a real FT232 with real 描述符, real transfer behaviour, and real quirks. You can unload and reload your 驱动程序 inside the VM without disconnecting anything; you can run 内核 with `INVARIANTS` and `WITNESS` without worrying about host-side impact; you can snapshot the VM and revert if a test goes badly.
+你的驱动程序（无论是 `uftdi` 还是你正在开发中的驱动程序）将看到一个真正的FT232，具有真实的描述符、真实的传输行为和真实的怪癖。你可以在虚拟机内卸载和重新加载驱动程序而不断开任何东西；你可以在带有 `INVARIANTS` 和 `WITNESS` 的内核中运行而不用担心对主机的影响；你可以在测试出错时快照虚拟机并恢复。
 
-A few subtleties to be aware of with USB redirection:
+USB重定向需要注意的几个细节：
 
-- Only one consumer can claim a USB 设备 at a time. If you redirect a 设备 into a VM, the host loses access to it until the VM releases it. This matters if you are redirecting something like a USB keyboard or mouse; choose a spare 设备 for development.
+- 一次只有一个消费者可以声明一个USB设备。如果你将设备重定向到虚拟机，主机将失去对它的访问，直到虚拟机释放它。如果你重定向的是USB键盘或鼠标之类的东西，这很重要；选择一个备用设备用于开发。
 
-- USB 等时传输 have some quirks in QEMU. They work, but timing can be slightly off. For most 驱动程序 development, you will be working with bulk, interrupt, and 控制传输, so this is rarely a concern.
+- USB等时传输在QEMU中有一些怪癖。它们可以工作，但时序可能略有偏差。对于大多数驱动程序开发，你将使用批量、中断和控制传输，因此这很少是问题。
 
-- Some 主机控制器s (particularly xHCI) can reset under heavy I/O. If your 驱动程序 behaves strangely under stress testing, try with a different `-设备` type (uhci, ehci, xhci) to see whether the issue is in your 驱动程序 or in the emulated controller.
+- 一些主机控制器（特别是xHCI）在繁重I/O下可能会重置。如果你的驱动程序在压力测试下行为异常，尝试使用不同的 `-设备` 类型（uhci、ehci、xhci）来看看问题是在你的驱动程序还是在模拟控制器中。
 
-- USB 3.0 SuperSpeed transfers are more reliable with `-设备 nec-usb-xhci`. Older `-usb` flag-based controllers are limited to USB 2.0.
+- 使用 `-device nec-usb-xhci` 时，USB 3.0 SuperSpeed 传输更可靠。较旧的基于 `-usb` 标志的控制器仅限于 USB 2.0。
 
-When the VM is running, the iteration cycle becomes: edit code on the host, copy to the VM (or 挂载 a shared directory), build inside the VM, load, test, reload, repeat. A Makefile with a `test:` target that does all of this can cut iteration time to tens of seconds.
+当虚拟机运行时，迭代循环变为：在主机上编辑代码，复制到虚拟机（或挂载共享目录），在虚拟机内构建、加载、测试、重新加载，重复。一个带有 `test:` 目标的Makefile可以将迭代时间缩短到几十秒。
 
-### Using `devd(8)` During Development
+### 在开发期间使用 `devd(8)`
 
-`devd(8)` is FreeBSD's 设备-event daemon. It reacts to 内核 notifications about 设备 附加 and 分离 and can run configured commands in response. During 驱动程序 development, `devd` is useful in two ways.
+`devd(8)` 是FreeBSD的设备事件守护进程。它对内核关于设备附加和分离的通知做出反应，可以运行配置的命令来响应。在驱动程序开发期间，`devd` 在两方面很有用。
 
-First, it can auto-load your module when a matching 设备 is plugged in. If your module is in `/boot/modules/` and your `USB_PNP_HOST_INFO` is set, `devd` will run `kldload` automatically when it sees a 设备 that would match.
+第一，它可以在匹配的设备插入时自动加载你的模块。如果你的模块在 `/boot/modules/` 中并且设置了 `USB_PNP_HOST_INFO`，`devd` 会在看到匹配的设备时自动运行 `kldload`。
 
-Second, it can run diagnostic commands on 附加. A `/etc/devd.conf` entry like:
+第二，它可以在附加时运行诊断命令。一个 `/etc/devd.conf` 条目如：
 
 ```text
 attach 100 {
@@ -2263,9 +2264,9 @@ attach 100 {
 };
 ```
 
-will write a log line every time a `myfirst_usb` 设备 附加. For more elaborate diagnostics, you can invoke your own shell script that dumps state, starts userland consumers, or sends notifications.
+将在每次 `myfirst_usb` 设备附加时写入一行日志。对于更详细的诊断，你可以调用自己的shell脚本来转储状态、启动用户态消费者或发送通知。
 
-During development, a useful pattern is to have `devd` open a `cu` session to a newly 附加ed `ucom` 设备, so you can exercise the 驱动程序 the moment it 附加:
+在开发期间，一个有用的模式是让 `devd` 在新附加的 `ucom` 设备上打开一个 `cu` 会话，这样你可以在驱动程序附加的瞬间就测试它：
 
 ```text
 attach 100 {
@@ -2274,11 +2275,11 @@ attach 100 {
 };
 ```
 
-This runs the test in a 分离ed `screen` session, which you can later 附加 to with `screen -r usb-serial`.
+这在一个分离的 `screen` 会话中运行测试，你之后可以用 `screen -r usb-serial` 附加到它。
 
-### Writing a Simple Userland Test Harness
+### 编写简单的用户态测试工具
 
-Most 驱动程序 bugs are exposed by actually running the 驱动程序 against userland. Even a short test program catches more bugs than reading the 驱动程序's code carefully. For our echo 驱动程序, a minimal test program looks like:
+大多数驱动程序错误是通过实际运行驱动程序与用户态交互来暴露的。即使是一个简短的测试程序也能比仔细阅读驱动程序代码捕获更多的错误。对于我们的echo驱动程序，一个最小的测试程序如下：
 
 ```c
 #include <fcntl.h>
@@ -2321,20 +2322,20 @@ main(int argc, char **argv)
 }
 ```
 
-Compile with `cc -o lab03-test lab03-test.c`. Run with `./lab03-test`. The expected output is "got 5 bytes: hello".
+用 `cc -o lab03-test lab03-test.c` 编译。用 `./lab03-test` 运行。预期输出是"got 5 bytes: hello"。
 
-Extensions to this test harness that catch more bugs:
+这个测试工具的扩展可以捕获更多错误：
 
-- Loop the open/write/read/close cycle a thousand times. Memory leaks and resource leaks show up after a few hundred iterations.
-- Fork multiple processes and have them all read/write concurrently. Race conditions manifest as random data corruption or deadlocks.
-- Intentionally kill the test process mid-transfer. Driver-side state machines sometimes get confused when a userland consumer disappears unexpectedly.
-- Send random-length writes (1 byte, 10 bytes, 100 bytes, 1 KB, 10 KB). Edge cases around short and long transfers are where many subtle bugs live.
+- 将open/write/read/close循环运行一千次。内存泄漏和资源泄漏在几百次迭代后就会显现。
+- 派生多个进程让它们同时读写。竞态条件表现为随机数据损坏或死锁。
+- 故意在传输过程中杀死测试进程。当用户态消费者意外消失时，驱动程序侧的状态机有时会混乱。
+- 发送随机长度的写入（1字节、10字节、100字节、1 KB、10 KB）。短传输和长传输的边缘情况是许多微妙错误藏身的地方。
 
-Build these extensions incrementally. Each one will probably reveal a bug the previous version did not; each bug you fix will make your 驱动程序 more ro总线t.
+逐步构建这些扩展。每个扩展可能会揭示前一个版本没有发现的错误；你修复的每个错误都会让你的驱动程序更健壮。
 
-### Logging Patterns for Development
+### 开发期间的日志模式
 
-During development, you want verbose logging. In production, you want silence. The pattern from 第25章 (`DLOG_RL` with a sysctl to control verbosity) carries over unchanged to USB and UART 驱动程序. Define a rate-limited logging macro that compiles to a no-op in production builds, and sprinkle it through every branch that might be interesting during debugging:
+在开发期间，你需要详细的日志。在生产环境中，你需要安静。第25章的模式（`DLOG_RL` 加上sysctl来控制详细程度）原样适用于USB和UART驱动程序。定义一个在生产构建中编译为空操作的速率限制日志宏，并将它散布在调试期间可能感兴趣的每个分支中：
 
 ```c
 #ifdef MYFIRST_USB_DEBUG
@@ -2348,7 +2349,7 @@ During development, you want verbose logging. In production, you want silence. T
 #endif
 ```
 
-Then in the 回调:
+然后在回调中：
 
 ```c
 case USB_ST_TRANSFERRED:
@@ -2356,7 +2357,7 @@ case USB_ST_TRANSFERRED:
     ...
 ```
 
-Control `myfirst_usb_debug` through a sysctl:
+通过sysctl控制 `myfirst_usb_debug`：
 
 ```c
 static int myfirst_usb_debug = 0;
@@ -2364,287 +2365,287 @@ SYSCTL_INT(_hw_myfirst_usb, OID_AUTO, debug, CTLFLAG_RWTUN,
     &myfirst_usb_debug, 0, "Enable debug logging");
 ```
 
-Now you can turn logging on and off at runtime with `sysctl hw.myfirst_usb.debug=1`. During development, turn it on. During stress tests, turn it off (logging rate-limiting helps, but zero logging is even cheaper). During post-mortem analysis of a bug, turn it on and reproduce.
+现在你可以用 `sysctl hw.myfirst_usb.debug=1` 在运行时打开和关闭日志。在开发期间打开它。在压力测试期间关闭它（日志速率限制有帮助，但零日志更廉价）。在bug的事后分析期间，打开它并重现问题。
 
-### A Test-Driven Workflow for 第26章
+### 第26章的测试驱动工作流
 
-For the hands-on labs coming in the next section, a good workflow looks like this:
+对于下一节中的动手实验，一个好的工作流如下：
 
-1. Write the 驱动程序 code.
-2. Compile it. Fix build errors.
-3. Load it in a test VM. Observe `dmesg` for 附加 failures.
-4. Run a small userland client that exercises the 驱动程序's I/O paths.
-5. Unload. Make a change. Go back to step 2.
-6. Once the 驱动程序 behaves well in the VM, test it on real hardware as a sanity check.
+1. 编写驱动程序代码。
+2. 编译它。修复构建错误。
+3. 在测试虚拟机中加载它。观察 `dmesg` 查找附加失败。
+4. 运行一个小型用户态客户端来测试驱动程序的I/O路径。
+5. 卸载。做修改。回到第2步。
+6. 一旦驱动程序在虚拟机中表现良好，在真实硬件上测试作为完整性检查。
 
-Most of the time spent on this loop is in steps 1 through 4. Real hardware testing in step 6 is a validation step, not an iteration step. If you try to iterate on real hardware, you will waste time on plug-unplug cycles and on recovering from accidental misconfigurations; the VM saves you this.
+在这个循环中花费的大部分时间在第1到第4步。第6步的真实硬件测试是验证步骤，不是迭代步骤。如果你试图在真实硬件上迭代，你会浪费时间在插拔循环和从意外错误配置中恢复上；虚拟机为你节省了这些。
 
-A fresh install of FreeBSD in a small VM, configured to boot quickly and to have your 驱动程序's build directory 挂载ed as a shared 文件系统, is a highly productive development environment. Spending half a day to set one up pays back many times over in the days that follow.
+在一个小型虚拟机中全新安装FreeBSD，配置为快速启动并将驱动程序的构建目录挂载为共享文件系统，是一个高效的开发环境。花半天时间设置一个在之后的日子里会获得多次回报。
 
-### 总结 Section 5
+### 第5节总结
 
-Section 5 has given you the tools to develop USB and 串行驱动程序 without being tied to specific physical hardware. `nmdm(4)` covers the serial-port side for any test that does not need a real modem. QEMU USB redirection covers the USB side for nearly any 驱动程序 you might write. The `cu`, `tip`, `stty`, `comcontrol`, and `usbconfig` utilities give you the userland tools to exercise 驱动程序 code paths by hand. And the general techniques, from factoring hardware-independent code into userland-testable functions to using `INVARIANTS` and `WITNESS` for 内核-time correctness checking, work regardless of what transport you are writing for.
+第5节为你提供了开发USB和串行驱动程序而不依赖特定物理硬件的工具。`nmdm(4)` 覆盖了任何不需要真正调制解调器的测试的串行端口侧。QEMU USB重定向覆盖了你可能编写的几乎所有驱动程序的USB侧。`cu`、`tip`、`stty`、`comcontrol` 和 `usbconfig` 工具为你提供了手动测试驱动程序代码路径的用户态工具。通用技术，从将硬件无关代码提取为用户态可测试的函数到使用 `INVARIANTS` 和 `WITNESS` 进行内核时的正确性检查，无论你编写什么传输层都有效。
 
-Having reached the end of Section 5, you have everything you need to start writing real USB and 串行驱动程序 for FreeBSD 14.3. The conceptual models, the code skeletons, the transfer mechanics, the TTY integration, and the testing environment are all in place. What remains is practice, which is the purpose of the next section.
+到达第5节末尾时，你已经具备了开始为FreeBSD 14.3编写真正的USB和串行驱动程序所需的一切。概念模型、代码骨架、传输机制、TTY集成和测试环境都已就绪。剩下的就是练习，这是下一节的目的。
 
-## Common Patterns Across Transport Drivers
+## 跨传输驱动程序的通用模式
 
-Now that we have walked through USB and serial in detail, it is worth stepping back and noting the patterns that recur. These patterns appear in 网络驱动程序 (第28章), 块 驱动程序 (第27章), and most other transport-specific 驱动程序 in FreeBSD. Recognising them saves time when you read a new 驱动程序.
+现在我们已经详细介绍了USB和串行，值得退后一步，注意那些反复出现的模式。这些模式出现在网络驱动程序（第28章）、块驱动程序（第27章）以及FreeBSD中大多数其他传输特定的驱动程序中。识别它们可以在你阅读新驱动程序时节省时间。
 
-### Pattern 1: Match Table, Probe, Attach, Detach
+### 模式1：匹配表、探测、附加、分离
 
-Every transport 驱动程序 begins with a 匹配表 describing which 设备 it supports. Every transport 驱动程序 has a 探测 method that tests a candidate against the 匹配表 and returns zero or `ENXIO`. Every transport 驱动程序 has an 附加 method that takes ownership of a matched 设备 and allocates all per-设备 state. Every transport 驱动程序 has a 分离 method that releases everything the 附加 method allocated, in reverse order.
+每个传输驱动程序都以一个描述其支持哪些设备的匹配表开始。每个传输驱动程序都有一个探测方法，根据匹配表测试候选设备并返回零或 `ENXIO`。每个传输驱动程序都有一个附加方法，接管匹配设备的所有权并分配所有每设备状态。每个传输驱动程序都有一个分离方法，以相反的顺序释放附加方法分配的所有内容。
 
-The specifics vary. USB 匹配表s use `STRUCT_USB_HOST_ID`. PCI 匹配表s use `pcidev(9)` entries. ISA 匹配表s use resource descriptions. The content differs, but the structure is identical.
+具体细节因传输方式而异。USB匹配表使用 `STRUCT_USB_HOST_ID`。PCI匹配表使用 `pcidev(9)` 条目。ISA匹配表使用资源描述。内容不同，但结构相同。
 
-When you read a new 驱动程序, the first thing to find is the 匹配表. It tells you what hardware the 驱动程序 supports. The second thing to find is the 附加 method. It tells you what resources the 驱动程序 owns. The third thing to find is the 分离 method. It tells you the shape of the 驱动程序's resource hierarchy.
+当你阅读一个新驱动程序时，首先要找的是匹配表。它告诉你驱动程序支持什么硬件。第二要找的是附加方法。它告诉你驱动程序拥有什么资源。第三要找的是分离方法。它告诉你驱动程序资源层次结构的形状。
 
-### Pattern 2: Softc As The Single Source of Per-Device State
+### 模式2：Softc作为每设备状态的唯一来源
 
-Every transport 驱动程序 has a per-设备 softc. Every piece of mutable state lives in the softc. No global variables are used to hold per-设备 state (global configuration like module flags is fine). This pattern keeps multi-设备驱动程序 correct without surprise.
+每个传输驱动程序都有一个每设备的softc。每个可变状态都存在于softc中。不使用全局变量来保存每设备状态（像模块标志这样的全局配置是可以的）。这种模式使多设备驱动程序保持正确而不会出现意外。
 
-The softc's size is declared in the 驱动程序 structure. The 框架 allocates and frees the softc automatically. The 驱动程序 accesses it through `设备_get_softc(dev)` inside New总线 methods and through whatever 框架 helper (like `usbd_xfer_softc`) is appropriate in 回调.
+softc的大小在驱动程序结构中声明。框架自动分配和释放softc。驱动程序在Newbus方法内通过 `device_get_softc(dev)` 访问它，在回调中通过适当的框架辅助函数（如 `usbd_xfer_softc`）访问。
 
-Adding a new feature to a 驱动程序 often means adding a new field to the softc, a new initialisation step in 附加, a new cleanup step in 分离, and whatever code uses the field in between. When you structure changes this way, you rarely forget to clean things up, because the shape of the change makes the cleanup step obvious.
+为驱动程序添加新功能通常意味着在softc中添加新字段、在附加中添加新的初始化步骤、在分离中添加新的清理步骤，以及使用该字段的代码。当你以这种方式组织更改时，你很少会忘记清理，因为更改的形状使清理步骤变得显而易见。
 
-### Pattern 3: Labelled-Goto Cleanup Chain
+### 模式3：标签化Goto清理链
 
-When an 附加 method has to allocate several resources, each allocation has a failure path that unwinds all previous allocations. The labelled-goto chain from 第25章 implements this uniformly. Every resource has a label corresponding to "the state where this resource has been successfully allocated." A failure at any point jumps to the label for the state just before, which cleans up in reverse order.
+当附加方法需要分配多个资源时，每个分配都有一个失败路径来展开所有先前的分配。第25章的标签化goto链统一实现了这一点。每个资源都有一个对应于"该资源已成功分配的状态"。任何点的失败都会跳转到恰好前一个状态的标签，该标签以相反顺序进行清理。
 
-This pattern is not aesthetically pleasing to some programmers (C's `goto` has a bad reputation), but it is pragmatically the cleanest way to handle an arbitrary number of cleanup steps in C. Alternatives like wrapping each resource in a separate function with its own cleanup are often more verbose. Alternatives like setting a flag per resource and testing it in a common cleanup routine add error-prone state management.
+这种模式对一些程序员来说在美学上不太令人愉悦（C语言的 `goto` 有不好的名声），但实际上这是在C语言中处理任意数量清理步骤的最干净的方法。像将每个资源包装在带有自己清理的单独函数中的替代方案通常更冗长。像为每个资源设置标志并在公共清理例程中测试它的替代方案增加了容易出错的状态管理。
 
-Whatever you think of `goto`, FreeBSD 驱动程序 use the labelled-goto pattern, and new 驱动程序 are expected to follow the convention.
+无论你对 `goto` 有什么看法，FreeBSD驱动程序使用标签化goto模式，新驱动程序应遵循这一约定。
 
-### Pattern 4: Frameworks Hide Transport Details
+### 模式4：框架隐藏传输细节
 
-Each transport has a 框架 that hides transport-specific details behind a uniform API. The USB 框架 hides DMA 缓冲区 management behind `usb_page_cache` and `usbd_copy_in/out`. The UART 框架 hides interrupt dispatching behind `uart_ops`. The network 框架 (第28章) will hide 数据包 缓冲区 management behind mbufs and `ifnet(9)`.
+每种传输都有一个框架，在统一的API后面隐藏传输特定的细节。USB框架在 `usb_page_cache` 和 `usbd_copy_in/out` 后面隐藏DMA缓冲区管理。UART框架在 `uart_ops` 后面隐藏中断分发。网络框架（第28章）将在mbufs和 `ifnet(9)` 后面隐藏数据包缓冲区管理。
 
-The value of these 框架 is that 驱动程序 become smaller and more portable. A 200-line UART 驱动程序 that supports dozens of chip variants would be impossible without the 框架. A 500-line USB驱动程序 that supports a complex protocol like USB audio would likewise be out of reach.
+这些框架的价值在于驱动程序变得更小、更可移植。一个支持数十种芯片变体的200行UART驱动程序如果没有框架是不可能的。一个支持像USB音频这样的复杂协议的500行USB驱动程序同样不可能实现。
 
-When you read a new 驱动程序, the parts you find most dense are usually the chip-specific logic. The parts that seem almost absent (the transfer scheduling, the 缓冲区 management, the TTY integration) are where the 框架 is doing its work.
+当你阅读新驱动程序时，你发现最密集的部分通常是芯片特定的逻辑。那些似乎几乎不存在的部分（传输调度、缓冲区管理、TTY集成）是框架在发挥作用的地方。
 
-### Pattern 5: Callbacks with State Machines
+### 模式5：带状态机的回调
 
-The USB 回调's three-state machine (`USB_ST_SETUP`, `USB_ST_TRANSFERRED`, `USB_ST_ERROR`) is the canonical example, but similar patterns appear in other transport 驱动程序. A 网络驱动程序's transmit completion 回调 has a similar structure. A 块 驱动程序's request completion 回调 is similar. The 框架 calls the 驱动程序 back at well-defined moments, and the 驱动程序 uses a state machine to decide what to do.
+USB回调的三状态机（`USB_ST_SETUP`、`USB_ST_TRANSFERRED`、`USB_ST_ERROR`）是典型的例子，但类似的模式出现在其他传输驱动程序中。网络驱动程序的传输完成回调有类似的结构。块驱动程序的请求完成回调也类似。框架在明确定义的时刻回调驱动程序，驱动程序使用状态机来决定做什么。
 
-Learning to read these state machines is learning a universal 驱动程序-reading skill. The specific states differ from 框架 to 框架, but the pattern is recognisable.
+学会阅读这些状态机就是学习一种通用的驱动程序阅读技能。具体的状态因框架而异，但模式是可识别的。
 
-### Pattern 6: Mutexes and Wakeups
+### 模式6：互斥锁和唤醒
 
-Every 驱动程序 protects its softc with a 互斥锁. Userland-facing code (read, write, ioctl) takes the 互斥锁 while manipulating softc fields. Callback code runs with the 互斥锁 held (the 框架 acquires it before calling). Userland code releases the 互斥锁 before sleeping and reacquires it after waking. Wakeup calls from 回调 release any sleeper waiting on the relevant channel.
+每个驱动程序用互斥锁保护其softc。面向用户态的代码（read、write、ioctl）在操作softc字段时获取互斥锁。回调代码在持有互斥锁的情况下运行（框架在调用之前获取它）。用户态代码在睡眠之前释放互斥锁并在醒来后重新获取。来自回调的唤醒调用释放任何在相关通道上等待的睡眠者。
 
-The specifics vary by transport, but the pattern is universal. Modern FreeBSD 驱动程序 are uniformly multithreaded and multi-CPU safe, which requires disciplined locking.
+具体细节因传输方式而异，但模式是通用的。现代FreeBSD驱动程序统一是多线程和多CPU安全的，这需要规范的锁定。
 
-### Pattern 7: Errno-Returning Helpers
+### 模式7：返回errno的辅助函数
 
-第25章 introduced the errno-returning helper function pattern: every internal function returns an integer errno (zero for success, nonzero for failure). Callers check the return value and propagate failure up through the stack. The 附加 method accumulates successful helpers in the labelled-goto chain; each helper's failure triggers the cleanup corresponding to its position.
+第25章介绍了返回errno的辅助函数模式：每个内部函数返回一个整数errno（零表示成功，非零表示失败）。调用者检查返回值并通过栈向上传播失败。附加方法在标签化goto链中累积成功的辅助函数；每个辅助函数的失败触发对应其位置的清理。
 
-This pattern requires discipline. Every helper must be consistent; no helper can return a "success value" that varies in meaning, and no helper can use global state to communicate failure. When followed rigorously, the pattern produces 驱动程序 where the control flow is legible and the error paths are easy to audit.
+这种模式需要纪律。每个辅助函数必须一致；没有辅助函数可以返回一个 "success value" 含义不同的值，也没有辅助函数可以使用全局状态来传达失败。严格遵循时，这种模式产生的驱动程序中控制流是清晰的，错误路径易于审计。
 
-### Pattern 8: Version Declarations and Module Dependencies
+### 模式8：版本声明和模块依赖
 
-Every 驱动程序 module declares its own version with `MODULE_VERSION`. Every 驱动程序 module declares its dependencies with `MODULE_DEPEND`. Dependencies are versioned ranges (minimum, preferred, maximum), which allows parallel development of 框架 and 驱动程序 to proceed without lockstep releases.
+每个驱动程序模块用 `MODULE_VERSION` 声明自己的版本。每个驱动程序模块用 `MODULE_DEPEND` 声明其依赖。依赖是版本化的范围（最小值、首选值、最大值），这允许框架和驱动的并行开发而无需同步发布。
 
-When a new major version of a 框架 is released with breaking API changes, the version range in `MODULE_DEPEND` is how a 驱动程序 expresses "I work with 框架 v1 or v2, but not v3." The 内核模块 loader refuses to load a 驱动程序 whose dependencies cannot be satisfied, which prevents many classes of silent breakage.
+当框架的新主版本发布并带有破坏性API更改时，`MODULE_DEPEND` 中的版本范围是驱动程序表达"我适用于框架v1或v2，但不适用于v3"的方式。 内核模块加载器拒绝加载依赖无法满足的驱动程序，这防止了许多类的静默破坏。
 
-### Pattern 9: Cross-Framework Layering
+### 模式9：跨框架分层
 
-Some 驱动程序 sit on top of multiple 框架. A USB-to-以太网 驱动程序 sits on top of `usbdi(9)` (for USB transfers) and `ifnet(9)` (for 网络接口 semantics). A USB-to-串行驱动程序 sits on top of `usbdi(9)` and `ucom(4)`. A USB mass-存储驱动程序 sits on top of `usbdi(9)` and CAM.
+一些驱动程序位于多个框架之上。USB转以太网驱动程序位于 `usbdi(9)`（用于USB传输）和 `ifnet(9)`（用于网络接口语义）之上。USB转串行驱动程序位于 `usbdi(9)` 和 `ucom(4)` 之上。USB大容量存储驱动程序位于 `usbdi(9)` 和CAM之上。
 
-When you write a cross-框架 驱动程序, the structure is: you write 回调 for each 框架, and you orchestrate the interaction between them in your 驱动程序's helper code. The 框架 on top of which you sit defines how userland sees your 驱动程序. The 框架 below handles the transport.
+当你编写跨框架驱动程序时，结构是：你为每个框架编写回调，并在驱动程序的辅助代码中协调它们之间的交互。你位于其上的框架定义了用户态如何看待你的驱动程序。下面的框架处理传输。
 
-Reading `uftdi.c` showed you this pattern: the 驱动程序 is a USB驱动程序 (it uses `usbdi(9)`) and a 串行驱动程序 (it uses `ucom(4)`), and the orchestration between the two is the heart of the file.
+阅读 `uftdi.c` 向你展示了这种模式：驱动程序既是USB驱动程序（使用 `usbdi(9)`），也是串行驱动程序（使用 `ucom(4)`），两者之间的协调是文件的核心。
 
-### Pattern 10: Early Attach Deferral
+### 模式10：早期附加延迟
 
-Some 驱动程序 cannot finish their 附加 work synchronously. For example, a 驱动程序 might need to read a configuration EEPROM that takes a few hundred milliseconds, or it might need to wait for a PHY to autonegotiate a link. These 驱动程序 use a deferred-附加 pattern: the New总线 附加 method queues a taskqueue task that does the slow work, then returns quickly.
+一些驱动程序无法同步完成其附加工作。例如，驱动程序可能需要读取需要几百毫秒的配置EEPROM，或者可能需要等待PHY自动协商链路。这些驱动程序使用延迟附加模式：Newbus附加方法将一个taskqueue任务排队来执行慢速工作，然后快速返回。
 
-This pattern keeps the system boot fast (no single 驱动程序 holds up boot by taking a long time in 附加) and lets 驱动程序 do their work asynchronously. The caller must be aware that 附加 "finishing" does not mean the 设备 is fully usable; a separate "ready" state has to be polled or signalled.
+这种模式保持系统启动快速（没有单个驱动程序通过在附加中花费很长时间来阻碍启动）并让驱动程序异步执行其工作。调用者必须意识到附加"完成"并不意味着设备完全可用；有一个单独的"就绪"状态需要轮询或信号通知。
 
-For USB and UART 驱动程序, 附加 is usually fast enough that deferral is not needed. For more complex 驱动程序 (network cards in particular), deferral is common. 第28章 will show an example.
+对于USB和UART驱动程序，附加通常足够快，不需要延迟。对于更复杂的驱动程序（特别是网卡），延迟很常见。第28章将展示一个例子。
 
-### Pattern 11: Separate Data Path and Control Path
+### 模式11：分离数据路径和控制路径
 
-In every transport 驱动程序, two conceptual paths exist: the control path (configuration, state changes, error recovery) and the data path (the actual bytes moving through the 设备). Most 驱动程序 structure these as separate code paths, sometimes with separate locking.
+在每个传输驱动程序中，存在两个概念路径：控制路径（配置、状态更改、错误恢复）和数据路径（通过设备移动的实际字节）。大多数驱动程序将它们构建为单独的代码路径，有时使用单独的锁定。
 
-The control path is low-bandwidth and infrequent. It can afford heavy locking and synchronous calls. The data path is high-bandwidth and continuous. It must be optimised for throughput: minimal locking, no synchronous calls, efficient 缓冲区 management.
+控制路径是低带宽和不频繁的。它可以承受重度锁定和同步调用。数据路径是高带宽和连续的。它必须为吞吐量进行优化：最少的锁定、无同步调用、高效的缓冲区管理。
 
-The USB 框架 keeps them naturally separate: configuration through `usbd_transfer_setup` and 控制传输; data through bulk and 中断传输. The UART 框架 likewise: configuration through `tsw_param`; data through the 中断处理程序 and 环形缓冲区. Network 驱动程序 have the most pronounced separation: configuration through ioctls; data through the TX and RX queues.
+USB框架自然地将它们分开：通过 `usbd_transfer_setup` 和控制传输进行配置；通过批量传输和中断传输传输数据。UART框架同样：通过 `tsw_param` 进行配置；通过中断处理程序和环形缓冲区传输数据。网络驱动程序的分离最为明显：通过ioctl进行配置；通过TX和RX队列传输数据。
 
-Reading a new 驱动程序, knowing this separation exists helps you parse what each code 块 is doing. A function with extensive locking and error handling is probably control path. A function with short, tight code and careful 缓冲区 management is probably data path.
+阅读新驱动程序时，知道这种分离的存在有助于你解析每个代码块在做什么。一个具有大量锁定和错误处理的函数可能是控制路径。一个具有简短、紧凑代码和仔细缓冲区管理的函数可能是数据路径。
 
-### Pattern 12: Reference Drivers
+### 模式12：参考驱动程序
 
-Every transport in FreeBSD has one or two "canonical" reference 驱动程序 that illustrate the patterns correctly and thoroughly. For USB, `uled.c` and `uftdi.c` are the references. For UART, `uart_dev_ns8250.c` is the reference. For networking, `em` (Intel 以太网) and `rl` (Realtek) are the references. For 块设备, `da` (direct-access storage) is the reference.
+FreeBSD中的每种传输都有一个或两个"规范"参考驱动程序——正确且详尽地展示模式的参考驱动程序。对于USB，`uled.c` 和 `uftdi.c` 是参考。对于UART，`uart_dev_ns8250.c` 是参考。对于网络，`em`（Intel以太网）和 `rl`（Realtek）是参考。对于块设备，`da`（直接访问存储）是参考。
 
-When you need to understand how to write a new 驱动程序 in an existing transport, the reference 驱动程序 is the right place to start. Do not try to understand the 框架 from its code alone; that is too abstract. Start from a working 驱动程序 and let it ground your understanding.
+当你需要理解如何在现有传输中编写新驱动程序时，参考驱动程序是正确的起点。不要试图仅从框架的代码来理解它；那太抽象了。从一个工作的驱动程序开始，让它为你的理解奠定基础。
 
 ## 动手实验
 
-These labs give you a chance to turn the reading into muscle memory. Each lab is designed to fit in a single sitting, ideally under an hour. They assume a FreeBSD 14.3 lab environment (either on physical hardware or inside a virtual machine), root access, and a working build environment as described in Chapter 3. The companion files for every lab in this chapter are available under `examples/part-06/ch26-usb-serial/` in the book's repository.
+这些实验给你机会将阅读转化为肌肉记忆。每个实验设计为一次完成，理想情况下不超过一小时。它们假设一个FreeBSD 14.3实验环境（物理硬件或虚拟机内）、root访问权限和第3章中描述的工作构建环境。本章每个实验的配套文件可在书籍仓库的 `examples/part-06/ch26-usb-serial/` 下找到。
 
-The labs build on each other but do not strictly depend on each other. You can skip a lab and come back to it later without losing continuity. The first three labs focus on USB; the last three focus on serial. Each lab has the same structure: a short summary, the steps, expected output, and a "what to watch for" note that highlights the learning goal.
+实验相互衔接但不严格相互依赖。你可以跳过一个实验稍后再回来而不失去连续性。前三个实验关注USB；后三个关注串行。每个实验有相同的结构：简短摘要、步骤、预期输出，以及一个"注意事项"注释来突出学习目标。
 
-### Lab 1: Exploring a USB Device with `usbconfig`
+### 实验1：使用 `usbconfig` 探索USB设备
 
-This lab exercises the 描述符 vocabulary from Section 1 by inspecting real USB 设备 on your machine. It does not involve writing any code.
+本实验通过检查你机器上的真实USB设备来练习第1节的描述符词汇。不涉及编写任何代码。
 
-**Goal.** Read the 描述符 of three different USB 设备 and identify their 接口 class, the number of 端点, and the 端点 types.
+**目标。** 读取三个不同USB设备的描述符，识别它们的接口类、端点数量和端点类型。
 
-**Requirements.** A FreeBSD system with at least three USB 设备 plugged in. If you only have one machine and few USB ports, a USB hub with a few small peripherals (mouse, keyboard, flash drive) is ideal.
+**要求。** 一台至少插入三个USB设备的FreeBSD系统。如果你只有一台机器且USB端口少，一个带有几个小外设（鼠标、键盘、闪存驱动器）的USB集线器是理想的。
 
-**Steps.**
+**步骤。**
 
-1. Run `usbconfig list` as root. Record the `ugenN.M` identifiers of three 设备.
+1. 以root身份运行 `usbconfig list`。记录三个设备的 `ugenN.M` 标识符。
 
-2. For each 设备, run:
+2. 对于每个设备，运行：
 
    ```
    # usbconfig -d ugenN.M dump_all_config_desc
    ```
 
-   Read through the output. Identify the `bInterfaceClass`, `bInterfaceSubClass`, and `bInterfaceProtocol` for each 接口. For each 端点 in each 接口, record the `bEndpointAddress` (including direction bit), the `bmAttributes` (including transfer type), and the `wMaxPacketSize`.
+   阅读输出。识别每个接口的 `bInterfaceClass`、`bInterfaceSubClass` 和 `bInterfaceProtocol`。对于每个接口中的每个端点，记录 `bEndpointAddress`（包括方向位）、`bmAttributes`（包括传输类型）和 `wMaxPacketSize`。
 
-3. Build a small table. For each 设备, write down: 供应商ID, 产品ID, 接口 class (with name from the USB class list), number of 端点, and the transfer type of each 端点.
+3. 制作一个小表。对于每个设备，写下：供应商ID、产品ID、接口类（使用USB类列表中的名称）、端点数量以及每个端点的传输类型。
 
-4. Match your table against `dmesg`. Confirm that the 驱动程序 that claimed each 设备 makes sense given the 接口 class you recorded.
+4. 将你的表与 `dmesg` 对比。确认声明每个设备的驱动程序在给定你记录的接口类的情况下是合理的。
 
-5. Optional: repeat the exercise for a 设备 you have not seen before (someone else's keyboard, a USB audio 接口, a game controller). The more variety you see, the faster 描述符 reading becomes.
+5. 可选：对你之前没见过的设备（别人的键盘、USB音频接口、游戏控制器）重复这个练习。你看到的种类越多，描述符阅读就越快。
 
-**Expected output.** A filled-in table with at least three rows. The exercise is successful if you can answer, for any 设备 in the table: "What class of 驱动程序 would handle this?"
+**预期输出。** 一个至少三行的填好的表。如果你能回答表中任何设备的以下问题，则练习成功："什么样的驱动程序会处理这个设备？"
 
-**What to watch for.** Pay attention to 设备 that expose multiple 接口. A webcam, for example, often has an audio 接口 (for the microphone) in addition to its video 接口. A multi-function printer might expose a printer 接口, a scanner 接口, and a mass-storage 接口. Noticing these is what trains your eye for the multi-接口 logic in the `探测` method.
+**注意事项。** 注意暴露多个接口的设备。例如，网络摄像头通常除了视频接口外还有音频接口（用于麦克风）。多功能打印机可能暴露打印机接口、扫描仪接口和大容量存储接口。注意到这些有助于训练你发现探测方法中多接口逻辑的眼光。
 
-### Lab 2: Building and Loading the USB Driver Skeleton
+### 实验2：构建和加载USB驱动程序骨架
 
-This lab walks through building the skeleton 驱动程序 from Section 2, loading it, and observing its behaviour when a matching 设备 is plugged in.
+本实验演示构建第2节的骨架驱动程序、加载它，并观察匹配设备插入时的行为。
 
-**Goal.** Compile and load `myfirst_usb.ko`, and observe its 附加 and 分离 messages.
+**目标。** 编译并加载 `myfirst_usb.ko`，观察其附加和分离消息。
 
-**Requirements.** The build environment from Chapter 3. The files under `examples/part-06/ch26-usb-serial/lab02-usb-skeleton/`. A USB 设备 whose vendor/product you can match. For development, a VOTI/OBDEV test VID/PID (0x16c0/0x05dc) is free to use; otherwise, pick a cheap prototyping 设备 (like an FT232 breakout board) and adjust the 匹配表 to match its IDs.
+**要求。** 第3章的构建环境。`examples/part-06/ch26-usb-serial/lab02-usb-skeleton/` 下的文件。一个你可以匹配其vendor/product的USB设备。用于开发时，VOTI/OBDEV测试VID/PID（0x16c0/0x05dc）可免费使用；否则，选择一个廉价的原型设备（如FT232分线板）并调整匹配表以匹配其ID。
 
-**Steps.**
+**步骤。**
 
-1. Enter the lab directory:
+1. 进入实验目录：
 
    ```
    # cd examples/part-06/ch26-usb-serial/lab02-usb-skeleton
    ```
 
-2. Read `myfirst_usb.c` and `myfirst_usb.h`. Identify the 匹配表, the 探测 method, the 附加 method, the softc, and the 分离 method. For each, trace how it relates to the Section 2 walkthrough.
+2. 阅读 `myfirst_usb.c` 和 `myfirst_usb.h`。识别匹配表、探测方法、附加方法、softc和分离方法。对于每个，追踪它如何与第2节的演练相关。
 
-3. Build the module:
+3. 构建模块：
 
    ```
    # make
    ```
 
-   You should see `myfirst_usb.ko` created in the build directory.
+   你应该看到 `myfirst_usb.ko` 在构建目录中创建。
 
-4. Load the module:
+4. 加载模块：
 
    ```
    # kldload ./myfirst_usb.ko
    ```
 
-   Run `kldstat | grep myfirst_usb` to confirm the module is loaded.
+   运行 `kldstat | grep myfirst_usb` 确认模块已加载。
 
-5. Plug in a matching 设备. Observe `dmesg`. You should see a line like:
+5. 插入匹配的设备。观察 `dmesg`。你应该看到类似这样的行：
 
    ```
    myfirst_usb0: <Vendor Product> on uhub0
    myfirst_usb0: attached
    ```
 
-   If the 设备 does not match, nothing will happen. In that case, open `usbdevs` on the target machine, find the vendor/product of a 设备 you do have, and edit the 匹配表 accordingly. Rebuild, reload, and try again.
+   如果设备不匹配，什么都不会发生。在这种情况下，在目标机器上打开 `usbdevs`，找到你确实有的设备的vendor/product，并相应地编辑匹配表。重建、重新加载并重试。
 
-6. Unplug the 设备. Observe `dmesg`. You should see the 内核 remove the 设备. Your `分离` does not log anything explicitly in this minimal skeleton, but you can add a `设备_printf(dev, "分离ed\n")` if you want confirmation.
+6. 拔出设备。观察 `dmesg`。你应该看到内核移除设备。在这个最小骨架中，你的分离方法不会显式记录任何内容，但如果你想要确认，可以添加 `device_printf(dev, "分离ed\n")`。
 
-7. Unload the module:
+7. 卸载模块：
 
    ```
    # kldunload myfirst_usb
    ```
 
-**Expected output.** Attach messages in `dmesg` when the 设备 is plugged in. Clean unload with no panics when the module is removed.
+**预期输出。** 设备插入时 `dmesg` 中出现附加消息。模块移除时干净卸载，没有崩溃。
 
-**What to watch for.** If `kldload` fails with an error about symbol lookups, you probably forgot a `MODULE_DEPEND` line or misspelled a symbol name. If `附加` is never called but the 设备 is definitely present, the 匹配表 is wrong: check the vendor and 产品IDs in `usbconfig list` and verify they match what you wrote in `myfirst_usb_devs`. If `附加` is called but fails, check `设备_printf` output for the failure reason.
+**注意事项。** 如果 `kldload` 因符号查找错误而失败，你可能忘记了一个 `MODULE_DEPEND` 行或拼错了符号名称。如果附加从未被调用但设备确实存在，匹配表是错误的：检查 `usbconfig list` 中的vendor和产品ID，验证它们是否与你在 `myfirst_usb_devs` 中写的一致。如果附加被调用但失败了，检查 `device_printf` 输出了解失败原因。
 
-### Lab 3: A Bulk Loopback Test
+### 实验3：批量环回测试
 
-This lab adds the transfer mechanics from Section 3 to the skeleton from Lab 2 and sends a few bytes through a USB 设备 that implements a loopback protocol. It is the first lab that actually moves data.
+本实验将第3节的传输机制添加到实验2的骨架中，通过实现环回协议的USB设备发送几个字节。这是第一个真正传输数据的实验。
 
-**Goal.** Add a bulk-OUT and bulk-IN channel to the 驱动程序, write a small userland client that sends a string and reads it back, and observe the roundtrip.
+**目标。** 向驱动程序添加批量输出和批量输入通道，编写一个小型用户态客户端发送字符串并读回，观察往返过程。
 
-**Requirements.** A USB 设备 that implements bulk loopback. The simplest such 设备 for development is a USB gadget controller running a loopback program (possible on some ARM boards and on some development kits). If you do not have one, you can substitute a simpler exercise: 附加 the 驱动程序 to a USB flash drive, open one of its `ugen` 端点, and simply armed-submit-complete a single read transfer. The loop will fail (because flash drives do not echo data), but the mechanics of setup and submission will run correctly.
+**要求。** 一个实现批量环回的USB设备。最简单的这种开发设备是运行环回程序的USB gadget控制器（在某些ARM板和某些开发板上可能）。如果没有，你可以替代为一个更简单的练习：将驱动程序附加到USB闪存驱动器，打开其 `ugen` 端点之一，简单地执行一次读取传输的 armed-submit-complete。环回将失败（因为闪存驱动器不会回显数据），但设置和提交的机制将正确运行。
 
-**Steps.**
+**步骤。**
 
-1. Copy `lab02-usb-skeleton` to `lab03-bulk-loopback` as a working copy.
+1. 将 `lab02-usb-skeleton` 复制到 `lab03-bulk-loopback` 作为工作副本。
 
-2. Add the bulk channels to the 驱动程序. Paste the config array from Section 3, the 回调 functions, and the userland interaction. Make sure the `/dev` entry your 驱动程序 creates supports `read(2)` and `write(2)`, which are what the lab test program uses.
+2. 将批量通道添加到驱动程序。粘贴第3节的配置数组、回调函数和用户态交互。确保你的驱动程序创建的 `/dev` 条目支持 `read(2)` 和 `write(2)`，这是实验测试程序使用的。
 
-3. Rebuild and reload the module.
+3. 重新构建并重新加载模块。
 
-4. Run the userland client:
+4. 运行用户态客户端：
 
    ```
    # ./lab03-test
    ```
 
-   which you will find alongside the 驱动程序 in the lab directory. The program opens `/dev/myfirst_usb0`, writes "hello", reads up to 16 bytes, and prints them. If loopback works, the output is "hello".
+   你会在实验目录中的驱动程序旁边找到它。程序打开 `/dev/myfirst_usb0`，写入"hello"，读取最多16个字节并打印它们。如果环回工作，输出是"hello"。
 
-5. Observe `dmesg` for any stall warnings or error messages.
+5. 观察 `dmesg` 查找任何停顿警告或错误消息。
 
-**Expected output.** "hello" echoed back. If the remote 设备 does not implement loopback, the read will return after the channel's timeout with no data, which is also a valid test outcome for the purposes of exercising the state machine.
+**预期输出。** "hello"被回显。如果远端设备不实现环回，读取将在通道超时后返回无数据，这也是用于测试状态机的有效测试结果。
 
-**What to watch for.** The most common mistake in this lab is mismatched 端点 directions. Remember: `UE_DIR_IN` means "the host reads from the 设备" and `UE_DIR_OUT` means "the host writes to the 设备". If you swap them, the transfers will fail with stalls. Watch also for missing locking around the userland read/write handlers; if you manipulate the transmit queue without the softc 互斥锁 held, you can race with the write 回调 and see bytes disappear.
+**注意事项。** 本实验最常见的错误是端点方向不匹配。记住：`UE_DIR_IN` 表示"主机从设备读取"，`UE_DIR_OUT` 表示"主机向设备写入"。如果你交换了它们，传输将以停顿失败。还要注意用户态读/写处理程序周围缺少锁定；如果你在没有持有softc互斥锁的情况下操作传输队列，你可能会与写回调竞争并看到字节消失。
 
-### Lab 4: A Simulated Serial Driver with `nmdm(4)`
+### 实验4：使用 `nmdm(4)` 的模拟串行驱动程序
 
-This lab is not about writing a 驱动程序; it is about learning the userland half of serial testing. The results will inform how you approach Lab 5 and how you debug any TTY-layer work in the future.
+本实验不是关于编写驱动程序；而是关于学习串行测试的用户态部分。结果将影响你如何进行实验5以及未来如何调试任何TTY层工作。
 
-**Goal.** Create a pair of `nmdm(4)` virtual ports, observe how data flows, and exercise `stty` and `comcontrol` to see how termios and modem signals work.
+**目标。** 创建一对 `nmdm(4)` 虚拟端口，观察数据如何流动，使用 `stty` 和 `comcontrol` 查看termios和调制解调器信号如何工作。
 
-**Requirements.** A FreeBSD system. No special hardware.
+**要求。** 一台FreeBSD系统。无需特殊硬件。
 
-**Steps.**
+**步骤。**
 
-1. Load the `nmdm` module:
+1. 加载 `nmdm` 模块：
 
    ```
    # kldload nmdm
    ```
 
-2. In terminal A, open the `A` side:
+2. 在终端A中，打开 `A` 侧：
 
    ```
    # cu -l /dev/nmdm0A -s 9600
    ```
 
-3. In terminal B, open the `B` side:
+3. 在终端B中，打开 `B` 侧：
 
    ```
    # cu -l /dev/nmdm0B -s 9600
    ```
 
-4. Type in terminal A. Observe that the characters appear in terminal B. Type in terminal B; they appear in terminal A.
+4. 在终端A中输入。观察字符出现在终端B中。在终端B中输入；它们出现在终端A中。
 
-5. Exit `cu` in both terminals (type `~.`). In a third terminal, run:
+5. 在两个终端中退出 `cu`（输入 `~.`）。在第三个终端中运行：
 
    ```
    # stty -a -f /dev/nmdm0A
    ```
 
-   Read through the output. Notice `9600` for the 波特率, `cs8 -parenb -cstopb` for the byte format, and various flags for line discipline.
+   阅读输出。注意波特率为 `9600`，字节格式为 `cs8 -parenb -cstopb`，以及各种线路规程标志。
 
-6. Change the 波特率 on one side:
+6. 更改一侧的波特率：
 
    ```
    # stty 115200 -f /dev/nmdm0A
    ```
 
-   Then open the ports again with `cu -s 115200`. The 波特率 change is visible, even though `nmdm(4)` does not actually wait for serialised bits.
+   然后用 `cu -s 115200` 再次打开端口。波特率更改是可见的，尽管 `nmdm(4)` 实际上并不等待串行化位。
 
 7. Run:
 
@@ -2652,118 +2653,118 @@ This lab is not about writing a 驱动程序; it is about learning the userland 
    # comcontrol /dev/ttyu0A
    ```
 
-   ...or rather, the equivalent for the `nmdm` 字符设备. The `nmdm` pairs do not always have `comcontrol`-visible modem signals, depending on the FreeBSD version; if your version does not, skip this step.
+   ...或者更准确地说，`nmdm` 字符设备的等价物。`nmdm` 对并不总是有 `comcontrol` 可见的调制解调器信号，取决于FreeBSD版本；如果你的版本没有，跳过这一步。
 
-**Expected output.** Text appears on the opposite side. `stty` shows termios flags. You now have a reproducible way to test TTY-layer behaviour on your machine.
+**预期输出。** 文本出现在对面。`stty` 显示termios标志。你现在有了一种可复现的方式来在你的机器上测试TTY层行为。
 
-**What to watch for.** The pair identifiers (`0`, `1`, `2`...) are implicit and allocated on first open. If you cannot open `/dev/nmdm5A` because nothing has opened `/dev/nmdm4A` yet, this is expected: pairs are created lazily in increasing order. Also note that `cu` uses a lock file in `/var/spool/lock/`; if you kill `cu` abruptly, the lock file may persist and prevent reopens. Delete it manually if you get a "port in use" error.
+**注意事项。** 对标识符（`0`、`1`、`2`...）是隐式的并在首次打开时分配。如果你无法打开 `/dev/nmdm5A` 是因为还没有任何东西打开过 `/dev/nmdm4A`，这是预期的：对是按递增顺序延迟创建的。还要注意 `cu` 使用 `/var/spool/lock/` 中的锁文件；如果你突然杀死 `cu`，锁文件可能持续存在并阻止重新打开。如果你得到"port in use"错误，手动删除它。
 
-### Lab 5: Talking to a Real USB-to-Serial Adapter
+### 实验5：与真正的USB转串口适配器通信
 
-This lab brings real hardware into the loop. You will use a USB-to-serial adapter (an FT232, a CP2102, a CH340G, or anything else FreeBSD supports) and a terminal program to exercise the full path from `ucom(4)` through the TTY layer to userland.
+本实验将真正的硬件引入循环。你将使用USB转串口适配器（FT232、CP2102、CH340G或FreeBSD支持的任何其他设备）和终端程序来测试从 `ucom(4)` 到TTY层再到用户态的完整路径。
 
-**Goal.** Plug in a USB-to-serial adapter, verify it 附加, and use `cu` to send data to it (perhaps by looping the TX and RX pins together with a jumper).
+**目标。** 插入USB转串口适配器，验证它已附加，并使用 `cu` 向其发送数据（也许通过跳线将TX和RX引脚连接在一起）。
 
-**Requirements.** A USB-to-serial adapter. A jumper wire (if you want to do a hardware loopback) or a second serial 设备 to talk to (a development board, an embedded computer, or an old serial modem).
+**要求。** 一个USB转串口适配器。一根跳线（如果你想进行硬件环回）或一个可以通信的第二串行设备（开发板、嵌入式计算机或旧串行调制解调器）。
 
-**Steps.**
+**步骤。**
 
-1. Plug in the adapter. Run `dmesg | tail` and confirm it 附加. You should see lines like:
+1. 插入适配器。运行 `dmesg | tail` 确认它已附加。你应该看到类似这样的行：
 
    ```
    uftdi0 on uhub0
    uftdi0: <FT232R USB UART, class 0/0, ...> on usbus0
    ```
 
-   and a `ucomN: <...>` line just after that.
+   以及紧随其后的 `ucomN: <...>` 行。
 
-2. Run `ls -l /dev/cuaU*`. The adapter's port is usually `/dev/cuaU0` for the first adapter, `/dev/cuaU1` for the second, and so on. (Note the capital-U suffix, which distinguishes USB-provided ports from the real UART ports at `/dev/cuau0`.)
+2. 运行 `ls -l /dev/cuaU*`。适配器的端口通常是 `/dev/cuaU0` 用于第一个适配器，`/dev/cuaU1` 用于第二个，以此类推。（注意大写U后缀，它区分USB提供的端口和 `/dev/cuau0` 处的真正UART端口。）
 
-3. Put a jumper wire between the TX and RX pins of the adapter. This creates a hardware loopback: whatever the adapter transmits comes back on its own RX line.
+3. 在适配器的TX和RX引脚之间放置一根跳线。这创建了一个硬件环回：适配器发送的任何内容都会在其自己的RX线上返回。
 
-4. In one terminal, set the 波特率:
+4. 在一个终端中，设置波特率：
 
    ```
    # stty 9600 -f /dev/cuaU0
    ```
 
-5. Open the port with `cu`:
+5. 用 `cu` 打开端口：
 
    ```
    # cu -l /dev/cuaU0 -s 9600
    ```
 
-   Type characters. Every character you type should appear twice: once as local echo (if your terminal is echoing), and once as the character coming back through the loopback. Disable the local echo in `cu` if it is confusing; the `stty -echo` will help.
+   输入字符。你输入的每个字符应该出现两次：一次作为本地回显（如果你的终端在回显），一次作为通过环回返回的字符。如果令人困惑，在 `cu` 中禁用本地回显；`stty -echo` 会有帮助。
 
-6. Remove the jumper. Type characters. Now they will not come back, because there is nothing connected to RX.
+6. 移除跳线。输入字符。现在它们不会回来了，因为RX上没有连接任何东西。
 
-7. Exit `cu` with `~.`. Unplug the adapter. Run `dmesg | tail` and verify clean 分离.
+7. 用 `~.` 退出 `cu`。拔出适配器。运行 `dmesg | tail` 验证干净的分离。
 
-**Expected output.** Characters are echoed back when the jumper is in place and lost when it is not. The `dmesg` shows clean 附加 and 分离.
+**预期输出。** 跳线在位时字符被回显，不在位时丢失。`dmesg` 显示干净的附加和分离。
 
-**What to watch for.** If the adapter 附加 but no `cuaU` 设备 appears, the underlying `ucom(4)` instance may have 附加ed but failed to create its TTY. Check `dmesg` for errors. If characters come out garbled, the 波特率 is probably wrong: make sure every stage of the path (your terminal, `cu`, `stty`, the adapter, and the far end) is set to the same rate. On older hardware, some USB-to-serial adapters do not reset their internal configuration when you open them; you may need to explicitly set the 波特率 with `stty` before `cu` will work correctly.
+**注意事项。** 如果适配器已附加但没有 `cuaU` 设备出现，底层 `ucom(4)` 实例可能已附加但未能创建其TTY。检查 `dmesg` 查找错误。如果字符出来是乱码，波特率可能错误：确保路径的每个阶段（你的终端、`cu`、`stty`、适配器和远端）都设置为相同的速率。在较旧的硬件上，一些USB转串口适配器在你打开它们时不会重置其内部配置；在 `cu` 正确工作之前，你可能需要用 `stty` 显式设置波特率。
 
-### Lab 6: Observing Hot-Plug Lifecycle
+### 实验6：观察热插拔生命周期
 
-This lab does not require writing any new 驱动程序 code. It exercises the 热插拔 lifecycle we described conceptually in Section 1 and in code in Section 2, using the existing `uhid` or `ukbd` 驱动程序 as the test subject.
+本实验不需要编写任何新的驱动程序代码。它使用现有的 `uhid` 或 `ukbd` 驱动程序作为测试对象，练习我们在第1节概念上和第2节代码中描述的热插拔生命周期。
 
-**Goal.** Plug in and unplug a USB 设备 repeatedly while monitoring 内核 logs, observing the full 附加/分离 sequence.
+**目标。** 在监视内核日志的同时反复插入和拔出USB设备，观察完整的附加/分离序列。
 
-**Requirements.** A USB 设备 you can plug and unplug without disrupting your work session. A USB flash drive or a USB mouse are both safe; a USB keyboard is not (because 分离ing a keyboard in the middle of a session can strand your shell).
+**要求。** 一个你可以插拔而不中断工作会话的USB设备。USB闪存驱动器或USB鼠标都是安全的；USB键盘不安全（因为在会话中间分离键盘可能使你的shell搁浅）。
 
-**Steps.**
+**步骤。**
 
-1. Open a terminal window and run:
+1. 打开一个终端窗口并运行：
 
    ```
    # tail -f /var/log/messages
    ```
 
-   or, if your system does not log 内核 messages to that file:
+   或者，如果你的系统不将内核消息记录到该文件：
 
    ```
    # dmesg -w
    ```
 
-   (The `-w` flag is a FreeBSD 14 addition that streams new 内核 messages as they arrive.)
+   （`-w` 标志是FreeBSD 14的新增功能，流式传输新到达的内核消息。）
 
-2. Plug in your USB 设备. Observe the messages. You should see:
-   - A message from the USB controller about the new 设备 appearing.
-   - A message from `uhub` about the port powering up.
-   - A message from the class 驱动程序 that matched the 设备 (e.g., `ums0` for a mouse, `umass0` for a flash drive).
-   - Possibly a message from the higher-level subsystem (e.g., `da0` for a mass-storage 设备).
+2. 插入你的USB设备。观察消息。你应该看到：
+   - 来自USB控制器关于新设备出现的消息。
+   - 来自 `uhub` 关于端口上电的消息。
+   - 来自匹配设备的类驱动程序的消息（例如，鼠标的 `ums0`，闪存驱动器的 `umass0`）。
+   - 可能还有来自更高级子系统的消息（例如，大容量存储设备的 `da0`）。
 
-3. Unplug the 设备. Observe the messages. You should see:
-   - A message from `uhub` about the port powering down.
-   - A 分离 message from the class 驱动程序.
+3. 拔出设备。观察消息。你应该看到：
+   - 来自 `uhub` 关于端口下电的消息。
+   - 来自类驱动程序的分离消息。
 
-4. Repeat several times. Watch that every 附加 is matched by a 分离. Watch that no message is missed. Watch the timing; the 附加 sequence can take tens or hundreds of milliseconds because enumeration involves several 控制传输.
+4. 重复几次。注意每个附加都有匹配的分离。注意没有消息被遗漏。注意时间；附加序列可能需要几十或几百毫秒，因为枚举涉及多个控制传输。
 
-5. Write a tiny shell loop that records the 附加 and 分离 times:
+5. 写一个小的shell循环记录附加和分离时间：
 
    ```
    # dmesg -w | awk '/ums|umass/ { print systime(), $0 }'
    ```
 
-   (Adjust the regex for the 设备 type you are using.) This gives you a machine-readable log of 附加 and 分离 timestamps.
+   （根据你使用的设备类型调整正则表达式。）这给你一个可机器读取的附加和分离时间戳日志。
 
-**Expected output.** Clean 附加 and 分离 every time, with no dangling state.
+**预期输出。** 每次都有干净的附加和分离，没有悬空状态。
 
-**What to watch for.** Occasionally you will see a 设备 附加 and then immediately 分离 within a few hundred milliseconds. This usually indicates the 设备 is failing enumeration: either a bad cable, insufficient power, or a buggy 设备 firmware. If it happens consistently with one 设备, try a different USB port or a powered hub. Also watch for cases where the 内核 reports a stall during enumeration; these are rarely harmful but indicate that the enumeration needed multiple tries.
+**注意事项。** 偶尔你会看到一个设备附加然后在几百毫秒内立即分离。这通常表示设备枚举失败：要么是坏电缆、供电不足，要么是有缺陷的设备固件。如果某个设备持续出现这种情况，尝试不同的USB端口或带电源的集线器。还要注意内核在枚举期间报告停顿的情况；这些通常无害，但表示枚举需要多次尝试。
 
-### Lab 7: Building a ucom(4) Skeleton from Scratch
+### 实验7：从零构建ucom(4)骨架
 
-This lab is an extended one that combines the USB and serial material from the chapter. You will build a minimal `ucom(4)` 驱动程序 skeleton that presents itself as a 串行端口 but is backed by a simple USB 设备.
+本实验是一个扩展实验，结合了本章的USB和串行材料。你将构建一个最小的 `ucom(4)` 驱动程序骨架，它将自己呈现为一个串行端口，但由简单的USB设备支持。
 
-**Goal.** Build a `ucom(4)` 驱动程序 skeleton that 附加 to a specific USB 设备, 寄存器 with the `ucom(4)` 框架, and provides empty implementations of the key 回调. The 驱动程序 will not actually talk to the hardware, but it will exercise the full `ucom(4)` registration path.
+**目标。** 构建一个 `ucom(4)` 驱动程序骨架，附加到特定的USB设备，向 `ucom(4)` 框架注册，并提供关键回调的空实现。驱动程序不会真正与硬件通信，但它将测试完整的 `ucom(4)` 注册路径。
 
-**Requirements.** The materials from Lab 2 (the USB驱动程序 skeleton). A USB 设备 you can match against (for testing, you can use the same VOTI/OBDEV VID/PID as in Lab 2, or any spare USB 设备 whose IDs you can read).
+**要求。** 实验2的材料（USB驱动程序骨架）。一个你可以匹配的USB设备（用于测试，你可以使用与实验2相同的VOTI/OBDEV VID/PID，或任何你可以读取ID的备用USB设备）。
 
-**Steps.**
+**步骤。**
 
-1. Start from Lab 2 as a template. Copy the directory to `lab07-ucom-skeleton`.
+1. 以实验2为模板开始。将目录复制到 `lab07-ucom-skeleton`。
 
-2. Modify the softc to include a `struct ucom_super_softc` and a `struct ucom_softc`:
+2. 修改softc以包含 `struct ucom_super_softc` 和 `struct ucom_softc`：
 
    ```c
    struct lab07_softc {
@@ -2777,7 +2778,7 @@ This lab is an extended one that combines the USB and serial material from the c
    };
    ```
 
-3. Add a `struct ucom_回调` with stub implementations:
+3. 添加带有存根实现的 `struct ucom_callback`：
 
    ```c
    static void lab07_cfg_open(struct ucom_softc *);
@@ -2809,11 +2810,11 @@ This lab is an extended one that combines the USB and serial material from the c
    };
    ```
 
-   `ucom_pre_param` runs on the caller's context before the configuration task is scheduled; use it to reject unsupported termios values by returning a nonzero errno. `ucom_cfg_param` runs in the 框架's task context and is where you would issue the actual USB 控制传输 to reprogram the chip.
+   `ucom_pre_param` 在配置任务调度之前在调用者的上下文中运行；用它通过返回非零errno来拒绝不支持的termios值。`ucom_cfg_param` 在框架的任务上下文中运行，是你发出实际USB控制传输来重新编程芯片的地方。
 
-4. Implement each 回调 as a no-op for now. Add `设备_printf(sc->sc_super_ucom.sc_dev, "%s\n", __func__)` to each so that you can see which 回调 are being invoked.
+4. 现在将每个回调实现为空操作。向每个回调添加 `device_printf(sc->sc_super_ucom.sc_dev, "%s\n", __func__)`，这样你可以看到哪些回调正在被调用。
 
-5. In the 附加 method, after `usbd_transfer_setup`, call:
+5. 在附加方法中，在 `usbd_transfer_setup` 之后调用：
 
    ```c
    error = ucom_attach(&sc->sc_super_ucom, &sc->sc_ucom, 1, sc,
@@ -2823,186 +2824,186 @@ This lab is an extended one that combines the USB and serial material from the c
    }
    ```
 
-6. In the 分离 method, call `ucom_分离(&sc->sc_super_ucom, &sc->sc_ucom)` before `usbd_transfer_unsetup`.
+6. 在分离方法中，在 `usbd_transfer_unsetup` 之前调用 `ucom_detach(&sc->sc_super_ucom, &sc->sc_ucom)`。
 
-7. Add `MODULE_DEPEND(lab07, ucom, 1, 1, 1);` after the existing MODULE_DEPEND.
+7. 在现有的MODULE_DEPEND之后添加 `MODULE_DEPEND(lab07, ucom, 1, 1, 1);`。
 
-8. Build, load, plug in the 设备, and observe. In `dmesg`, you should see the 驱动程序 附加, and you should see a `cuaU0` 设备 appear in `/dev/`.
+8. 构建、加载、插入设备并观察。在 `dmesg` 中，你应该看到驱动程序附加，你应该看到 `cuaU0` 设备出现在 `/dev/` 中。
 
-9. Run `cu -l /dev/cuaU0 -s 9600`. The `cu` command will open the 设备, which triggers several of the ucom 回调. Watch `dmesg` to see which ones fire. Close `cu` with `~.` and observe more 回调.
+9. 运行 `cu -l /dev/cuaU0 -s 9600`。`cu` 命令将打开设备，这会触发几个ucom回调。观察 `dmesg` 看哪些被触发了。用 `~.` 关闭 `cu` 并观察更多回调。
 
-10. Run `stty -a -f /dev/cuaU0`. Observe that the port has default termios settings. Run `stty 115200 -f /dev/cuaU0` and observe that `lab07_cfg_param` is called.
+10. 运行 `stty -a -f /dev/cuaU0`。观察端口具有默认的termios设置。运行 `stty 115200 -f /dev/cuaU0` 并观察 `lab07_cfg_param` 被调用。
 
-11. Unplug the 设备. Observe clean 分离.
+11. 拔出设备。观察干净的分离。
 
-**Expected output.** The 驱动程序 附加 as a `ucom` 设备, creates `/dev/cuaU0`, and responds to configuration ioctls (even though the underlying USB 设备 does not actually do anything). Every 回调 invocation is visible in `dmesg`.
+**预期输出。** 驱动程序作为 `ucom` 设备附加，创建 `/dev/cuaU0`，并响应配置ioctl（即使底层USB设备实际上什么也没做）。每次回调调用在 `dmesg` 中可见。
 
-**What to watch for.** If the 驱动程序 附加 but `/dev/cuaU0` does not appear, check that `ucom_附加` succeeded. The return value is an errno; a nonzero value means failure. If it failed with `ENOMEM`, you are running out of memory for the TTY allocation. If it failed with `EINVAL`, one of the 回调 fields is probably null (look at `/usr/src/sys/dev/usb/serial/usb_serial.c` to see which fields are strictly required).
+**注意事项。** 如果驱动程序已附加但 `/dev/cuaU0` 没有出现，检查 `ucom_attach` 是否成功。返回值是errno；非零值表示失败。如果以 `ENOMEM` 失败，你的TTY分配内存不足。如果以 `EINVAL` 失败，可能是某个回调字段为null（查看 `/usr/src/sys/dev/usb/serial/usb_serial.c` 看哪些字段是严格必需的）。
 
-This lab is a building 块. A real `ucom` 驱动程序 (like `uftdi`) would fill in the 回调 with actual USB transfers to the chip. Starting from an empty skeleton and adding one 回调 at a time is a good way to build a new 驱动程序.
+这个实验是一个构建块。一个真正的 `ucom` 驱动程序（如 `uftdi`）会用实际的USB传输来填充回调。从空骨架开始，一次添加一个回调是构建新驱动程序的好方法。
 
-### Lab 8: Troubleshooting a Hung TTY Session
+### 实验8：排查挂起的TTY会话
 
-This lab is a diagnostic exercise. Given a malfunctioning serial setup, you will use the tools from Section 5 to find the problem.
+本实验是一个诊断练习。给定一个功能异常的串行设置，你将使用第5节的工具来找到问题。
 
-**Goal.** Find why a `cu` session does not echo characters back after connecting to an `nmdm(4)` pair that has an unconfigured 波特率 on one side.
+**目标。** 找出为什么 `cu` 会话在连接到一侧波特率未配置的 `nmdm(4)` 对后不回显字符。
 
-**Steps.**
+**步骤。**
 
-1. Load `nmdm`:
+1. 加载 `nmdm`：
 
    ```
    # kldload nmdm
    ```
 
-2. Set different 波特率s on the two sides. This is contrived but mimics a real configuration bug:
+2. 在两侧设置不同的波特率。这是人为的但模拟了真实的配置错误：
 
    ```
    # stty 9600 -f /dev/nmdm0A
    # stty 115200 -f /dev/nmdm0B
    ```
 
-3. Open both sides with `cu`, each with the mismatched rate:
+3. 用 `cu` 打开两侧，各自使用不匹配的速率：
 
    ```
    (terminal 1) # cu -l /dev/nmdm0A -s 9600
    (terminal 2) # cu -l /dev/nmdm0B -s 115200
    ```
 
-4. Type in terminal 1. You will likely see characters appear in terminal 2, but possibly garbled. Or characters may not appear at all if the `nmdm(4)` 驱动程序 enforces rate matching strictly.
+4. 在终端1中输入。你可能会看到字符出现在终端2中，但可能是乱码。或者如果 `nmdm(4)` 驱动程序严格强制速率匹配，字符可能根本不出现。
 
-5. Exit both `cu` sessions.
+5. 退出两个 `cu` 会话。
 
-6. Run `stty -a -f /dev/nmdm0A` and `stty -a -f /dev/nmdm0B`. Find the discrepancy.
+6. 运行 `stty -a -f /dev/nmdm0A` 和 `stty -a -f /dev/nmdm0B`。找出差异。
 
-7. Fix: set both sides to the same rate. Reopen `cu` and verify that the issue is resolved.
+7. 修复：将两侧设置为相同的速率。重新打开 `cu` 并验证问题已解决。
 
-**What to watch for.** This lab teaches the diagnostic habit of checking both ends of a link. A mismatch at any one end produces problems; finding it requires looking at both. The diagnostic tools (`stty`, `comcontrol`) work from the command line and produce human-readable output. Making use of them is a simple first check before diving into deeper debugging.
+**注意事项。** 本实验教授检查链路两端的诊断习惯。任一端的不匹配都会产生问题；找到它需要查看两端。诊断工具（`stty`、`comcontrol`）从命令行工作并产生人类可读的输出。在进行更深入的调试之前，使用它们是一个简单的首要检查。
 
-### Lab 9: Monitoring USB Transfer Statistics
+### 实验9：监控USB传输统计
 
-This lab explores the per-channel statistics the USB 框架 maintains, which can help identify performance issues or hidden errors.
+本实验探索USB框架维护的每通道统计信息，可以帮助识别性能问题或隐藏的错误。
 
-**Goal.** Use `usbconfig dump_stats` to observe the transfer counts on a 总线y USB 设备 and identify whether the 设备 is performing as expected.
+**目标。** 使用 `usbconfig dump_stats` 观察繁忙USB设备上的传输计数，识别设备是否按预期执行。
 
-**Steps.**
+**步骤。**
 
-1. Plug in a USB 设备 that you can exercise meaningfully. A USB flash drive is a good choice because you can trigger 批量传输 by copying files.
+1. 插入一个你可以有意义地测试的USB设备。USB闪存驱动器是一个好选择，因为你可以通过复制文件来触发批量传输。
 
-2. Identify the 设备:
+2. 识别设备：
 
    ```
    # usbconfig list
    ```
 
-   Note the `ugenN.M` identifier.
+   记录 `ugenN.M` 标识符。
 
-3. Dump the baseline statistics:
+3. 转储基线统计：
 
    ```
    # usbconfig -d ugenN.M dump_stats
    ```
 
-   Record the output.
+   记录输出。
 
-4. Perform significant I/O to the 设备. For a flash drive, copy a large file:
+4. 对设备执行大量I/O。对于闪存驱动器，复制一个大文件：
 
    ```
    # cp /usr/src/sys/dev/usb/usb_transfer.c /mnt/usb_mount/
    ```
 
-5. Dump the statistics again. Compare.
+5. 再次转储统计。比较。
 
-6. Note which counters changed. `xfer_completed` should have increased significantly. `xfer_err` should still be small.
+6. 注意哪些计数器改变了。`xfer_completed` 应该显著增加。`xfer_err` 应该仍然很小。
 
-7. Try to deliberately cause errors. Unplug the 设备 mid-transfer. Then plug it back in. Dump the stats on the new `ugenN.M` (a new one is allocated on replug).
+7. 尝试故意导致错误。在传输过程中拔出设备。然后再插回。转储新 `ugenN.M` 的统计（重新插入时分配新的）。
 
-**What to watch for.** The statistics reveal invisible behaviours. A 设备 that is mostly working but occasionally stalling will show `stall_count` nonzero. A 设备 that is dropping transfers will show `xfer_err` climbing. In normal operation, a healthy 设备 shows steady `xfer_completed` growth and zero errors.
+**注意事项。** 统计揭示了不可见的行为。一个大部分时间正常工作但偶尔停顿的设备将显示 `stall_count` 非零。一个正在丢失传输的设备将显示 `xfer_err` 在攀升。在正常操作中，一个健康的设备显示稳定的 `xfer_completed` 增长和零错误。
 
-If you are developing a 驱动程序 and the statistics show unexpected errors, that is a clue that something is wrong. The statistics are maintained by the USB 框架, not the 驱动程序, so they reflect reality regardless of whether the 驱动程序 notices.
+如果你正在开发驱动程序并且统计显示意外的错误，这是一个线索，说明有问题。统计由USB框架维护，而不是驱动程序，所以无论驱动程序是否注意到，它们都反映了实际情况。
 
 ## 挑战练习
 
-Challenge exercises stretch your understanding. They are not strictly necessary for progressing to 第27章, but each one will deepen your grasp of USB and 串行驱动程序 work. Take your time. Read relevant FreeBSD source. Write small programs. Expect some challenges to take several hours.
+挑战练习扩展你的理解。它们对于进入第27章不是严格必需的，但每一个都会加深你对USB和串行驱动程序工作的掌握。慢慢来。阅读相关的FreeBSD源代码。编写小程序。预期一些挑战需要几个小时。
 
-### Challenge 1: Add a Third USB Endpoint Type
+### 挑战1：添加第三种USB端点类型
 
-The skeleton in Section 2 supports 批量传输. Extend it to also handle an interrupt 端点. Add a new channel to the `struct usb_config` array with `.type = UE_INTERRUPT`, `.direction = UE_DIR_IN`, and a small 缓冲区 (say, sixteen bytes). Implement the 回调 as a continuous poll, reading a small status 数据包 from the 设备 on every interrupt-IN completion.
+第2节的骨架支持批量传输。扩展它以同时处理中断端点。向 `struct usb_config` 数组添加一个新通道，使用 `.type = UE_INTERRUPT`、`.direction = UE_DIR_IN` 和一个小缓冲区（比如十六个字节）。将回调实现为连续轮询，在每次中断输入完成时从设备读取一个小的状态数据包。
 
-Test the change by comparing the behaviour of the three channels. Bulk channels should be quiet most of the time and only submit transfers when the 驱动程序 has work to do. The interrupt channel should run continuously, quietly consuming interrupt-IN 数据包 whenever the 设备 sends them.
+通过比较三个通道的行为来测试更改。批量通道大部分时间应该是安静的，只在驱动程序有工作时提交传输。中断通道应该连续运行，安静地消费设备发送的中断输入数据包。
 
-A stretch goal: make the interrupt 回调 deliver received bytes to the same `/dev` node as the bulk channel. When userspace reads the node, it gets a merged view of bulk-in and interrupt-in data. This is a useful pattern for 设备 that have both streaming data and asynchronous status events.
+一个进阶目标：让中断回调将接收到的字节传递到与批量通道相同的 `/dev` 节点。当用户态读取该节点时，它获得批量输入和中断输入数据的合并视图。这对于既有流式数据又有异步状态事件的设备是一个有用的模式。
 
-### Challenge 2: Write a Minimal USB Gadget Driver
+### 挑战2：编写一个最小的USB Gadget驱动程序
 
-The running example is a host-side 驱动程序: the FreeBSD machine is the USB host, and the 设备 is the peripheral. Turn the example around by writing a USB gadget 驱动程序 that makes the FreeBSD machine present itself as a simple 设备 to another host.
+运行示例是一个主机端驱动程序：FreeBSD机器是USB主机，设备是外设。通过编写一个USB gadget驱动程序来反转示例，使FreeBSD机器将自己作为一个简单设备呈现给另一个主机。
 
-This requires USB-on-the-Go hardware, so the challenge is only feasible on specific boards (some ARM development boards support it). The relevant source is in `/usr/src/sys/dev/usb/template/`. Start from `usb_template_cdce.c`, which implements the CDC 以太网 class, and modify it to implement a simpler vendor-specific class with one bulk-OUT 端点 that just swallows whatever the host sends.
+这需要USB-on-the-Go硬件，因此此挑战仅在特定板子上可行（一些ARM开发板支持它）。相关源代码在 `/usr/src/sys/dev/usb/template/` 中。从 `usb_template_cdce.c` 开始，它实现了CDC以太网类，修改它以实现一个更简单的厂商特定类，带有一个只吞掉主机发送内容的批量输出端点。
 
-This challenge teaches you how the USB 框架 looks from the other side. Many of the concepts are mirror-imaged: what was a transfer from the host's perspective is a transfer from the 设备's perspective, but the direction of the bulk arrow is reversed.
+此挑战教你USB框架从另一侧看起来如何。许多概念是镜像的：从主机角度看是传输的东西从设备角度也是传输，但批量箭头的方向相反。
 
-### Challenge 3: A Custom `termios` Flag Handler
+### 挑战3：自定义 `termios` 标志处理程序
 
-The `termios` structure has many flags, and the `uart(4)` 框架 handles most of them automatically. Write a small modification to a UART 驱动程序 (or to a copy of `uart_dev_ns8250.c` in a private build) that makes the 驱动程序 log a `设备_printf` message every time a specific termios flag changes value.
+`termios` 结构有很多标志，`uart(4)` 框架自动处理其中大多数。对UART驱动程序（或私有构建中的 `uart_dev_ns8250.c` 副本）做一个小的修改，使驱动程序在特定termios标志改变值时记录一条 `device_printf` 消息。
 
-Pick, say, `CRTSCTS` (hardware 流控制) as the flag to track. Add a log message in the 驱动程序's `param` path that prints "CRTSCTS=on" or "CRTSCTS=off" whenever the flag's new value differs from its old value.
+选择，比如 `CRTSCTS`（硬件流控制）作为要跟踪的标志。在驱动程序的 `param` 路径中添加一条日志消息，打印 "CRTSCTS=on" 或 "CRTSCTS=off" 每当标志的新值与旧值不同时。
 
-Test the modification by running:
+通过运行以下命令测试修改：
 
 ```console
 # stty crtscts -f /dev/cuau0
 # stty -crtscts -f /dev/cuau0
 ```
 
-Verify that the log messages appear in `dmesg` and that they correspond correctly to the `stty` changes.
+验证日志消息出现在 `dmesg` 中并且正确对应 `stty` 的更改。
 
-This challenge is about understanding exactly where in the call chain the termios change arrives at the 驱动程序. The answer (in `param`) is documented in the source, but seeing it with your own eyes is different from reading about it.
+此挑战是关于准确理解termios更改在调用链中的何处到达驱动程序。答案（在 `param` 中）在源代码中有文档说明，但亲眼看到与阅读不同。
 
-### Challenge 4: Parsing a Small USB Protocol
+### 挑战4：解析一个小型USB协议
 
-Pick a USB protocol you are curious about. HID is a good candidate because it is widely documented. CDC ACM is another good choice because it is simple. Pick one, read the specification on usb.org (the public parts), and write a small protocol parser in C that takes a 缓冲区 of bytes and prints what they mean.
+选择一个你感兴趣的USB协议。HID是一个好选择，因为它有广泛的文档。CDC ACM是另一个好选择，因为它很简单。选择一个，阅读usb.org上的规范（公开部分），写一个小的C协议解析器，接受一个字节缓冲区并打印它们的含义。
 
-For HID, the parser would consume reports: input reports, output reports, feature reports. It would look up the 设备's report 描述符 to learn the layout. It would print, for each report, the usage (mouse motion, button press, keyboard scan code) and the value.
+对于HID，解析器将消费报告：输入报告、输出报告、特性报告。它将查找设备的报告描述符以了解布局。它将为每个报告打印用途（鼠标移动、按钮按下、键盘扫描码）和值。
 
-For CDC ACM, the parser would consume the AT command set: a small set of commands that terminal programs use to configure modems. It would recognise the commands and report which ones the 驱动程序 would handle and which would be passed through to the 设备.
+对于CDC ACM，解析器将消费AT命令集：终端程序用来配置调制解调器的一小组命令。它将识别命令并报告哪些将由驱动程序处理，哪些将传递给设备。
 
-This is not a 驱动程序-writing challenge per se; it is a protocol-understanding challenge. Device 驱动程序 implement protocols, and being comfortable with protocol specifications is a core skill.
+这不是一个驱动程序编写挑战本身；它是一个协议理解挑战。设备驱动程序实现协议，熟悉协议规范是一项核心技能。
 
-### Challenge 5: Ro总线tness Under Load
+### 挑战5：负载下的健壮性
 
-Take the echo-loop 驱动程序 from Lab 3 (or a similar 驱动程序 you have written) and stress-test it. Write a userland program that runs two threads: one constantly writes random bytes to the 设备, one constantly reads and verifies.
+使用实验3的echo-loop驱动程序（或你编写的类似驱动程序）进行压力测试。编写一个运行两个线程的用户态程序：一个不断向设备写入随机字节，一个不断读取并验证。
 
-Run the program for an hour. Then run it for a day. Then unplug and replug the 设备 during the run and see whether the program recovers cleanly.
+运行程序一小时。然后运行一天。然后在运行过程中拔出并重新插入设备，看程序是否能干净地恢复。
 
-You will probably find bugs. Common ones include: write 回调 locking issues under concurrent access, races between close() and in-flight transfers, memory leaks from 缓冲区 that are allocated but never freed on specific error paths, and state machine bugs when a stall arrives at an unexpected moment.
+你可能会发现错误。常见的包括：并发访问下的写回调锁定问题、close()和传输中传输之间的竞态、在特定错误路径上分配但从未释放的缓冲区导致的内存泄漏，以及停顿在意料之外时刻到达时的状态机错误。
 
-Each bug you find will teach you something about where the 驱动程序's contract with its callers is subtle. Fix the bugs. Log what you learned. This is exactly the kind of work that separates a good 驱动程序 from a merely working one.
+你发现的每个错误都会教你一些关于驱动程序与调用者之间的约定在哪里微妙的东西。修复错误。记录你学到了什么。这正是一个好的驱动程序与一个仅仅能工作的驱动程序之间的区别。
 
-### Challenge 6: Implement Suspend/Resume Properly
+### 挑战6：正确实现挂起/恢复
 
-Most USB驱动程序 do not implement suspend and resume handlers. The 框架 has defaults that work for the common case, but a 驱动程序 that holds long-term state (a queue of pending commands, a streaming context, a negotiated session) may need to save and restore that state around suspend cycles.
+大多数USB驱动程序不实现挂起和恢复处理程序。框架有适用于常见情况的默认值，但持有长期状态（待处理命令队列、流式上下文、已协商会话）的驱动程序可能需要在挂起周期周围保存和恢复该状态。
 
-Extend the echo-loop 驱动程序 with `设备_suspend` and `设备_resume` methods. In suspend, flush any pending transfers and save a small 挂载 of state. In resume, restore the state and resubmit any pending work.
+用 `device_suspend` 和 `device_resume` 方法扩展echo-loop驱动程序。在挂起时，冲刷所有待处理的传输并保存少量状态。在恢复时，恢复状态并重新提交任何待处理的工作。
 
-Test by running the system through a suspend cycle (on a laptop that supports it) while the 驱动程序 is running. Verify that after resume, the 驱动程序 continues working correctly and no state was lost.
+通过在驱动程序运行时让系统经过一个挂起周期来测试（在支持它的笔记本电脑上）。验证恢复后驱动程序继续正确工作且没有状态丢失。
 
-This challenge teaches the subtleties of suspend/resume, including that hardware may be in a different state after resume than it was before suspend, and that all in-flight state must be reconstructed or abandoned.
+此挑战教授挂起/恢复的微妙之处，包括硬件在恢复后可能处于与挂起前不同的状态，以及所有传输中的状态必须被重建或放弃。
 
-### Challenge 7: Adding `poll(2)` Support
+### 挑战7：添加 `poll(2)` 支持
 
-Most 驱动程序 shown in this chapter support `read(2)` and `write(2)` but not `poll(2)` or `select(2)`. These system calls let userland programs wait for I/O readiness on multiple 描述符 at once, which is essential for servers and interactive programs.
+本章展示的大多数驱动程序支持 `read(2)` 和 `write(2)` 但不支持 `poll(2)` 或 `select(2)`。这些系统调用让用户态程序可以一次在多个描述符上等待I/O就绪，这对于服务器和交互式程序是必不可少的。
 
-Add a `d_poll` method to the echo 驱动程序's `cdevsw`. The method should return a bitmask indicating which I/O events are currently possible: POLLIN if there is data to read, POLLOUT if there is space to write.
+向echo驱动程序的 `cdevsw` 添加 `d_poll` 方法。该方法应返回一个位掩码指示当前可能的I/O事件：如果有数据可读则为POLLIN，如果有空间可写则为POLLOUT。
 
-The hardest part of adding poll support is the wakeup logic. When a 传输回调 adds data to the RX queue, it must call `selwakeup` on the selinfo structure the poll mechanism uses. Similarly, when the write 回调 drains bytes from the TX queue and makes space, it must call `selwakeup` on the write selinfo.
+添加poll支持最难的部分是唤醒逻辑。当传输回调将数据添加到RX队列时，它必须在poll机制使用的selinfo结构上调用 `selwakeup`。类似地，当写回调从TX队列排空字节并腾出空间时，它必须在写selinfo上调用 `selwakeup`。
 
-This challenge will require reading `/usr/src/sys/kern/sys_generic.c` and `/usr/src/sys/sys/selinfo.h` to understand the selinfo mechanism.
+此挑战需要阅读 `/usr/src/sys/kern/sys_generic.c` 和 `/usr/src/sys/sys/selinfo.h` 来理解selinfo机制。
 
-### Challenge 8: Writing a Character-Counter ioctl
+### 挑战8：编写字符计数ioctl
 
-Add an ioctl to the echo 驱动程序 that returns the current TX and RX byte counters. The ioctl 接口 requires you to:
+向echo驱动程序添加一个ioctl，返回当前的TX和RX字节计数器。ioctl接口要求你：
 
-1. Define a magic number and struct for the ioctl in a header:
+1. 在头文件中为ioctl定义一个魔术数字和结构：
    ```c
    struct myfirst_usb_stats {
        uint64_t tx_bytes;
@@ -3011,373 +3012,372 @@ Add an ioctl to the echo 驱动程序 that returns the current TX and RX byte co
    #define MYFIRST_USB_GET_STATS _IOR('U', 1, struct myfirst_usb_stats)
    ```
 
-2. Implement a `d_ioctl` method that responds to `MYFIRST_USB_GET_STATS` by copying the counters out to userland.
+2. 实现一个 `d_ioctl` 方法，通过将计数器复制到用户态来响应 `MYFIRST_USB_GET_STATS`。
 
-3. Maintain the counters in the softc, incrementing them in the 传输回调.
+3. 在softc中维护计数器，在传输回调中递增它们。
 
-4. Write a userland program that issues the ioctl and prints the results.
+4. 编写一个用户态程序发出ioctl并打印结果。
 
-This challenge teaches the ioctl 接口, which is the standard way 驱动程序 expose non-streaming operations to userland. It also introduces you to the `_IOR`, `_IOW`, and `_IOWR` macros from `<sys/ioccom.h>`.
+此挑战教授ioctl接口，这是驱动程序向用户态暴露非流式操作的标准方式。它还向你介绍了 `<sys/ioccom.h>` 中的 `_IOR`、`_IOW` 和 `_IOWR` 宏。
 
 ## 故障排除指南
 
-Despite your best efforts, problems will occur. This section documents the most common classes of problem you will hit while working on USB and 串行驱动程序, with concrete steps to diagnose each.
+尽管你尽了最大努力，问题仍会发生。本节记录了你在USB和串行驱动程序工作中会遇到的最常见问题类别，以及诊断每个问题的具体步骤。
 
-### The Module Will Not Load
+### 模块无法加载
 
-Symptom: `kldload myfirst_usb.ko` returns an error, typically with a message about unresolved symbols.
+症状：`kldload myfirst_usb.ko` 返回错误，通常带有关于未解析符号的消息。
 
-Causes and fixes:
-- Missing `MODULE_DEPEND` entry. Add `MODULE_DEPEND(myfirst_usb, usb, 1, 1, 1);` to the 驱动程序.
-- Missing `MODULE_DEPEND` on a second module, such as `ucom`. If your 驱动程序 uses `ucom_附加`, add a dependency on `ucom`.
-- Compiled against a 内核 that does not match the running 内核. Rebuild the module against the currently-running sources.
-- Kernel symbol table out of date. After 内核 upgrade, run `kldxref /boot/内核` to refresh.
+原因和修复：
+- 缺少 `MODULE_DEPEND` 条目。向驱动程序添加 `MODULE_DEPEND(myfirst_usb, usb, 1, 1, 1);`。
+- 缺少对第二个模块（如 `ucom`）的 `MODULE_DEPEND`。如果你的驱动程序使用 `ucom_attach`，添加对 `ucom` 的依赖。
+- 针对不匹配运行内核的内核编译。使用当前运行的源代码重新构建模块。
+- 内核符号表过期。内核升级后，运行 `kldxref /boot/kernel` 刷新。
 
-If the error message mentions a specific symbol you did not write (like `ttycreate` or `cdevsw_open`), look up the missing symbol in the source tree to find out which subsystem it lives in, and add a `MODULE_DEPEND` on that module.
+如果错误消息提到一个你没有编写的特定符号（如 `ttycreate` 或 `cdevsw_open`），在源代码树中查找缺失的符号以找出它属于哪个子系统，并添加对该模块的 `MODULE_DEPEND`。
 
-### The Driver Loads but Never Attaches
+### 驱动程序加载但从不附加
 
-Symptom: `kldstat` shows the 驱动程序 loaded, but `dmesg` shows no 附加 message when the 设备 is plugged in.
+症状：`kldstat` 显示驱动程序已加载，但设备插入时 `dmesg` 没有显示附加消息。
 
-Causes and fixes:
-- Match table does not match the 设备. Compare the vendor and 产品IDs from `usbconfig list` against your `STRUCT_USB_HOST_ID` entries.
-- Interface number mismatch. If the 设备 has multiple 接口 and your 探测 guards against `bIfaceIndex != 0`, try a different 接口.
-- Probe returns `ENXIO` for some other reason. Add `设备_printf(dev, "探测 with class=%x subclass=%x\n", uaa->info.bInterfaceClass, uaa->info.bInterfaceSubClass);` at the top of `探测` temporarily to see what the 框架 is offering.
-- Another 驱动程序 is claiming the 设备 first. Check `dmesg` for other 驱动程序 附加ments; you may need to explicitly unload the competing 驱动程序 with `kldunload` before yours can bind. Alternatively, give your 驱动程序 a higher priority through 总线-探测 return values (applies to PCI-like 总线es, not USB).
+原因和修复：
+- 匹配表不匹配设备。将 `usbconfig list` 中的vendor和产品ID与你的 `STRUCT_USB_HOST_ID` 条目进行比较。
+- 接口号不匹配。如果设备有多个接口且你的探测防范 `bIfaceIndex != 0`，尝试不同的接口。
+- 探测因其他原因返回 `ENXIO`。在 `probe` 顶部临时添加 `device_printf(dev, "probe with class=%x subclass=%x\n", uaa->info.bInterfaceClass, uaa->info.bInterfaceSubClass);` 来查看框架提供了什么。
+- 另一个驱动程序先声明了设备。检查 `dmesg` 中其他驱动程序的附加；你可能需要用 `kldunload` 显式卸载竞争的驱动程序，你的才能绑定。或者，通过总线探测返回值给你的驱动程序更高的优先级（适用于类似PCI的总线，不适用于USB）。
 
-### The Driver Attaches but `/dev` Node Does Not Appear
+### 驱动程序附加但 `/dev` 节点不出现
 
-Symptom: 附加 message in `dmesg`, but `ls /dev/` shows no corresponding entry.
+症状：`dmesg` 中有附加消息，但 `ls /dev/` 没有显示相应的条目。
 
-Causes and fixes:
-- `make_dev` call failed. Check the return value; if null, handle the error and log it.
-- Wrong cdevsw. Make sure `myfirst_usb_cdevsw` is declared correctly with `d_version = D_VERSION` and valid `d_name`, `d_open`, `d_close`, `d_read`, `d_write`, `d_ioctl` where relevant.
-- `si_drv1` not set. Although not strictly required for the node to appear, many bugs manifest as "the node appears but ioctls see a NULL softc" because `si_drv1` was not initialised.
-- Permissions issue. The default 0644 permissions may restrict access; try 0666 temporarily during development.
+原因和修复：
+- `make_dev` 调用失败。检查返回值；如果为null，处理错误并记录。
+- 错误的cdevsw。确保 `myfirst_usb_cdevsw` 正确声明了 `d_version = D_VERSION` 和有效的 `d_name`、`d_open`、`d_close`、`d_read`、`d_write`、`d_ioctl`。
+- `si_drv1` 未设置。虽然严格来说不是节点出现所必需的，但许多错误表现为 "the node appears but ioctls see a NULL softc" 因为 `si_drv1` 未初始化。
+- 权限问题。默认的0644权限可能限制访问；在开发期间尝试0666。
 
-### The Driver Panics on Detach
+### 驱动程序在分离时崩溃
 
-Symptom: unplugging the 设备 (or unloading the module) causes a 内核 panic.
+症状：拔出设备（或卸载模块）导致内核崩溃。
 
-Causes and fixes:
-- Transfer 回调 running during 分离. You must call `usbd_transfer_unsetup` before destroying the 互斥锁. The 框架's cancellation and wait logic is what makes 分离 safe.
-- `/dev` node open when 驱动程序 unloads. If userspace has the node open, the module cannot unload. Run `fstat | grep myfirst_usb` to see which process holds it, and kill the process or close the file.
-- Memory freed before all uses complete. If you use deferred work (taskqueue, callout), you must cancel and wait for it before freeing the softc. The `taskqueue_drain` and `callout_drain` functions exist for this.
-- Softc use-after-free. If you have code outside the 驱动程序 that holds a pointer to the softc, the softc can be freed while that pointer is still dangling. Redesign to avoid external softc pointers, or add reference counting.
+原因和修复：
+- 分离期间传输回调仍在运行。你必须在销毁互斥锁之前调用 `usbd_transfer_unsetup`。框架的取消和等待逻辑使分离安全。
+- 驱动程序卸载时 `/dev` 节点仍打开。如果用户态持有节点打开，模块无法卸载。运行 `fstat | grep myfirst_usb` 查看哪个进程持有它，杀死进程或关闭文件。
+- 内存在所有使用完成之前被释放。如果你使用延迟工作（taskqueue、callout），你必须在释放softc之前取消并等待它。`taskqueue_drain` 和 `callout_drain` 函数就是为此而存在的。
+- Softc释放后使用。如果你有驱动程序外部的代码持有指向softc的指针，softc可能在指针仍然悬空时被释放。重新设计以避免外部softc指针，或添加引用计数。
 
-### Transfers Stall
+### 传输停顿
 
-Symptom: 批量传输 appear to succeed at the submit call but never complete, or they complete with `USB_ERR_STALLED`.
+症状：批量传输在提交调用时似乎成功但从未完成，或以 `USB_ERR_STALLED` 完成。
 
-Causes and fixes:
-- Wrong 端点 direction. Verify the direction in your `struct usb_config` against the 端点's `bEndpointAddress` high bit.
-- Wrong 端点 type. Verify that the `type` field matches the 端点's `bmAttributes` low bits.
-- Transfer too large. If you set a 帧 length larger than the 端点's `wMaxPacketSize`, the 框架 will usually slice it into 数据包, but some 设备 reject a transfer that exceeds an internal 缓冲区.
-- Device firmware stall. The remote 设备 is signalling "not ready." The 框架's automatic clear-stall should recover, but a persistent stall usually indicates a protocol error (wrong command, wrong sequence, missing authentication).
+原因和修复：
+- 端点方向错误。根据端点的 `bEndpointAddress` 高位验证 `struct usb_config` 中的方向。
+- 端点类型错误。验证 `type` 字段匹配端点的 `bmAttributes` 低位。
+- 传输太大。如果你设置的帧长度大于端点的 `wMaxPacketSize`，框架通常会将其切分为数据包，但一些设备拒绝超过内部缓冲区的传输。
+- 设备固件停顿。远端设备正在发出信号 "not ready." 框架的自动清除停顿应该能恢复，但持续的停顿通常表示协议错误（错误的命令、错误的序列、缺少认证）。
 
-### Serial Characters Garbled
+### 串行字符乱码
 
-Symptom: bytes appear on the wire but are wrong or contain extra characters.
+症状：线路上出现字节但内容错误或包含额外字符。
 
-Causes and fixes:
-- Baud rate mismatch. Every stage must agree. Use `stty` to check all stages.
-- Byte format mismatch. Set databits, 奇偶校验, and stopbits to match. `stty cs8 -parenb -cstopb` is the most common configuration.
-- Incorrect `termios` flag handling in the 驱动程序. If you modify `uart_dev_ns8250.c` and break `param`, the chip will be programmed wrong. Compare against the upstream file.
-- Flow-control mismatch. If one side has `CRTSCTS` enabled and the other does not, bytes will be lost under load. Set both sides consistently.
-- Cable issue. A bad cable or a cable with unusual pinouts (some RJ45-to-DB9 cables have nonstandard pinouts) can introduce bit errors. Swap cables to rule this out.
+原因和修复：
+- 波特率不匹配。每个阶段都必须一致。使用 `stty` 检查所有阶段。
+- 字节格式不匹配。设置数据位、奇偶校验和停止位以匹配。`stty cs8 -parenb -cstopb` 是最常见的配置。
+- 驱动程序中 `termios` 标志处理不正确。如果你修改了 `uart_dev_ns8250.c` 并破坏了 `param`，芯片将被错误编程。与上游文件进行比较。
+- 流控制不匹配。如果一端启用了 `CRTSCTS` 而另一端没有，负载下会丢失字节。一致地设置两侧。
+- 电缆问题。坏电缆或具有不寻常引脚排列的电缆（一些RJ45转DB9电缆具有非标准引脚排列）可能引入位错误。更换电缆来排除此问题。
 
-### A Process is Stuck in `read(2)` and Will Not Exit
+### 进程卡在 `read(2)` 中无法退出
 
-Symptom: a program 块ed on the 驱动程序's `read()` path will not respond to Ctrl+C or `kill`.
+症状：一个阻塞在驱动程序 `read()` 路径上的程序不响应Ctrl+C或 `kill`。
 
-Causes and fixes:
-- Driver `d_read` sleeps without checking for signals. Use `msleep(..., PCATCH, ...)` (with the `PCATCH` flag) so the sleep returns `EINTR` when a signal arrives, and propagate the errno back to userspace.
-- Driver `d_read` holds a non-interruptible lock. Verify that the sleep is on an interruptible condition variable and that the 互斥锁 is dropped during the sleep.
-- Transfer 回调 is never arming the channel. If your `d_read` waits on a flag that only the read 回调 sets, and the read 回调 is never fired, the wait will never complete. Make sure the channel is started on `d_open` or at 附加 time.
+原因和修复：
+- 驱动程序 `d_read` 在未检查信号的情况下睡眠。使用 `msleep(..., PCATCH, ...)`（带 `PCATCH` 标志），这样当信号到达时睡眠返回 `EINTR`，并将errno传播回用户态。
+- 驱动程序 `d_read` 持有不可中断的锁。验证睡眠是在可中断的条件变量上，且互斥锁在睡眠期间被释放。
+- 传输回调从未重新准备通道。如果你的 `d_read` 等待一个只有读回调设置的标志，而读回调从未被触发，等待将永远不会完成。确保通道在 `d_open` 或附加时启动。
 
-### High CPU Usage When Idle
+### 空闲时CPU使用率高
 
-Symptom: the 驱动程序 consumes significant CPU even when no data is flowing.
+症状：即使没有数据流动，驱动程序也消耗大量CPU。
 
-Causes and fixes:
-- Polling-based implementation. If your 驱动程序 polls a flag in a 总线y loop, rewrite it to sleep on an event.
-- Callback firing excessively. The 框架 should not fire a 回调 without a state change, but some misconfigured channels can enter a "retry on error" loop that fires the 回调 as fast as the hardware can respond. Add a retry counter or a rate-limiter.
-- Read 回调 with no work but always rearming. If the 设备 sends zero-byte transfers to signal "I have nothing to say," make sure your 回调 handles these gracefully without treating them as normal data.
+原因和修复：
+- 基于轮询的实现。如果你的驱动程序在忙循环中轮询标志，重写为在事件上睡眠。
+- 回调过度触发。框架不应在没有状态变化时触发回调，但一些配置错误的通道可能进入一个 "retry on error" 循环，以硬件能响应的最快速度触发回调。添加重试计数器或速率限制器。
+- 读回调没有工作但总是重新准备。如果设备发送零字节传输来表示 "I have nothing to say," 确保你的回调优雅地处理这些而不将其视为正常数据。
 
-### `usbconfig` Shows the Device but `dmesg` Is Silent
+### `usbconfig` 显示设备但 `dmesg` 没有输出
 
-Symptom: `usbconfig list` shows the 设备, but no 驱动程序 附加 message appears.
+症状：`usbconfig list` 显示设备，但没有驱动程序附加消息出现。
 
-Causes and fixes:
-- Device 附加ed to `ugen` (the generic 驱动程序) because no specific 驱动程序 matched. This is the normal behaviour when there is no matching 驱动程序. Check the 匹配表s of the available 驱动程序. `pciconf -lv` will not help here because this is USB, not PCI; the USB equivalent is `usbconfig -d ugenN.M dump_设备_desc`.
-- `devd` is disabled and auto-load is not happening. Enable `devd` by running `service devd onestart`, then plug the 设备 in again.
-- Module file is not in a loadable path. `kldload` can take a full path (`kldload /path/to/module.ko`), but for automatic loading by `devd`, the module has to be in a directory `devd` is configured to search. `/boot/modules/` is the conventional location for out-of-tree modules on a production system.
+原因和修复：
+- 设备附加到 `ugen`（通用驱动程序），因为没有特定的驱动程序匹配。当没有匹配的驱动程序时，这是正常行为。检查可用驱动程序的匹配表。`pciconf -lv` 在这里没有帮助，因为这是USB，不是PCI；USB等价物是 `usbconfig -d ugenN.M dump_device_desc`。
+- `devd` 被禁用，自动加载没有发生。通过运行 `service devd onestart` 启用 `devd`，然后再次插入设备。
+- 模块文件不在可加载路径中。`kldload` 可以接受完整路径（`kldload /path/to/module.ko`），但对于 `devd` 的自动加载，模块必须在 `devd` 配置搜索的目录中。`/boot/modules/` 是生产系统上树外模块的常规位置。
 
-### Debugging a Deadlock with `WITNESS`
+### 使用 `WITNESS` 调试死锁
 
-Symptom: the 内核 hangs with the CPU stuck in a specific function, and `WITNESS` is enabled.
+症状：内核挂起，CPU卡在特定函数中，且启用了 `WITNESS`。
 
-Causes and fixes:
-- Lock order violation. `WITNESS` will log the violation on the serial console. Read the log: it will tell you which locks were taken in which order, and where the reverse order was observed. Fix by establishing a consistent lock acquisition order throughout your 驱动程序.
-- Lock held across a sleep. If you hold a 互斥锁 and then call a function that sleeps, you can deadlock with any other thread that wants the 互斥锁. Identify the sleeping function (often hidden in an allocation or in a USB transfer wait), and restructure to release the 互斥锁 before the sleep.
+原因和修复：
+- 锁顺序违规。`WITNESS` 将在串行控制台上记录违规。阅读日志：它会告诉你哪些锁以什么顺序获取，以及在哪里观察到相反的顺序。通过在整个驱动程序中建立一致的锁获取顺序来修复。
+- 持有锁时睡眠。如果你持有互斥锁然后调用一个会睡眠的函数，你可能与任何想要该互斥锁的其他线程死锁。识别睡眠函数（通常隐藏在分配或USB传输等待中），并重构以在睡眠之前释放互斥锁。
 - Lock taken in interrupt context that was first taken outside interrupt context without `MTX_SPIN`. FreeBSD 互斥锁es have two forms: default (`MTX_DEF`) can sleep, spin (`MTX_SPIN`) cannot. Taking a sleep 互斥锁 from an 中断处理程序 is a bug.
 
-Enabling `WITNESS` during development (by building the 内核 with `options WITNESS` or by using `GENERIC-NODEBUG`'s `INVARIANTS`-enabled counterpart) catches many of these problems before they appear on a user's machine.
+在开发期间启用 `WITNESS`（通过用 `options WITNESS` 构建内核或使用 `GENERIC-NODEBUG` 的 `INVARIANTS` 启用版本）可以在这些问题出现在用户机器上之前捕获它们。
 
-### A Driver That Appears Twice for the Same Device
+### 同一设备出现两次的驱动程序
 
-Symptom: `dmesg` shows your 驱动程序 附加ing twice for a single 设备, creating `myfirst_usb0` and `myfirst_usb1` with the same USB IDs.
+症状：`dmesg` 显示你的驱动程序为单个设备附加两次，创建具有相同USB ID的 `myfirst_usb0` 和 `myfirst_usb1`。
 
-Causes and fixes:
-- The 设备 has two 接口 and the 驱动程序 is matching both. Check `bIfaceIndex` in the 探测 method and match only the 接口 you actually support.
-- The 设备 has multiple configurations and both are active. This is rare; if so, select the correct configuration explicitly in the 附加 method.
-- Another 驱动程序 is 附加ed to one of the 接口. This is not a bug; it just means the 设备 is multi-接口 and different 驱动程序 claim different 接口. If you see `myfirst_usb0` and `ukbd0` for the same 设备, the 设备 has both a vendor-specific 接口 and a HID 接口, and the two 驱动程序 附加 independently.
+原因和修复：
+- 设备有两个接口，驱动程序匹配了两者。检查探测方法中的 `bIfaceIndex`，只匹配你实际支持的接口。
+- 设备有多个配置且两者都处于活动状态。这很罕见；如果是这样，在附加方法中显式选择正确的配置。
+- 另一个驱动程序附加到了其中一个接口。这不是错误；这只是意味着设备是多接口的，不同的驱动程序声明不同的接口。如果你看到同一设备的 `myfirst_usb0` 和 `ukbd0`，设备既有厂商特定接口又有HID接口，两个驱动程序独立附加。
 
-### USB Serial Baud Rate Does Not Take Effect
+### USB串行波特率不生效
 
-Symptom: You `stty 115200 -f /dev/cuaU0`, but data exchange happens at a different rate.
+症状：你执行 `stty 115200 -f /dev/cuaU0`，但数据交换以不同的速率进行。
 
-Causes and fixes:
-- The 控制传输 to program the 波特率 failed. Check `dmesg` for error messages from `ucom_cfg_param`. Instrument the 驱动程序 to log the result of the 控制传输.
-- The chip's divisor encoding is wrong. Different FTDI variants use slightly different divisor formulas; check the variant detection in the 驱动程序.
-- The peer is running at a different rate. As noted earlier in the chapter, both ends must agree.
-- The cable or adapter is introducing its own rate limitation. Some USB-to-serial adapters silently renegotiate; this is rare but can happen with poor-quality cables.
+原因和修复：
+- 编程波特率的控制传输失败。检查 `dmesg` 中 `ucom_cfg_param` 的错误消息。为驱动程序添加日志以记录控制传输的结果。
+- 芯片的分频器编码错误。不同的FTDI变体使用略有不同的分频公式；检查驱动程序中的变体检测。
+- 对端以不同的速率运行。如本章前面所述，两端必须一致。
+- 电缆或适配器引入了自己的速率限制。一些USB转串口适配器静默重新协商；这很罕见但可能发生在劣质电缆上。
 
-### A Kernel Panic with "Spin lock held too long"
+### 内核崩溃："Spin lock held too long"
 
-Symptom: The 内核 panics with this message, usually during high I/O on the 驱动程序.
+症状：内核以此消息崩溃，通常在驱动程序高I/O期间。
 
-Causes and fixes:
-- A UART 驱动程序's `uart_ops` method is sleeping or 块ing. The six methods in `uart_ops` run with spin locks held (on some paths) and must not sleep, call non-spin-safe functions, or do long loops. Review the offending method for any expensive calls.
-- The 中断处理程序 is not draining the interrupt source fast enough. If the handler takes longer than the interrupt rate, interrupts accumulate. Speed up the handler.
-- Lock contention is causing priority inversion. Reduce the scope of the critical section, or break it up.
+原因和修复：
+- UART驱动程序的 `uart_ops` 方法正在睡眠或阻塞。`uart_ops` 中的六个方法在持有自旋锁的情况下运行（在某些路径上），不能睡眠、调用非自旋安全函数或进行长循环。检查有问题的方法中是否有任何昂贵的调用。
+- 中断处理程序没有足够快地排空中断源。如果处理程序花费的时间超过中断速率，中断会累积。加快处理程序。
+- 锁竞争导致优先级反转。减少临界区的范围，或将其分解。
 
-### A Device Never Completes Enumeration
+### 设备从未完成枚举
 
-Symptom: Plugging in a 设备 produces a `dmesg` line or two about enumeration starting, but never a completion message.
+症状：插入设备产生一两行关于枚举开始的 `dmesg` 消息，但从未有完成消息。
 
-Causes and fixes:
-- The 设备 is violating the USB specification. Some cheap or counterfeit 设备 have buggy firmware. If possible, try a different 设备.
-- Insufficient power. Devices that claim more power than the port can supply will fail to enumerate. Try a powered hub.
-- Electromagnetic interference. A bad cable or a bad port can cause bit errors during enumeration. Try different cables or ports.
-- The USB 主机控制器 is in a confused state. Try unloading and reloading the 主机控制器 驱动程序, or (as a last resort) rebooting.
+原因和修复：
+- 设备违反USB规范。一些廉价或伪造的设备有缺陷的固件。如果可能，尝试不同的设备。
+- 供电不足。声称需要比端口能提供更多功率的设备将无法枚举。尝试带电源的集线器。
+- 电磁干扰。坏电缆或坏端口可能在枚举期间导致位错误。尝试不同的电缆或端口。
+- USB主机控制器处于混乱状态。尝试卸载和重新加载主机控制器驱动程序，或（作为最后手段）重启。
 
-### Diagnostic Checklist When You Are Stuck
+### 卡住时的诊断检查清单
 
-When a 驱动程序 under development is not behaving correctly and you do not know why, walk through this checklist in order. Each step eliminates a large class of possible problems.
+当开发中的驱动程序行为不正确且你不知道原因时，按顺序走一遍这个检查清单。每一步消除了大量可能的问题。
 
-1. Compile cleanly with `-Wall -Werror`. Many subtle bugs produce warnings.
-2. Load in a 内核 built with `INVARIANTS` and `WITNESS`. Any locking or invariant violations will be caught immediately.
-3. Enable your 驱动程序's debug logging. Run a minimal reproduction scenario and capture the logs.
-4. Compare the 驱动程序's behaviour against a known-working 驱动程序 for similar hardware. Diffing behaviour reveals bugs that staring at your own code does not.
-5. Simplify the scenario. Write a minimal userland test program. Use a minimal USB 设备 (or an `nmdm` pair for serial). Remove every variable you can.
-6. Use `dtrace` on the USB 框架 functions. `usbd_transfer_submit:entry` and `usbd_transfer_submit:return` 探测 let you trace exactly which transfers were submitted and what happened to them.
-7. Run the 驱动程序 with `WITNESS_CHECKORDER` enabled. Each time a 互斥锁 is taken, the order is verified against the accumulated history.
-8. If the issue is intermittent, run under a stress-test harness that generates load for hours. Intermittent bugs become reproducible under sustained load.
+1. 使用 `-Wall -Werror` 干净编译。许多微妙的错误会产生警告。
+2. 在用 `INVARIANTS` 和 `WITNESS` 构建的内核中加载。任何锁定或不变量违规将被立即捕获。
+3. 启用驱动程序的调试日志。运行最小复现场景并捕获日志。
+4. 将驱动程序的行为与已知工作的类似硬件的驱动程序进行比较。差异比较能揭示盯着自己代码看不到的错误。
+5. 简化场景。编写一个最小的用户态测试程序。使用最小的USB设备（或用于串行的 `nmdm` 对）。移除你能移除的每个变量。
+6. 在USB框架函数上使用 `dtrace`。`usbd_transfer_submit:entry` 和 `usbd_transfer_submit:return` 探测让你精确跟踪哪些传输被提交以及它们发生了什么。
+7. 在启用 `WITNESS_CHECKORDER` 的情况下运行驱动程序。每次获取互斥锁时，顺序都会与累积的历史进行验证。
+8. 如果问题是间歇性的，在产生负载数小时的压力测试工具下运行。间歇性错误在持续负载下变得可复现。
 
-This checklist is not exhaustive, but it covers the techniques that find the majority of 驱动程序 bugs.
+这个检查清单不是详尽无遗的，但它涵盖了找到大多数驱动程序错误的技术。
 
-## Reading the FreeBSD USB Source Tree: A Guided Tour
+## 阅读FreeBSD USB源代码树：导览
 
-The `myfirst_usb` skeleton and the FTDI walkthrough have given you the shape of a USB驱动程序. But the real learning happens when you read existing 驱动程序 in the tree. Each one is a small lesson in how to apply the 框架 to a specific class of 设备. This section gives you a guided tour of five 驱动程序, ordered from simplest to most representative, and points out what each one teaches.
+`myfirst_usb` 骨架和FTDI演练已经给了你USB驱动程序的形状。但真正的学习发生在你阅读树中现有驱动程序时。每一个都是如何将框架应用于特定类别设备的小课程。本节给你五个驱动程序的导览，从最简单到最具代表性的顺序排列，并指出每个驱动程序教授了什么。
 
-The pattern we recommend is this. Open each 驱动程序's source file next to this section. Read the opening comment 块 and the structure definitions first; those tell you what the 驱动程序 is for and what state it maintains. Then trace the lifecycle: 匹配表, 探测, 附加, 分离, registration. Only after the lifecycle is clear should you move on to the data path. This ordering mirrors how the 框架 itself treats the 驱动程序: first as a match candidate, then as an 附加ed 驱动程序, and only then as something that moves data.
+我们推荐的模式是这样的。在此节旁边打开每个驱动程序的源文件。首先阅读开头的注释块和结构定义；它们告诉你驱动程序是做什么的以及它维护什么状态。然后追踪生命周期：匹配表、探测、附加、分离、注册。只有在生命周期清楚之后才应该进入数据路径。这种排序反映了框架本身如何对待驱动程序：首先作为匹配候选，然后作为已附加的驱动程序，最后才作为移动数据的东西。
 
-### Tour 1: uled.c, the Simplest USB Driver
+### 导览1：uled.c，最简单的USB驱动程序
 
 File: `/usr/src/sys/dev/usb/misc/uled.c`.
 
-Start here. `uled.c` is the Dream Cheeky USB LED 驱动程序. It is under 400 lines. It implements a single output (setting the LED colour) through a single 控制传输. There is no input, no 批量传输, no 中断传输, no concurrent I/O. Everything about it is minimal, and for that reason everything about it is easy to read.
+从这里开始。`uled.c` 是Dream Cheeky USB LED驱动程序。它不到400行。它通过单个控制传输实现单个输出（设置LED颜色）。没有输入、没有批量传输、没有中断传输、没有并发I/O。它的一切都是最小的，因此一切都很易读。
 
-Key things to study in `uled.c`:
+在 `uled.c` 中要学习的关键内容：
 
-The 匹配表 has a single entry: `{USB_VPI(USB_VENDOR_DREAM_CHEEKY, USB_PRODUCT_DREAM_CHEEKY_WEBMAIL_NOTIFIER_2, 0)}`. This is the minimal match-by-VID/PID idiom. No subclass or protocol filtering; just vendor and product.
+匹配表只有一个条目：`{USB_VPI(USB_VENDOR_DREAM_CHEEKY, USB_PRODUCT_DREAM_CHEEKY_WEBMAIL_NOTIFIER_2, 0)}`。这是最小化的按VID/PID匹配惯用法。没有子类或协议过滤；只有厂商和产品。
 
-The softc is tiny. It contains a 互斥锁, the `usb_设备` pointer, the `usb_xfer` array, and the LED state. This is the minimum every USB驱动程序 needs.
+softc很小。它包含一个互斥锁、`usb_device` 指针、`usb_xfer` 数组和LED状态。这是每个USB驱动程序需要的最小值。
 
-The 探测 method is two lines: check that the 设备 is in host mode and return the result of `usbd_lookup_id_by_uaa` against the 匹配表. No 接口-index check, no complex matching. For a simple 设备 with a single function, this is enough.
+探测方法是两行：检查设备是否处于主机模式，并返回 `usbd_lookup_id_by_uaa` 对匹配表的结果。没有接口索引检查，没有复杂的匹配。对于具有单一功能的简单设备，这足够了。
 
-The 附加 method allocates the transfer channel, creates a 设备-file entry with `make_dev`, and stores the pointers. No complex negotiation; the 设备 is ready after `附加` returns.
+附加方法分配传输通道，用 `make_dev` 创建设备文件条目，并存储指针。没有复杂的协商；设备在 `attach` 返回后就准备好了。
 
-The I/O path is a single 控制传输 with a fixed setup. The 驱动程序 sets the 帧 length, fills in the color bytes with `usbd_copy_in`, and calls `usbd_transfer_submit`. That is it.
+I/O路径是具有固定设置的单个控制传输。驱动程序设置帧长度，用 `usbd_copy_in` 填充颜色字节，然后调用 `usbd_transfer_submit`。就是这样。
 
-Read `uled.c` first. When you have read it once, the rest of the USB subsystem opens up. Every more complex 驱动程序 is a variation on this pattern.
+首先阅读 `uled.c`。当你读了一遍之后，USB子系统的其余部分就会展开。每个更复杂的驱动程序都是这个模式的变化。
 
-### Tour 2: ugold.c, Adding Interrupt Transfers
+### 导览2：ugold.c，添加中断传输
 
 File: `/usr/src/sys/dev/usb/misc/ugold.c`.
 
-`ugold.c` drives a USB thermometer. It is still very short, under 500 lines, but it introduces 中断传输, which are the staple of HID-class 设备.
+`ugold.c` 驱动USB温度计。它仍然很短，不到500行，但它引入了中断传输，这是HID类设备的主要传输方式。
 
-Key things to learn from `ugold.c`:
+从 `ugold.c` 中要学习的关键内容：
 
-The 设备 publishes temperature readings periodically via an interrupt 端点. The 驱动程序's job is to listen on that 端点 and deliver the readings to userland via `sysctl`.
+设备通过中断端点定期发布温度读数。驱动程序的工作是监听该端点并通过 `sysctl` 将读数传递给用户态。
 
-The `usb_config` array now has an entry for `UE_INTERRUPT`, with `UE_DIR_IN`. This tells the 框架 to set up a channel that polls the interrupt 端点.
+`usb_config` 数组现在有一个 `UE_INTERRUPT` 条目，方向为 `UE_DIR_IN`。这告诉框架设置一个轮询中断端点的通道。
 
-The interrupt 回调 shows the canonical pattern: on `USB_ST_TRANSFERRED`, extract the received bytes with `usbd_copy_out`, parse them, update the softc. On `USB_ST_SETUP` (including the initial 回调 after `start`), set the 帧 length and submit. On `USB_ST_ERROR`, decide whether to recover or give up.
+中断回调展示了经典模式：在 `USB_ST_TRANSFERRED` 时，用 `usbd_copy_out` 提取接收到的字节，解析它们，更新softc。在 `USB_ST_SETUP` 时（包括 `start` 后的初始回调），设置帧长度并提交。在 `USB_ST_ERROR` 时，决定是恢复还是放弃。
 
-The 驱动程序 exposes readings through `sysctl` nodes created in `附加` and torn down in `分离`. This is a common pattern for 设备 that produce occasional readings: the interrupt 回调 writes to softc state, and userland reads from `sysctl` when it wants a value.
+驱动程序通过在附加中创建、在分离中拆除的 `sysctl` 节点暴露读数。这是产生偶尔读数的设备的常见模式：中断回调写入softc状态，用户态在需要值时从 `sysctl` 读取。
 
-Compare `ugold.c` to `uled.c` after reading both. The control-transfer-only 驱动程序 and the interrupt-transfer 驱动程序 represent the two most common skeleton patterns. Most other USB驱动程序 are composed of variations of these two.
+读完两者后比较 `ugold.c` 和 `uled.c`。仅控制传输的驱动程序和中断传输的驱动程序代表了两种最常见的骨架模式。大多数其他USB驱动程序由这两种的变化组合而成。
 
-### Tour 3: udbp.c, Bidirectional Bulk Transfers
+### 导览3：udbp.c，双向批量传输
 
 File: `/usr/src/sys/dev/usb/misc/udbp.c`.
 
-`udbp.c` is the USB Double Bulk Pipe 驱动程序. It exists to test bidirectional bulk data flow between two computers connected by a special USB-to-USB cable. It is about 700 lines and gives you a complete working example of bulk read and bulk write.
+`udbp.c` 是USB双批量管道驱动程序。它的存在是为了测试通过特殊USB转USB电缆连接的两台计算机之间的双向批量数据流。它大约700行，给你一个批量读写的完整工作示例。
 
-Key things to learn from `udbp.c`:
+从 `udbp.c` 中要学习的关键内容：
 
-The `usb_config` has two entries: one for `UE_BULK` `UE_DIR_OUT` (host-to-设备) and one for `UE_BULK` `UE_DIR_IN` (设备-to-host). This is the standard bulk-duplex pattern.
+`usb_config` 有两个条目：一个用于 `UE_BULK` `UE_DIR_OUT`（主机到设备），一个用于 `UE_BULK` `UE_DIR_IN`（设备到主机）。这是标准的批量双工模式。
 
-Each 回调 does the same three-state dance. On `USB_ST_SETUP`, set the 帧 length (or if it is a read, just submit). On `USB_ST_TRANSFERRED`, consume the completed data and re-arm. On `USB_ST_ERROR`, decide the recovery policy.
+每个回调执行相同的三状态舞步。在 `USB_ST_SETUP` 时，设置帧长度（或者如果是读操作，只需提交）。在 `USB_ST_TRANSFERRED` 时，消费完成的数据并重新准备。在 `USB_ST_ERROR` 时，决定恢复策略。
 
-The 驱动程序 uses the netgraph 框架 to integrate with higher layers. This is a choice specific to the Double Bulk Pipe 设备. For a simple application, you would expose the bulk channels through a 字符设备, as `myfirst_usb` does.
+驱动程序使用netgraph框架与更高层集成。这是Double Bulk Pipe设备特有的选择。对于简单的应用，你会通过字符设备暴露批量通道，如 `myfirst_usb` 所做的那样。
 
-Trace how the softc maintains the state of each direction independently. The receive 回调 rearms only when a 缓冲区 is available. The transmit 回调 rearms only when there is something to send. The two 回调 coordinate only through shared softc fields (counter of pending operations, queue pointers).
+追踪softc如何独立维护每个方向的状态。接收回调仅在缓冲区可用时重新准备。发送回调仅在有待发送内容时重新准备。两个回调仅通过共享的softc字段（待处理操作计数器、队列指针）进行协调。
 
-### Tour 4: uplcom.c, a USB-to-Serial Bridge
+### 导览4：uplcom.c，USB转串口桥接
 
 File: `/usr/src/sys/dev/usb/serial/uplcom.c`.
 
-`uplcom.c` drives the Prolific PL2303, one of the most common USB-to-serial chips. At around 1400 lines, it is more substantial than the previous three, but every part of it maps directly onto the serial-驱动程序 pattern from Section 4 of this chapter.
+`uplcom.c` 驱动Prolific PL2303，最常见的USB转串口芯片之一。大约1400行，比前三个更充实，但它的每个部分都直接映射到本章第4节的串行驱动程序模式。
 
-Key things to learn from `uplcom.c`:
+从 `uplcom.c` 中要学习的关键内容：
 
-The `ucom_回调` structure fills in every configuration method you would expect a real 驱动程序 to implement: `ucom_cfg_open`, `ucom_cfg_param`, `ucom_cfg_set_dtr`, `ucom_cfg_set_rts`, `ucom_cfg_set_break`, `ucom_cfg_get_status`, `ucom_cfg_close`. Each of these calls the 框架-provided `ucom` primitives after issuing the chip-specific USB 控制传输.
+`ucom_callback` 结构填充了你期望真正驱动程序实现的每个配置方法：`ucom_cfg_open`、`ucom_cfg_param`、`ucom_cfg_set_dtr`、`ucom_cfg_set_rts`、`ucom_cfg_set_break`、`ucom_cfg_get_status`、`ucom_cfg_close`。每一个在发出芯片特定的USB控制传输后调用框架提供的 `ucom` 原语。
 
-Look at `uplcom_cfg_param`. It takes a `termios` structure, extracts the 波特率 and framing, and constructs a vendor-specific 控制传输 to program the chip. This is how a user's `stty 9600` call propagates through the layers: `stty` updates `termios`, the TTY layer calls `ucom_param`, the 框架 schedules the 控制传输, and `uplcom_cfg_param` programs the chip.
+看看 `uplcom_cfg_param`。它接受一个 `termios` 结构，提取波特率和帧格式，并构造一个厂商特定的控制传输来编程芯片。这就是用户的 `stty 9600` 调用如何通过各层传播的：`stty` 更新 `termios`，TTY层调用 `ucom_param`，框架调度控制传输，`uplcom_cfg_param` 编程芯片。
 
-Compare `uplcom_cfg_param` with the corresponding function in `uftdi.c`. Both translate a `termios` to a vendor-specific control sequence, but the vendor protocols are entirely different. This illustrates why the 框架 insists on per-vendor 驱动程序: each chip has its own command set, and the 框架's job is only to give each 驱动程序 a uniform way to be called.
+将 `uplcom_cfg_param` 与 `uftdi.c` 中对应的函数进行比较。两者都将 `termios` 翻译为厂商特定的控制序列，但厂商协议完全不同。这说明了为什么框架坚持每个厂商都有驱动程序：每个芯片有自己的命令集，框架的工作只是给每个驱动程序一个统一的被调用方式。
 
-Note how the 驱动程序 handles reset, modem signals, and break. Each modem-line operation is a separate USB 控制传输. The cost of changing, say, DTR is one round-trip to the 设备, which on a 12 Mbps 总线 takes about 1 ms. This tells you why line signals change more slowly over USB-to-serial than over a native UART, and why protocols that toggle DTR frequently can behave differently through a USB-to-serial adapter.
+注意驱动程序如何处理重置、调制解调器信号和断开。每个调制解调器线路操作是一个独立的USB控制传输。改变，比如说DTR的成本是一次到设备的往返，在12 Mbps总线上大约需要1毫秒。这告诉你为什么线路信号通过USB转串口比通过原生UART变化更慢，以及为什么频繁切换DTR的协议通过USB转串口适配器可能表现不同。
 
-### Tour 5: uhid.c, the Human Interface Device Driver
+### 导览5：uhid.c，人机接口设备驱动程序
 
 File: `/usr/src/sys/dev/usb/input/uhid.c`.
 
-`uhid.c` is the generic HID 驱动程序. HID stands for Human Interface Device; it covers keyboards, mice, gamepads, touchscreens, and countless vendor-specific 设备 that conform to the HID class standard. `uhid.c` is roughly 1000 lines.
+`uhid.c` 是通用HID驱动程序。HID代表人机接口设备；它涵盖键盘、鼠标、游戏手柄、触摸屏以及无数符合HID类标准的厂商特定设备。`uhid.c` 大约1000行。
 
-Key things to learn from `uhid.c`:
+从 `uhid.c` 中要学习的关键内容：
 
-The 匹配表 uses class-based matching. Instead of listing every VID/PID, the 驱动程序 matches any 设备 that advertises the HID 接口 class. `UIFACE_CLASS(UICLASS_HID)` tells the 框架 to match any HID 接口, no matter which vendor made the 设备.
+匹配表使用基于类的匹配。驱动程序不是列出每个VID/PID，而是匹配任何声明HID接口类的设备。`UIFACE_CLASS(UICLASS_HID)` 告诉框架匹配任何HID接口，无论哪个厂商制造了设备。
 
-The 驱动程序 exposes the 设备 through a 字符设备, not through `ucom` or a networking 框架. The 字符设备 pattern lets userland programs open `/dev/uhidN` and issue `ioctl` calls to read HID 描述符, read reports, and set feature reports.
+驱动程序通过字符设备暴露设备，而不是通过 `ucom` 或网络框架。字符设备模式让用户态程序可以打开 `/dev/uhidN` 并发出 `ioctl` 调用来读取HID描述符、读取报告和设置特性报告。
 
-The interrupt 端点 delivers HID reports, and the 驱动程序 hands them up to userland through a 环形缓冲区 and `read`. This is the USB equivalent of a character-设备 interrupt-driven read loop.
+中断端点传送HID报告，驱动程序通过环形缓冲区和 `read` 将它们传递给用户态。这是字符设备中断驱动读取循环的USB等价物。
 
-Study how `uhid.c` uses the HID report 描述符 to understand what the 设备 is. The 描述符 is parsed at 附加 time, and the 驱动程序 populates its internal tables from the parse. Every HID 设备 describes itself this way; the 驱动程序 does not hard-code 设备 semantics.
+研究 `uhid.c` 如何使用HID报告描述符来理解设备是什么。描述符在附加时解析，驱动程序从解析中填充其内部表。每个HID设备都以这种方式描述自己；驱动程序不硬编码设备语义。
 
-### How to Study a Driver You Have Never Seen
+### 如何研究你从未见过的驱动程序
 
-Beyond the tour, you will encounter 驱动程序 in the tree that you have never seen. A general-purpose reading strategy helps:
+除了导览之外，你还会遇到树中你从未见过的驱动程序。一个通用的阅读策略会有帮助：
 
-Open the source file and scroll to the bottom. The registration macros are there. They tell you what the 驱动程序 附加 to (`uhub`, `usb`) and its name (`udbp`, `uhid`). Already you know where the 驱动程序 fits in the tree.
+打开源文件并滚动到底部。注册宏就在那里。它们告诉你驱动程序附加到什么（`uhub`、`usb`）以及它的名称（`udbp`、`uhid`）。你已经知道驱动程序在树中的位置。
 
-Scroll back up to the `usb_config` array (or the transfer declarations for non-USB驱动程序). Each entry is one channel. Count them; look at their types and directions. You now know the shape of the data path.
+向上滚动到 `usb_config` 数组（或非USB驱动程序的传输声明）。每个条目是一个通道。数它们；看它们的类型和方向。你现在知道了数据路径的形状。
 
-Look at the 探测 method. If it matches by VID/PID, the 设备 is vendor-specific. If it matches by class, the 驱动程序 supports a family of 设备. This tells you the scope of the 驱动程序.
+查看探测方法。如果它按VID/PID匹配，设备是厂商特定的。如果它按类匹配，驱动程序支持一系列设备。这告诉你驱动程序的范围。
 
-Look at the 附加 method. Follow its labelled-goto chain. The labels give you the order of resource allocation: 互斥锁, channels, 字符设备, sysctls, and so on.
+查看附加方法。跟随其标签化goto链。标签给你资源分配的顺序：互斥锁、通道、字符设备、sysctl等。
 
-Finally, look at the data-path 回调. Each one is a three-state state machine. Read `USB_ST_TRANSFERRED` first; that is where the actual work happens. Then read `USB_ST_SETUP`; that is the kickoff. Then read `USB_ST_ERROR`; that is the recovery policy.
+最后，查看数据路径回调。每个都是一个三状态状态机。先读 `USB_ST_TRANSFERRED`；那是实际工作发生的地方。然后读 `USB_ST_SETUP`；那是启动。然后读 `USB_ST_ERROR`；那是恢复策略。
 
-With this reading order, you can make sense of any USB驱动程序 in the tree in about 15 minutes. With practice, you will start to recognise patterns across 驱动程序 and know which ones are idiomatic (the ones to copy) and which ones are historical oddities (the ones to understand but not copy).
+通过这种阅读顺序，你可以在大约15分钟内理解树中任何USB驱动程序。通过练习，你会开始识别驱动程序之间的模式，知道哪些是惯用的（要复制的），哪些是历史遗留的（要理解但不复制的）。
 
-### Where to Go Beyond the Tour
+### 导览之外去哪里
 
-The `/usr/src/sys/dev/usb/` tree has four subdirectories that are worth exploring:
+`/usr/src/sys/dev/usb/` 树有四个值得探索的子目录：
 
-`/usr/src/sys/dev/usb/misc/` contains simple, single-purpose 驱动程序: `uled`, `ugold`, `udbp`. If you are writing a new 设备-specific 驱动程序 that does not fit an existing class, read the 驱动程序 here to see how small 驱动程序 are structured.
+`/usr/src/sys/dev/usb/misc/` 包含简单的、单一用途的驱动程序：`uled`、`ugold`、`udbp`。如果你正在编写一个不适合现有类的新设备特定驱动程序，阅读这里的驱动程序可以了解小型驱动程序的结构。
 
-`/usr/src/sys/dev/usb/serial/` contains the USB-to-serial bridge 驱动程序: `uftdi`, `uplcom`, `uslcom`, `u3g` (3G modems, which present as serial to userland), `uark`, `uipaq`, `uchcom`. If you are writing a new USB-to-串行驱动程序, start here.
+`/usr/src/sys/dev/usb/serial/` 包含USB转串口桥接驱动程序：`uftdi`、`uplcom`、`uslcom`、`u3g`（3G调制解调器，对用户态表现为串口）、`uark`、`uipaq`、`uchcom`。如果你正在编写新的USB转串行驱动程序，从这里开始。
 
-`/usr/src/sys/dev/usb/input/` contains keyboard, mouse, and HID 驱动程序. `ukbd`, `ums`, `uhid`. If you are writing a new input 驱动程序, these are the patterns to follow.
+`/usr/src/sys/dev/usb/input/` 包含键盘、鼠标和HID驱动程序。`ukbd`、`ums`、`uhid`。如果你正在编写新的输入驱动程序，这些是要遵循的模式。
 
-`/usr/src/sys/dev/usb/net/` contains USB 网络驱动程序: `axge`, `axe`, `cdce`, `ure`, `smsc`. These are the 驱动程序 that bridge 第26章 to 第27章, because they combine the USB 框架 of this chapter with the `ifnet(9)` 框架 of the next. Reading one of them after finishing 第27章 is a productive exercise.
+`/usr/src/sys/dev/usb/net/` 包含USB网络驱动程序：`axge`、`axe`、`cdce`、`ure`、`smsc`。这些是将第26章连接到第27章的驱动程序，因为它们结合了本章的USB框架和下一章的 `ifnet(9)` 框架。读完第27章后阅读其中一个是很有成效的练习。
 
-The `/usr/src/sys/dev/uart/` tree has fewer files but each is worth reading:
+`/usr/src/sys/dev/uart/` 树文件较少但每个都值得阅读：
 
-`/usr/src/sys/dev/uart/uart_core.c` is the 框架 core. Read this to understand what happens above your 驱动程序: how bytes flow in and out, how the TTY layer connects, how interrupts are dispatched.
+`/usr/src/sys/dev/uart/uart_core.c` 是框架核心。阅读它来了解驱动程序之上发生了什么：字节如何流入流出、TTY层如何连接、中断如何分发。
 
-`/usr/src/sys/dev/uart/uart_dev_ns8250.c` is the canonical reference 驱动程序. Read this after the 框架 core so you can see how a 驱动程序 plugs in.
+`/usr/src/sys/dev/uart/uart_dev_ns8250.c` 是规范的参考驱动程序。在框架核心之后阅读它，这样你可以看到驱动程序如何插入。
 
-`/usr/src/sys/dev/uart/uart_总线_pci.c` shows the PCI 总线-附加 glue for UARTs. If you ever need to write a UART 驱动程序 that 附加 to PCI, this is your starting point.
+`/usr/src/sys/dev/uart/uart_bus_pci.c` 展示了UART的PCI总线附加胶水代码。如果你需要编写附加到PCI的UART驱动程序，这是你的起点。
 
-Each of these files is small enough to read in one sitting. Reading the source is not homework; it is how you learn a subsystem. 第26章 has given you the vocabulary and the mental model; the source is where you apply them.
+这些文件中的每一个都足够小，可以在一次阅读中完成。阅读源代码不是作业；这是你学习子系统的方式。第26章给了你词汇和心智模型；源代码是你应用它们的地方。
 
-## 性能考虑 for Transport Drivers
+## 传输驱动程序的性能考虑
 
-Most of 第26章 has focused on correctness: getting a 驱动程序 to 附加, do its work, and 分离 cleanly. Correctness always comes first. But once your 驱动程序 works, you will often want to know how fast it is, and whether its performance matches what the transport can sustain. This section gives you a practical 帧 for thinking about USB and UART performance without turning the chapter into a benchmarking manual.
+第26章的大部分内容集中在正确性上：让驱动程序附加、工作并干净地分离。正确性始终是第一位的。但一旦你的驱动程序工作了，你通常会想知道它有多快，以及其性能是否匹配传输能维持的水平。本节给你一个实用的框架来思考USB和UART性能，而不把这一章变成基准测试手册。
 
-### The USB Bus as a Shared Resource
+### USB总线作为共享资源
 
-Every 设备 on a USB 总线 shares the 总线 with every other 设备. The bandwidth is not divided fairly; it is allocated according to USB's scheduling rules. Control and interrupt 端点 get guaranteed periodic service. Bulk 端点 get what is left over, in a fair-share sense. Isochronous 端点 reserve bandwidth up front; if there is not enough, the allocation fails.
+USB总线上的每个设备与每个其他设备共享总线。带宽不是公平分配的；它根据USB的调度规则分配。控制和中断端点获得保证的定期服务。批量端点获得剩余的带宽，在公平分享的意义上。等时端点预先保留带宽；如果不足，分配就会失败。
 
-For a bulk-transferring 驱动程序, the practical upshot is this. Your effective bandwidth is the theoretical link speed (12, 480, 5000 Mbps) minus the overhead of other 设备' periodic traffic, minus the USB protocol overhead (roughly 10% on full-speed, less on higher speeds), minus the overhead of short transfers.
+对于批量传输驱动程序，实际结果是：你的有效带宽是理论链路速度（12、480、5000 Mbps）减去其他设备周期性流量的开销，减去USB协议开销（全速上大约10%，更高速率上更少），减去短传输的开销。
 
-The last item is the one you can influence. A transfer of 16 KB is not 16 times more expensive than a transfer of 1 KB; the overhead of initiating and completing a transfer is fixed, and the data-transfer portion is close to linear in size. For high-throughput 批量传输, use large 缓冲区. The hardware is designed for this; the 框架 is designed for this; your 驱动程序 should be designed for this.
+最后一项是你能够影响的。一个16KB的传输并不比一个1KB的传输昂贵16倍；启动和完成传输的开销是固定的，数据传输部分与大小大致呈线性关系。对于高吞吐量的批量传输，使用大缓冲区。硬件为此设计；框架为此设计；你的驱动程序也应为此设计。
 
-For an interrupt-transferring 驱动程序, the constraint is different. The interrupt 端点 polls at a fixed interval (configured by the 设备). The 框架 delivers a 回调 whenever the polled transfer completes. The maximum report rate is the 端点's polling rate. If the 设备 has a 1-ms interval, you get at most 1000 reports per second. Planning for interrupt-driven performance means planning around the polling rate.
+对于中断传输驱动程序，约束条件有所不同。中断端点以固定间隔轮询（由设备配置）。框架在每次轮询传输完成时传递回调。最大报告速率是端点的轮询速率。如果设备有1毫秒的间隔，你最多每秒获得1000个报告。规划中断驱动的性能意味着围绕轮询率进行规划。
 
-### Latency: What Costs Microseconds, What Costs Milliseconds
+### 延迟：什么花费微秒，什么花费毫秒
 
-USB is not a low-latency 总线. A single 控制传输 on full-speed USB takes roughly 1 ms round-trip. A single 批量传输 takes roughly 1 ms of framing overhead plus the time to move the data. Interrupt transfers are scheduled at the polling interval, so the minimum latency is the interval itself.
+USB不是低延迟总线。在全速USB上，单个控制传输大约需要1毫秒往返时间。单个批量传输大约需要1毫秒的帧开销加上移动数据的时间。中断传输按轮询间隔调度，因此最小延迟就是间隔本身。
 
-Compare this to native UART, where a character transmission takes roughly 1 ms at 9600 baud, 100 us at 115200 baud, and 10 us at 1 Mbps. A native UART 驱动程序 can push out a byte in hundreds of microseconds if it is well designed; a USB-to-serial bridge cannot match that, because each byte has to traverse USB first.
+与此相比，原生UART在9600波特率下字符传输大约需要1毫秒，在115200波特率下需要100微秒，在1 Mbps下需要10微秒。如果设计得当，原生UART驱动程序可以在几百微秒内推送出一个字节；USB转串口桥无法匹敌这一点，因为每个字节必须首先通过USB传输。
 
-For your 驱动程序, this means: think about where latency matters for your use case. If you are building a monitoring 驱动程序 that reports once a second, USB is fine. If you are building an interactive controller where the user can feel each character round-trip, native UART is much better. If you are building a real-time control loop where characters must traverse in tens of microseconds, neither USB nor general-purpose UART is appropriate; you need a dedicated 总线 with known timing.
+对你的驱动程序来说，这意味着：思考你的用例中延迟在哪里重要。如果你正在构建一个每秒报告一次的监控驱动程序，USB就足够了。如果你正在构建一个用户能感受到每个字符往返的交互式控制器，原生UART要好得多。如果你正在构建一个字符必须在几十微秒内传输的实时控制回路，USB和通用UART都不合适；你需要一个具有已知时序的专用总线。
 
-### When to Rearm: The Classic USB Tradeoff
+### 何时重新准备：经典的USB权衡
 
-A key decision in any streaming USB驱动程序 is where in the 回调 to re-arm the transfer. There are two viable patterns:
+任何流式USB驱动程序中的一个关键决策是在回调中的何处重新准备传输。有两种可行的模式：
 
-**Rearm after work.** In `USB_ST_TRANSFERRED`, do the work (parse the data, hand it up, update state), then rearm. Simple to implement. Has a latency cost: the time between the previous completion and the next submission is the time it took to do the work.
+**工作后重新准备。** 在 `USB_ST_TRANSFERRED` 中，执行工作（解析数据、向上传递、更新状态），然后重新准备。实现简单。有延迟成本：上次完成和下次提交之间的时间是执行工作所需的时间。
 
-**Rearm before work, using multiple 缓冲区.** In `USB_ST_TRANSFERRED`, immediately rearm with a fresh 缓冲区, then do the work on the just-completed 缓冲区. This requires multiple `帧` in the `usb_config` (so the 框架 rotates through a pool of 缓冲区) or two parallel transfer channels. Has near-zero latency between transfers because the hardware always has a 缓冲区 ready.
+**工作前重新准备，使用多个缓冲区。** 在 `USB_ST_TRANSFERRED` 中，立即用新缓冲区重新准备，然后对刚完成的缓冲区执行工作。这需要在 `usb_config` 中有多个 `帧`（这样框架会在一组缓冲区中轮转）或两条并行的传输通道。传输之间接近零延迟，因为硬件始终有准备好的缓冲区。
 
-Most 驱动程序 in the tree use the first pattern because it is simpler. The second pattern is used in high-throughput 驱动程序 where hiding the work latency matters. `ugold.c` is the first pattern; some of the USB 以太网 驱动程序 in `/usr/src/sys/dev/usb/net/` are the second.
+树中的大多数驱动程序使用第一种模式，因为它更简单。第二种模式用于高吞吐量驱动程序，其中隐藏工作延迟很关键。`ugold.c` 是第一种模式；`/usr/src/sys/dev/usb/net/` 中的一些USB以太网驱动程序是第二种模式。
 
-### Buffer Sizing
+### 缓冲区大小
 
-For 批量传输, the 缓冲区 size is a knob. Larger 缓冲区 amortise the per-transfer overhead, but they also delay the delivery of partial data and increase memory usage. The typical values in the tree are between 1 KB and 64 KB.
+对于批量传输，缓冲区大小是一个可调节的参数。较大的缓冲区可以分摊每次传输的开销，但它们也会延迟部分数据的交付并增加内存使用。树中的典型值在1 KB到64 KB之间。
 
-For 中断传输, the 缓冲区 size is usually small (8 to 64 bytes) because the 端点 itself limits the report size. Do not make this larger than the 端点's `wMaxPacketSize`; the extra 缓冲区 is wasted.
+对于中断传输，缓冲区大小通常很小（8到64字节），因为端点本身限制了报告大小。不要将其设置为大于端点的 `wMaxPacketSize`；额外的缓冲区是浪费。
 
-For 控制传输, the 缓冲区 size is determined by the protocol of the specific operation. The `usb_设备_request` header is always 8 bytes; the data portion depends on the request.
+对于控制传输，缓冲区大小由特定操作的协议决定。`usb_device_request` 头部始终是8字节；数据部分取决于请求。
 
-### UART Performance
+### UART性能
 
-For a UART 驱动程序, performance is usually a question of interrupt efficiency. A 16550A with a FIFO depth of 16 bytes at 115200 baud needs to be serviced roughly every 1.4 ms in the worst case. If your 中断处理程序 takes longer than that, the FIFO overflows and data is lost. Modern UARTs (16750, 16950, ns16550 variants on embedded SoCs) often have deeper FIFOs (64, 128, or 256 bytes) specifically to relax this constraint.
+对于UART驱动程序，性能通常是一个中断效率问题。一个FIFO深度为16字节、波特率为115200的16550A在最坏情况下大约每1.4毫秒需要被服务一次。如果你的中断处理程序花费的时间比这更长，FIFO就会溢出并丢失数据。现代UART（16750、16950、嵌入式SoC上的ns16550变体）通常有更深的FIFO（64、128或256字节），专门用来放宽这一约束。
 
-The `uart(4)` 框架 handles the FIFO management for you through `uart_ops->rxready` and the 环形缓冲区. What you control as the 驱动程序 author is: how fast your implementation of `getc` is, how fast `putc` is, and whether your 中断处理程序 is sharing the CPU with other work.
+`uart(4)` 框架通过 `uart_ops->rxready` 和环形缓冲区为你处理FIFO管理。你作为驱动程序作者可以控制的是：你的 `getc` 实现有多快，`putc` 有多快，以及你的中断处理程序是否与其他工作共享CPU。
 
-For higher 波特率s (921600, 1.5M, 3M), a raw 16550A is not enough. These rates require either a chip with a larger FIFO or a 驱动程序 that uses DMA to move characters directly to memory. The `uart(4)` 框架 supports DMA-backed 驱动程序, but the vast majority of 驱动程序 (including `ns8250`) do not use it. DMA support is usually reserved for embedded platforms that specifically provide it.
+对于更高的波特率（921600、1.5M、3M），原始的16550A是不够的。这些速率需要具有更大FIFO的芯片，或者使用DMA直接将字符移动到内存的驱动程序。`uart(4)` 框架支持DMA-backed的驱动程序，但绝大多数驱动程序（包括 `ns8250`）不使用它。DMA支持通常保留给专门提供它的嵌入式平台。
 
-### Concurrency and Lock Hold Times
+### 并发和锁持有时间
 
-A USB 回调 runs with the 驱动程序's 互斥锁 held. If the 回调 takes a long time (copying a large 缓冲区, doing complex processing), no other 回调 can run, and no 分离 can complete. Keep 回调 work short.
+USB回调在持有驱动程序互斥锁的情况下运行。如果回调花费很长时间（复制大缓冲区、执行复杂处理），其他回调就无法运行，也无法完成分离。保持回调工作简短。
+非平凡工作的惯用模式是：在回调中，将数据从框架缓冲区复制到softc中的私有缓冲区，然后将数据标记为就绪并唤醒消费者。消费者（通过 `read` 的用户态，或工作者taskqueue）在没有驱动程序互斥锁的情况下执行繁重处理。
 
-The idiomatic pattern for non-trivial work is: in the 回调, copy the data out of the 框架 缓冲区 into a private 缓冲区 in softc, then mark the data as ready and wake a consumer. The consumer (userland via `read`, or a worker taskqueue) does the heavy processing without the 驱动程序 互斥锁.
+对于UART驱动程序，同样的原则适用。`rxready` 和 `getc` 方法必须快速，因为它们在中端上下文中运行。繁重处理稍后在中端外部由TTY层和用户进程完成。
 
-For a UART 驱动程序, the same principle applies. The `rxready` and `getc` methods must be fast because they run in interrupt context. Heavy processing is done later, outside the interrupt, by the TTY layer and user processes.
+### 测量，而非猜测
 
-### Measuring, Not Guessing
+回答性能问题的最佳方法是测量。`usbd_transfer_submit` 及相关函数上的 `dtrace` 钩子让你能够以微秒精度计时传输。`sysctl -a | grep usb` 暴露每设备统计信息。对于UART，`sysctl -a dev.uart` 和 `vmstat` 中的TTY统计信息告诉你时间花在哪里。
 
-The best way to answer a performance question is to measure. The `dtrace` hooks on `usbd_transfer_submit` and related functions let you time transfers to microsecond precision. `sysctl -a | grep usb` exposes per-设备 statistics. For UARTs, `sysctl -a dev.uart` and the TTY statistics in `vmstat` tell you where time is going.
+不要盲目优化驱动程序。运行工作负载、测量、找到瓶颈，并修复真正重要的问题。对于大多数驱动程序，瓶颈不是传输本身而是其周围的问题：内存分配、锁定或大小不当的缓冲区。
 
-Do not optimise a 驱动程序 blindly. Run the workload, measure, find the bottleneck, and fix what actually matters. For most 驱动程序, the bottleneck is not the transfer itself but something surrounding it: memory allocation, locking, or a poorly sized 缓冲区.
+## 编写第一个传输驱动程序时的常见错误
 
-## 常见错误 When Writing Your First Transport Driver
+本章中的模式是编写传输驱动程序的正确方法。但模式描述起来容易应用起来难。大多数初学者的驱动程序在原则上正确地遵循了每个模式，但在实践中却误用了它们。本节列出了某人第一次编写USB或UART驱动程序时最常出现的具体错误。每个错误都配对了纠正方法和为什么纠正方法必要的简短说明。
 
-The patterns in this chapter are the right way to write a transport 驱动程序. But patterns are easier to describe than to apply. Most first-time 驱动程序 are written with every pattern followed correctly in principle but misapplied in practice. This section lists the specific mistakes that appear most often when someone sits down to write a USB or UART 驱动程序 for the first time. Each mistake is paired with the correction and a short explanation of why the correction is necessary.
+在编写第一个驱动程序之前阅读本部分一次，在调试驱动程序时再读一次。这些错误惊人地普遍；几乎每个有经验的FreeBSD驱动程序作者都曾在某个时候犯过其中几个。
 
-Read this section once before you write your first 驱动程序, and again when you are debugging one. The mistakes are surprisingly universal; almost every experienced FreeBSD 驱动程序 author has made several of them at some point.
+### 错误1：在回调中显式获取框架互斥锁
 
-### Mistake 1: Taking the Framework Mutex Explicitly in a Callback
-
-The mistake looks like this:
+该错误看起来是这样的：
 
 ```c
 static void
@@ -3391,13 +3391,13 @@ my_bulk_read_callback(struct usb_xfer *xfer, usb_error_t error)
 }
 ```
 
-The 框架 has already acquired the 互斥锁 before calling the 回调. Taking it a second time is a self-deadlock on most 互斥锁 implementations and an extra uncontested acquisition on others. On some 内核 configurations, it will panic immediately with a "recursive lock" assertion from WITNESS.
+框架在调用回调之前已经获取了互斥锁。在大多数互斥锁实现中第二次获取它会导致自死锁，而在其他实现中则是一次额外的无争议获取。在某些内核配置上，它会立即因WITNESS的"递归锁"断言而panic。
 
-The correction is to simply not lock. The 框架 guarantees that 回调 are invoked with the softc 互斥锁 held. Your 回调 just does its work and returns; the 框架 releases the 互斥锁 on return.
+纠正方法就是不加锁。框架保证回调在持有softc互斥锁的情况下被调用。你的回调只需执行工作然后返回；框架在返回时释放互斥锁。
 
-### Mistake 2: Calling Framework Primitives Without the Mutex Held
+### 错误2：在未持有互斥锁的情况下调用框架原语
 
-The opposite mistake is also common:
+相反的错误也很常见：
 
 ```c
 static int
@@ -3411,9 +3411,9 @@ my_userland_write(struct cdev *dev, struct uio *uio, int ioflag)
 }
 ```
 
-Most 框架 primitives (`usbd_transfer_start`, `usbd_transfer_stop`, `usbd_transfer_submit`) expect the caller to hold the associated 互斥锁. Calling them without the 互斥锁 is a race: the 框架's own state can be modified by a concurrent 回调 while you are issuing the primitive.
+大多数框架原语（`usbd_transfer_start`、`usbd_transfer_stop`、`usbd_transfer_submit`）期望调用者持有相关的互斥锁。在没有互斥锁的情况下调用它们会导致竞态：在你发出原语时，框架自身的状态可能被并发回调修改。
 
-The correction is to take the 互斥锁 around the call:
+纠正方法是在调用周围获取互斥锁：
 
 ```c
 mtx_lock(&sc->sc_mtx);
@@ -3421,72 +3421,72 @@ usbd_transfer_start(sc->sc_xfer[MY_BULK_TX]);
 mtx_unlock(&sc->sc_mtx);
 ```
 
-This is the idiomatic pattern. The 框架 provides the locking; the 驱动程序 provides the 互斥锁.
+这是惯用模式。框架提供锁定的调用约定；驱动程序提供互斥锁。
 
-### Mistake 3: Forgetting `USB_ERR_CANCELLED` Handling
+### 错误3：忘记处理 `USB_ERR_CANCELLED`
 
-The 框架 uses `USB_ERR_CANCELLED` to tell a 回调 that its transfer is being torn down (typically during 分离). If your 回调 handles this error the same way it handles other errors (for example by rearming the transfer), 分离 will hang forever because the transfer never actually stops.
+框架使用 `USB_ERR_CANCELLED` 来通知回调其传输正在被拆除（通常在分离期间）。如果你的回调以与其他错误相同的方式处理此错误（例如通过重新准备传输），分离将永远挂起，因为传输从未真正停止。
 
-The correct pattern is:
+正确的模式是：
 
 ```c
 case USB_ST_ERROR:
     if (error == USB_ERR_CANCELLED) {
-        return;   /* do not rearm; the framework is tearing us down */
+        return;   /* 不要重新准备；框架正在拆除我们 */
     }
-    /* handle other errors, possibly rearm */
+    /* 处理其他错误，可能重新准备 */
     break;
 ```
 
-Omitting the cancellation check is one of the most common reasons a 驱动程序 分离 cleanly in development (because the ref count happens to be zero) but hangs in production (because a read was in-flight when 分离 ran).
+省略取消检查是驱动程序在开发中能干净分离（因为引用计数恰好为零）但在生产中挂起（因为分离运行时读操作正在进行中）的最常见原因之一。
 
-### Mistake 4: Submitting to a Channel That Has Not Been Started
+### 错误4：向尚未启动的通道提交传输
 
-A transfer channel is inert until `usbd_transfer_start` has been called on it. Calling `usbd_transfer_submit` on an inactive channel is a no-op in some 框架 versions and a panic in others.
+传输通道在调用 `usbd_transfer_start` 之前是惰性的。在未激活的通道上调用 `usbd_transfer_submit` 在某些框架版本中是空操作，在其他版本中会导致panic。
 
-The correct pattern is to call `usbd_transfer_start` from userland-initiated work (in response to an open, for instance) and leave the channel active until 分离. Do not call `usbd_transfer_submit` directly; let `usbd_transfer_start` schedule the first 回调, and rearm from `USB_ST_SETUP` or `USB_ST_TRANSFERRED`.
+正确的模式是从用户态发起的工作中调用 `usbd_transfer_start`（例如响应open），并保持通道活跃直到分离。不要直接调用 `usbd_transfer_submit`；让 `usbd_transfer_start` 调度第一个回调，并从 `USB_ST_SETUP` 或 `USB_ST_TRANSFERRED` 重新准备。
 
-### Mistake 5: Assuming `USB_GET_STATE` Returns the Real Hardware State
+### 错误5：假设 `USB_GET_STATE` 返回真实硬件状态
 
-`USB_GET_STATE(xfer)` returns the state the 框架 wants the 回调 to handle at this moment. It does not report the underlying hardware state. The three states `USB_ST_SETUP`, `USB_ST_TRANSFERRED`, and `USB_ST_ERROR` are 框架 concepts, not hardware concepts.
+`USB_GET_STATE(xfer)` 返回框架希望回调在此刻处理的状态。它不报告底层硬件状态。三个状态 `USB_ST_SETUP`、`USB_ST_TRANSFERRED` 和 `USB_ST_ERROR` 是框架概念，而不是硬件概念。
 
-In particular, `USB_ST_TRANSFERRED` means "the 框架 thinks this transfer completed." If the hardware is misbehaving (spurious transfer complete interrupts, split completions), the 回调 may be called with `USB_ST_TRANSFERRED` even when the actual transfer has not fully drained. This is rare, but when debugging, do not assume the 框架 state is ground truth about the hardware.
+特别是，`USB_ST_TRANSFERRED` 意味着"框架认为此传输已完成。"如果硬件行为异常（虚假传输完成中断、拆分完成），即使实际传输尚未完全排空，回调也可能以 `USB_ST_TRANSFERRED` 被调用。这很少见，但在调试时，不要假设框架状态是硬件的真实情况。
 
-### Mistake 6: Using `M_WAITOK` in a Callback
+### 错误6：在回调中使用 `M_WAITOK`
 
-A USB 回调 runs in an environment where sleeping is not allowed. Memory allocations in a 回调 must use `M_NOWAIT`. Using `M_WAITOK` will assert or panic.
+USB回调在不允许睡眠的环境中运行。回调中的内存分配必须使用 `M_NOWAIT`。使用 `M_WAITOK` 会导致断言失败或panic。
 
-A more subtle version of this mistake is calling a helper that internally uses `M_WAITOK`. For example, some 框架 helpers sleep; calling them from a 回调 is forbidden. If you need to do work that would require sleeping (DNS lookup, disk I/O, USB 控制传输 from a USB 回调), queue it to a taskqueue and let the taskqueue worker do the work outside the 回调.
+这种错误的一个更微妙的版本是调用一个内部使用 `M_WAITOK` 的辅助函数。例如，一些框架辅助函数会睡眠；从回调中调用它们是被禁止的。如果你需要执行需要睡眠的工作（DNS查找、磁盘I/O、从USB回调中发起USB控制传输），将其排队到taskqueue，让taskqueue工作者在回调外部执行该工作。
 
-### Mistake 7: Forgetting `MODULE_DEPEND` on `usb`
+### 错误7：忘记在 `usb` 上声明 `MODULE_DEPEND`
 
-A USB驱动程序 module that does not declare `MODULE_DEPEND(my, usb, 1, 1, 1)` will fail to load with a cryptic unresolved-symbol error:
+未声明 `MODULE_DEPEND(my, usb, 1, 1, 1)` 的USB驱动程序模块将加载失败，并出现难以理解的未解析符号错误：
 
 ```text
 link_elf_obj: symbol usbd_transfer_setup undefined
 ```
 
-The symbol is undefined because the `usb` module has not been loaded, and the linker cannot resolve the 驱动程序's dependency on it. Adding the correct `MODULE_DEPEND` directive causes the 内核模块 loader to automatically load `usb` before your 驱动程序, which resolves the symbol and lets your 驱动程序 附加.
+该符号未定义是因为 `usb` 模块尚未加载，链接器无法解析驱动程序对它的依赖。添加正确的 `MODULE_DEPEND` 指令会使内核模块加载器在加载你的驱动程序之前自动加载 `usb`，从而解析符号并让你的驱动程序能够附加。
 
-Every USB驱动程序 must have `MODULE_DEPEND(驱动程序name, usb, 1, 1, 1)`. Every UART-框架 驱动程序 must have `MODULE_DEPEND(驱动程序name, uart, 1, 1, 1)`. Every `ucom(4)` 驱动程序 must depend on both `usb` and `ucom`.
+每个USB驱动程序必须有 `MODULE_DEPEND(驱动程序名, usb, 1, 1, 1)`。每个UART框架驱动程序必须有 `MODULE_DEPEND(驱动程序名, uart, 1, 1, 1)`。每个 `ucom(4)` 驱动程序必须同时依赖 `usb` 和 `ucom`。
 
-### Mistake 8: Mutable State in a Read-Only Path
+### 错误8：只读路径中的可变状态
 
-Imagine a 驱动程序 that exposes a status field through a `sysctl`. The sysctl handler reads the field from the softc without taking the 互斥锁:
+想象一个通过 `sysctl` 暴露状态字段的驱动程序。sysctl处理程序在未获取互斥锁的情况下从softc读取字段：
 
 ```c
 static int
 my_sysctl_status(SYSCTL_HANDLER_ARGS)
 {
     struct my_softc *sc = arg1;
-    int val = sc->sc_status;   /* <-- unlocked read */
+    int val = sc->sc_status;   /* <-- 未加锁的读取 */
     return (SYSCTL_OUT(req, &val, sizeof(val)));
 }
 ```
 
-If the field can be updated by a 回调 (which runs under the 互斥锁), and read by the sysctl handler (which does not take the 互斥锁), you have a data race. On modern platforms, word-sized reads are usually atomic, so the race is often invisible. But on platforms where they are not, or when the field is wider than a word, you can get torn reads.
+如果该字段可以被回调（在互斥锁下运行）更新，并且被sysctl处理程序（不获取互斥锁）读取，就存在数据竞态。在现代平台上，字大小的读取通常是原子的，因此竞态通常不可见。但在非原子平台上，或者当字段宽度超过一个字时，你可能会得到撕裂的读取。
 
-The correction is to take the 互斥锁 for the read:
+纠正方法是为读取获取互斥锁：
 
 ```c
 mtx_lock(&sc->sc_mtx);
@@ -3494,28 +3494,28 @@ val = sc->sc_status;
 mtx_unlock(&sc->sc_mtx);
 ```
 
-Even if the race is invisible on x86, taking the lock documents your intent and protects against future changes (like widening the field to 64 bits).
+即使竞态在x86上不可见，获取锁也能记录你的意图并防止未来变更（如将字段扩展到64位）。
 
-### Mistake 9: Stale Pointers After `usbd_transfer_unsetup`
+### 错误9：`usbd_transfer_unsetup` 后的悬空指针
 
-`usbd_transfer_unsetup` frees the transfer channels. The pointer in `sc->sc_xfer[i]` is no longer valid after the call returns. If any other code in your 驱动程序 uses that pointer after unsetup, the behaviour is undefined.
+`usbd_transfer_unsetup` 释放传输通道。调用返回后 `sc->sc_xfer[i]` 中的指针不再有效。如果驱动程序中的任何其他代码在取消设置后使用该指针，行为是未定义的。
 
-The correction is to zero the array after unsetup:
+纠正方法是在取消设置后将数组归零：
 
 ```c
 usbd_transfer_unsetup(sc->sc_xfer, MY_N_TRANSFERS);
-memset(sc->sc_xfer, 0, sizeof(sc->sc_xfer));   /* optional but defensive */
+memset(sc->sc_xfer, 0, sizeof(sc->sc_xfer));   /* 可选但防御性 */
 ```
 
-More importantly, structure your 分离 so that nothing in the 驱动程序 can observe the stale pointers. This usually means setting a "分离ing" flag in the softc before calling unsetup, and having every other code path check the flag before using the pointers.
+更重要的是，组织你的分离，使驱动程序中的任何内容都无法观察到悬空指针。这通常意味着在调用unsetup之前在softc中设置"分离中"标志，并让所有其他代码路径在使用指针之前检查该标志。
 
-### Mistake 10: Not Zeroing the Softc's `分离ing` Flag at Attach Time
+### 错误10：在附加时未将Softc的"分离中"标志归零
 
-If your softc uses a `分离ing` flag to coordinate 分离, the flag must start at zero when 附加 is called. This is normally automatic (the 框架 zero-fills the softc), but if you have any field that needs a non-zero initial value, be careful not to accidentally initialise `分离ing` to a nonzero value.
+如果你的softc使用"分离中"标志来协调分离，该标志在调用附加时必须从零开始。这通常是自动的（框架将softc零填充），但如果你有任何需要非零初始值的字段，注意不要意外将"分离中"初始化为非零值。
 
-A 驱动程序 that starts with `分离ing = 1` will appear to "分离 before it ever 附加ed," which shows up as a 驱动程序 that 附加 normally but refuses to respond to any I/O.
+一个以 `分离中 = 1` 开始的驱动程序将表现为"在附加之前就分离了"，表现为驱动程序正常附加但拒绝响应任何I/O。
 
-### Mistake 11: Forgetting to Destroy the Device Node on Detach
+### 错误11：忘记在分离时销毁设备节点
 
 If your 驱动程序 creates a 字符设备 with `make_dev` in 附加, you must destroy it with `destroy_dev` in 分离. Forgetting this leaves a stale `/dev` entry that points to freed memory. Userland programs that open the stale node will panic the 内核.
 
@@ -3523,92 +3523,90 @@ The correction is to call `destroy_dev(sc->sc_cdev)` in 分离, and always befor
 
 A stronger pattern is to order the `destroy_dev` call first in 分离 (before any other cleanup). This 块 new opens and waits for existing opens to close, so that by the time the rest of 分离 runs, no userland code can reach the 驱动程序.
 
-### Mistake 12: Racing on the Character Device Open
+### 错误12：字符设备打开时的竞态
 
-Even with `destroy_dev` in the right place, there is a window between 附加 succeeding and the first `open()` succeeding where the 驱动程序's state is being initialised. If your open handler assumes certain softc fields are valid, and 附加 has not finished initialising them when the first open arrives, the open will see garbage.
+即使 `destroy_dev` 放在正确的位置，在附加成功和第一个 `open()` 成功之间，存在驱动程序状态正在被初始化的窗口。如果你的open处理程序假设某些softc字段是有效的，而附加在第一个open到达时尚未完成它们的初始化，open将看到垃圾数据。
 
-The correction is to call `make_dev` last in 附加, only after everything else is fully initialised. This way, the `/dev` entry does not appear until the 驱动程序 is ready to service opens. Correspondingly, call `destroy_dev` first in 分离, before tearing anything down.
+纠正方法是在附加中最后调用 `make_dev`，只有在所有其他内容完全初始化之后。这样，`/dev` 条目在驱动程序准备好服务打开之前不会出现。相应地，在分离中首先调用 `destroy_dev`，在拆除任何其他内容之前。
 
-### Mistake 13: Overlooking the TTY Layer's Own Locking
+### 错误13：忽略TTY层自身的锁定
 
-UART 驱动程序 integrate with the TTY layer, which has its own locking rules. In particular, the TTY layer holds `tty_lock` when it calls into the 驱动程序's `tsw_param`, `tsw_open`, and `tsw_close` methods. If the 驱动程序 then takes another lock inside these methods, the lock order is `tty_lock -> 驱动程序_互斥锁`. If any other code path takes the 驱动程序 互斥锁 and then the tty lock, you have a lock order inversion, and WITNESS will catch it.
+UART驱动程序与TTY层集成，而TTY层有自己的锁定规则。特别是，当TTY层调用驱动程序的 `tsw_param`、`tsw_open` 和 `tsw_close` 方法时，它持有 `tty_lock`。如果驱动程序在这些方法内部再获取另一个锁，锁顺序是 `tty_lock -> 驱动程序互斥锁`。如果任何其他代码路径先获取驱动程序互斥锁再获取tty锁，就存在锁顺序反转，WITNESS会捕获它。
 
-The correction is to respect the lock order that the 框架 establishes. For UART 驱动程序, the order is documented in `/usr/src/sys/dev/uart/uart_core.c`. When in doubt, run under WITNESS with `WITNESS_CHECKORDER` enabled; it will detect any violation immediately.
+纠正方法是尊重框架建立的锁顺序。对于UART驱动程序，顺序记录在 `/usr/src/sys/dev/uart/uart_core.c` 中。如有疑问，在启用了 `WITNESS_CHECKORDER` 的WITNESS下运行；它会立即检测到任何违规。
 
-### Mistake 14: Not Handling Zero-Length Data in Read or Write
+### 错误14：未处理读或写中的零长度数据
 
-A userland `read` or `write` with a zero-length 缓冲区 is legal. Your 驱动程序 must handle it, either by immediately returning zero or by propagating the zero-length request through the 框架. Forgetting this case often produces a 驱动程序 that "mostly works" but fails weird test scenarios.
+用户态使用零长度缓冲区进行 `read` 或 `write` 是合法的。你的驱动程序必须处理它，要么立即返回零，要么通过框架传播零长度请求。忘记这种情况通常会产生一个"大部分时间能工作"但在奇怪测试场景中失败的驱动程序。
 
-The simplest correction is:
+最简单的纠正方法是在读写函数的顶部添加：
 
 ```c
 if (uio->uio_resid == 0)
     return (0);
 ```
 
-at the top of your read and write functions.
+### 错误15：在检查传输状态之前复制数据
 
-### Mistake 15: Copying Data Before Checking the Transfer Status
-
-In a read path, a common mistake is to unconditionally copy data out of the USB 缓冲区:
+在读路径中，一个常见错误是无条件地从USB缓冲区复制数据：
 
 ```c
 case USB_ST_TRANSFERRED:
     usbd_copy_out(pc, 0, sc->sc_rx_buf, actlen);
-    /* hand data up to userland */
+    /* 将数据向上传递给用户态 */
     break;
 ```
 
-If the transfer was a short read (`actlen < wMaxPacketSize`), the copy is correct for exactly `actlen` bytes but the 驱动程序 code may assume more. If the transfer was empty (`actlen == 0`), the copy does nothing and any subsequent code that operates on "just-received data" works on stale data from the previous transfer.
+如果传输是短读取（`actlen < wMaxPacketSize`），复制对于恰好 `actlen` 字节是正确的，但驱动程序代码可能假设更多。如果传输是空的（`actlen == 0`），复制不做任何事情，任何后续对"刚接收到的数据"进行操作的代码将在上一次传输的陈旧数据上工作。
 
-The correction is to always check `actlen` before acting on the data:
+纠正方法是在对数据执行操作之前始终检查 `actlen`：
 
 ```c
 case USB_ST_TRANSFERRED:
     if (actlen == 0)
-        goto rearm;   /* nothing received */
+        goto rearm;   /* 未收到任何内容 */
     usbd_copy_out(pc, 0, sc->sc_rx_buf, actlen);
-    /* work with exactly actlen bytes */
+    /* 使用恰好 actlen 个字节 */
 rearm:
-    /* re-submit */
+    /* 重新提交 */
     break;
 ```
 
-### Mistake 16: Assuming `termios` Values Are in Standard Units
+### 错误16：假设 `termios` 值是标准单位
 
-The `termios` structure's `c_ispeed` and `c_ospeed` fields contain 波特率 values, but the encoding has historical oddities. On FreeBSD, speeds are integer values (9600, 38400, 115200). On some other systems, they are indices into a table. Porting code that assumed index-based speeds to FreeBSD without checking is a common source of "the 驱动程序 thinks the 波特率 is 13 instead of 115200" bugs.
+`termios` 结构的 `c_ispeed` 和 `c_ospeed` 字段包含波特率值，但编码有历史遗留的怪癖。在FreeBSD上，速度是整数值（9600、38400、115200）。在其他一些系统上，它们是表的索引。移植假定基于索引的速度的代码到FreeBSD而不进行检查是"驱动程序认为波特率是13而不是115200"类错误的常见来源。
 
-The correction is to look at the actual FreeBSD implementation: `/usr/src/sys/sys/termios.h` and `/usr/src/sys/kern/tty.c`. The 波特率 in FreeBSD `termios` is an integer bit rate. When your 驱动程序 receives a `termios` in `param`, read `c_ispeed` and `c_ospeed` as integers.
+纠正方法是查看实际的FreeBSD实现：`/usr/src/sys/sys/termios.h` 和 `/usr/src/sys/kern/tty.c`。FreeBSD `termios` 中的波特率是整数比特率。当你的驱动程序在 `param` 中收到 `termios` 时，将 `c_ispeed` 和 `c_ospeed` 作为整数读取。
 
-### Mistake 17: Missing `设备_set_desc` or `设备_set_desc_copy`
+### 错误17：缺少 `device_set_desc` 或 `device_set_desc_copy`
 
-The `设备_set_desc` family of calls sets the human-readable description that `dmesg` shows when the 设备 附加. Without it, `dmesg` shows a generic label (like "my_drv0: <unknown>"), which is confusing for users and for your own debugging.
+`device_set_desc` 系列调用设置了设备附加时 `dmesg` 显示的人类可读描述。没有它，`dmesg` 会显示通用标签（如"my_drv0: <unknown>"），这对用户和你自己的调试都很混乱。
 
-The correction is to call `设备_set_desc` in 探测 (not 附加), before returning `BUS_PROBE_GENERIC` or similar:
+纠正方法是在探测（而非附加）中调用 `device_set_desc`，在返回 `BUS_PROBE_GENERIC` 或类似值之前：
 
 ```c
 static int
 my_probe(device_t dev)
 {
-    /* ... match check ... */
+    /* ... 匹配检查 ... */
     device_set_desc(dev, "My Device");
     return (BUS_PROBE_DEFAULT);
 }
 ```
 
-Use `设备_set_desc_copy` when the string is dynamic (constructed from 设备 data); the 框架 will free the copy when the 设备 is 分离ed.
+当字符串是动态的（从设备数据构建）时使用 `device_set_desc_copy`；框架会在设备分离时释放副本。
 
-### Mistake 18: `设备_printf` in the Data Path Without Rate Limiting
+### 错误18：数据路径中无速率限制的 `device_printf`
 
-The `设备_printf` call is fine for occasional messages. In a data-path 回调, it is not, because every single transfer prints a line to `dmesg` and to the console. A 1 Mbps stream of characters becomes a flood of log messages.
+`device_printf` 调用对偶尔的消息没问题。但在数据路径回调中则不行，因为每次传输都会向 `dmesg` 和控制台打印一行。1 Mbps的字符流会变成日志消息的洪水。
 
-The correction is the `DLOG_RL` pattern from 第25章: rate-limit data-path log messages to one per second, or one per thousand events, whichever is appropriate. Keep full logging in the configuration and error paths; rate-limit in the data path.
+纠正方法是第25章的 `DLOG_RL` 模式：将数据路径日志消息限制为每秒一条，或每千个事件一条，视情况而定。在配置和错误路径中保留完整日志；在数据路径中进行速率限制。
 
-### Mistake 19: Not Waking Readers on Device Removal
+### 错误19：设备移除时未唤醒读取者
 
-If a userland program is 块ed in `read()` waiting for data, and the 设备 is unplugged, the 驱动程序 must wake the reader and return an error (typically `ENXIO` or `ENODEV`). Forgetting to do this leaves the read 块ed forever, which is a resource leak and a hang.
+如果用户态程序阻塞在 `read()` 中等待数据，而设备被拔掉，驱动程序必须唤醒读取者并返回错误（通常为 `ENXIO` 或 `ENODEV`）。忘记这样做会使读取永远阻塞，这既是资源泄漏也是挂起。
 
-The correction is to wake all sleepers in 分离 before returning:
+纠正方法是在返回之前在分离中唤醒所有睡眠者：
 
 ```c
 mtx_lock(&sc->sc_mtx);
@@ -3618,7 +3616,7 @@ wakeup(&sc->sc_tx_queue);
 mtx_unlock(&sc->sc_mtx);
 ```
 
-And in the read path, check the flag after waking:
+在读路径中，唤醒后检查标志：
 
 ```c
 while (sc->sc_rx_head == sc->sc_rx_tail && !sc->sc_detaching) {
@@ -3630,401 +3628,401 @@ if (sc->sc_detaching)
     return (ENXIO);
 ```
 
-This is the idiomatic pattern and avoids the classic "userland process hangs after you unplug the 设备" bug.
+这是惯用模式，避免了经典的"拔掉设备后用户态进程挂起"的错误。
 
-### Mistake 20: Thinking "It Works on My Machine" Is Enough
+### 错误20：认为"在我的机器上能工作"就足够了
 
-Driver bugs can be hardware-dependent. A 驱动程序 that works on one machine may fail on another because of timing differences, interrupt delivery differences, or hardware quirks in the USB controller. A 驱动程序 that works with one model of a 设备 may fail with another model of the same family because of firmware differences.
+驱动程序错误可能是硬件相关的。在一个机器上能工作的驱动程序可能因为时序差异、中断传递差异或USB控制器中的硬件怪癖而在另一个机器上失败。与一种设备型号能正常工作的驱动程序，可能因为固件差异而与同一系列的另一型号失败。
 
-The correction is to test on multiple machines, multiple USB hosts (xHCI, EHCI, OHCI), and multiple 设备 if possible. When something works on one and fails on another, the difference is information. Trace both, compare, and the bug usually becomes clear.
+纠正方法是在多台机器、多个USB主机（xHCI、EHCI、OHCI）和多个设备（如果可能）上进行测试。当某个东西在一台机器上工作而在另一台上失败时，差异就是信息。追踪两者，进行比较，错误通常就会变得清晰。
 
-### What To Do After You Make One of These Mistakes
+### 犯了这些错误之一后该怎么办
 
-You will make several of these mistakes. This is normal. The way to learn is: debug the failure, identify which mistake it was, understand why it caused the specific symptom, and add the correction to your mental toolkit. Keep a note of which mistakes you have made in practice. When you see a new 驱动程序 failure, check your note; the answer is usually a mistake you have already solved once.
+你会犯其中几个错误。这是正常的。学习的方法是：调试失败，识别是哪个错误，理解它为什么会引起特定的症状，并将纠正方法添加到你的心智工具箱中。记录你在实践中犯过哪些错误。当你看到一个新的驱动程序失败时，查看你的笔记；答案通常是你已经解决过一次的错误。
 
-The specific mistakes above are collected from the author's own experience writing and debugging USB and UART 驱动程序 on FreeBSD. They are not exhaustive, but they are representative of the kinds of issues that come up. Reading 驱动程序 in the tree, attending FreeBSD developer forums, and submitting your work for code review are all ways to accelerate this kind of learning.
+以上具体错误收集自在FreeBSD上编写和调试USB及UART驱动程序的作者亲身经验。它们并非详尽无遗，但代表了可能出现的问题类型。阅读树中的驱动程序、参加FreeBSD开发者论坛以及提交你的工作供代码审查都是加速这种学习的方式。
 
 ## 总结
 
-第26章 has taken you on a long tour. It began with the idea that a transport-specific 驱动程序 is a New总线 驱动程序 plus a set of rules about how the transport works. It then built out the two transport-specific layers we are focusing on in 第6部分: USB and serial.
+第26章带你进行了一次长途导览。它从传输专用驱动程序是New总线驱动程序加上一套关于传输如何工作的规则这一概念开始。然后它构建了我们在第6部分中关注的两个传输专用层：USB和串行。
 
-On the USB side, you learned the host-and-设备 model, the 描述符 hierarchy, the four transfer types, and the 热插拔 lifecycle. You walked through a complete 驱动程序 skeleton: the 匹配表, the 探测 method, the 附加 method, the softc, the 分离 method, and the registration macros. You saw how `struct usb_config` declares transfer channels and how `usbd_transfer_setup` brings them to life. You followed the three-state 回调 state machine through bulk, interrupt, and 控制传输, and you saw how `usbd_copy_in` and `usbd_copy_out` move data between the 驱动程序 and the 框架's 缓冲区. You learned the locking rules around transfer operations and the retry policies 驱动程序 should choose. By the end of Section 3, you had a mental model that would let you write a bulk-loopback 驱动程序 from scratch.
+在USB方面，你学习了主机和设备模型、描述符层次结构、四种传输类型和热插拔生命周期。你完整地走过了一个驱动程序骨架：匹配表、探测方法、附加方法、softc、分离方法和注册宏。你看到了 `struct usb_config` 如何声明传输通道以及 `usbd_transfer_setup` 如何赋予它们生命。你跟随三状态回调状态机经历了批量、中断和控制传输，并看到了 `usbd_copy_in` 和 `usbd_copy_out` 如何在驱动程序和框架缓冲区之间移动数据。你学习了围绕传输操作的锁定规则以及驱动程序应选择的重试策略。到第3节结束时，你拥有了一个可以从零编写批量环回驱动程序的心智模型。
 
-On the serial side, you learned that the TTY layer sits on top of two distinct 框架: `uart(4)` for 总线-附加ed UARTs and `ucom(4)` for USB-to-serial bridges. You saw the six-method structure of a `uart(4)` 驱动程序, the role of `uart_ops` and `uart_class`, and how the `ns8250` canonical 驱动程序 implements each method. You learned how `termios` settings flow from `stty` through the TTY layer into the 驱动程序's `param` path, and how hardware 流控制 is implemented at the 注册 level. For USB-to-serial 设备, you saw the distinct `ucom_回调` structure and how configuration methods translate termios changes into vendor-specific USB 控制传输.
+在串行方面，你学习了TTY层位于两个不同的框架之上：`uart(4)` 用于总线附加的UART，以及 `ucom(4)` 用于USB转串口桥接。你看到了 `uart(4)` 驱动程序的六方法结构、`uart_ops` 和 `uart_class` 的作用，以及 `ns8250` 规范驱动程序如何实现每个方法。你学习了 `termios` 设置如何从 `stty` 通过TTY层流入驱动程序的 `param` 路径，以及硬件流控制如何在寄存器级别实现。对于USB转串口设备，你看到了独特的 `ucom_callback` 结构，以及配置方法如何将termios更改转换为厂商特定的USB控制传输。
 
-For testing, you learned about `nmdm(4)` for pure-TTY testing, QEMU USB redirection for USB development, and a handful of userland tools (`cu`, `tip`, `stty`, `comcontrol`, `usbconfig`) that make 驱动程序 development manageable even without constant hardware access. You saw that much of 驱动程序 work is not 注册-level wrestling but careful arrangement of data flow through well-defined abstractions.
+在测试方面，你了解了用于纯TTY测试的 `nmdm(4)`、用于USB开发的QEMU USB重定向，以及一系列用户态工具（`cu`、`tip`、`stty`、`comcontrol`、`usbconfig`），这些工具使驱动程序开发即使没有持续硬件访问也变得可控。你看到驱动程序工作的大部分不是寄存器级别的搏斗，而是通过明确定义的抽象对数据流进行精心安排。
 
-The hands-on labs and challenge exercises gave you concrete problems to work on. Each lab is short enough to finish in a sitting, and each challenge extends one of the core ideas from the main text.
+动手实验和挑战练习为你提供了具体的问题来解决。每个实验都足够短，可以一次完成，每个挑战都扩展了正文中的核心思想之一。
 
-Three habits from earlier chapters extended naturally into 第26章. The labelled-goto cleanup chain from 第25章 is the same pattern used in USB and UART 附加 routines. The softc-as-single-source-of-truth discipline from 第25章 is applied identically to USB and UART 驱动程序 state. The errno-returning helper function pattern is unchanged. What 第26章 added was transport-specific vocabulary and transport-specific abstractions built on top of those habits.
+来自前几章的三个习惯自然地延伸到了第26章。第25章的标签化goto清理链与USB和UART附加例程中使用的模式相同。第25章的softc作为唯一真相来源的纪律同样应用于USB和UART驱动程序状态。返回errno的辅助函数模式保持不变。第26章新增的是传输专用词汇和建立在这些习惯之上的传输专用抽象。
 
-There is also a habit that 第26章 has introduced which will stay with you: the three-state 回调 state machine (`USB_ST_SETUP`, `USB_ST_TRANSFERRED`, `USB_ST_ERROR`). Every USB驱动程序 uses it. Learning to read this state machine is learning to read every USB 回调 in the tree. When you open `uftdi.c`, `ucycom.c`, `uchcom.c`, or any other USB驱动程序, you will see the same pattern. Recognising it is recognising the USB 框架's core abstraction.
+第26章还引入了一个将伴随你的习惯：三状态回调状态机（`USB_ST_SETUP`、`USB_ST_TRANSFERRED`、`USB_ST_ERROR`）。每个USB驱动程序都使用它。学会阅读这个状态机就是学会阅读树中的每个USB回调。当你打开 `uftdi.c`、`ucycom.c`、`uchcom.c` 或任何其他USB驱动程序时，你会看到相同的模式。识别它就是识别USB框架的核心抽象。
 
-Transport-specific 驱动程序 are where the book's abstract 框架 concepts become concrete. From here on, every chapter in 第6部分 will deepen your practical skill with one more transport or one more kind of 内核 service. The New总线 foundation from Part 3, the character-设备 basics from Part 4, and the discipline themes from 第5部分 are all in play simultaneously. You are no longer learning concepts in isolation; you are using them together.
+传输专用驱动程序是本书抽象框架概念变得具体的地方。从这里开始，第6部分中的每章都将通过更多一种传输或更多一种内核服务来深化你的实践技能。第3部分的New总线基础、第4部分的字符设备基础知识以及第5部分的纪律主题都在同时发挥作用。你不再孤立地学习概念；你将它们一起使用。
 
-## 通往第 27
+## 通往第27章
 
-第27章 turns to 网络驱动程序. Much of the structure will feel familiar: there is a New总线 附加ment, there is per-设备 state (called `if_softc` in 网络驱动程序), there is a 匹配表, there is a 探测-and-附加 sequence, there are 热插拔 considerations, and there is an integration with a higher 框架. But the higher 框架 here is `ifnet(9)`, the 接口-框架 abstraction for network 设备, and its idioms are different from those of USB and serial.
+第27章转向网络驱动程序。许多结构会让人感到熟悉：有New总线附加、有每设备状态（在网络驱动程序中称为 `if_softc`）、有匹配表、有探测和附加序列、有热插拔考虑因素，以及与更高级框架的集成。但这里的高级框架是 `ifnet(9)`，即网络设备的接口框架抽象，其惯用法与USB和串行不同。
 
-A 网络驱动程序 does not expose a 字符设备. It exposes an 接口, which is visible to userland through `ifconfig(8)`, through `netstat -i`, and through the 套接字 layer. Instead of `read(2)` and `write(2)`, 网络驱动程序 handle 数据包 input and 数据包 output through the network stack's pipeline. Instead of `termios` for configuration, they handle `SIOCSIFFLAGS`, `SIOCADDMULTI`, `SIOCSIFMEDIA`, and a host of other network-specific ioctls.
+网络驱动程序不暴露字符设备。它暴露接口，用户态可以通过 `ifconfig(8)`、`netstat -i` 和套接字层看到该接口。网络驱动程序不处理 `read(2)` 和 `write(2)`，而是通过网络栈的管道处理数据包输入和数据包输出。它们不通过 `termios` 进行配置，而是处理 `SIOCSIFFLAGS`、`SIOCADDMULTI`、`SIOCSIFMEDIA` 以及大量其他网络特定的ioctl。
 
-Many network cards also happen to use USB or PCIe as their underlying transport. A USB 以太网 adapter, for example, sits on USB (via `if_cdce` or a vendor-specific 驱动程序) and exposes an `ifnet(9)` 接口. A PCIe 以太网 card sits on PCIe and also exposes an `ifnet(9)` 接口. 第27章 will show how the same `ifnet(9)` 框架 sits on top of these very different transports, and how the separation lets you write a 驱动程序 that focuses on the 数据包-level protocol without worrying about the details of its transport.
+许多网卡恰好也使用USB或PCIe作为其底层传输。例如，USB以太网适配器位于USB之上（通过 `if_cdce` 或厂商特定的驱动程序），并暴露 `ifnet(9)` 接口。PCIe以太网卡位于PCIe之上，也暴露 `ifnet(9)` 接口。第27章将展示相同的 `ifnet(9)` 框架如何位于这些非常不同的传输之上，以及这种分离如何让你编写专注于数据包级协议而无需担心传输细节的驱动程序。
 
-One specific thing to look forward to is the contrast between how USB delivers 数据包 (as transfer completions, one 缓冲区 at a time, with explicit 流控制 at the transfer level) and how PCIe-based network cards deliver 数据包 (as DMA-from-hardware events with 描述符 rings). The 数据包 pipeline in the network stack is designed to hide this difference from the upper layers, but a 驱动程序 author has to understand both models because they determine the 驱动程序's internal structure.
+一个值得期待的具体事情是USB如何传递数据包（作为传输完成，一次一个缓冲区，在传输级别有明确的流控制）与基于PCIe的网卡如何传递数据包（作为来自硬件的DMA事件，使用描述符环）之间的对比。网络栈中的数据包管道旨在向上层隐藏这种差异，但驱动程序作者必须理解两种模型，因为它们决定了驱动程序的内部结构。
 
-第27章 will then turn to 块 设备驱动程序 (storage). That chapter will cover the GEOM 框架, which is FreeBSD's layered 块-设备 infrastructure. Block 驱动程序 have their own idioms: a different way of matching 设备, a different way of exposing state (through GEOM providers and consumers), and a fundamentally different data flow model (read and write operations on 扇区, with a strong consistency model).
+第27章然后转向块设备驱动程序（存储）。那一章将涵盖GEOM框架，即FreeBSD的分层块设备基础设施。块驱动程序有自己的惯用法：不同的设备匹配方式、不同的状态暴露方式（通过GEOM提供者和消费者），以及根本不同的数据流模型（对扇区的读写操作，具有强一致性模型）。
 
-Parts 7, 8, and 9 then cover the more specialised topics: 内核 services and advanced 内核 idioms, debugging and testing in depth, and distribution and packaging. By the end of the book, you will have written and maintained 驱动程序 across several transport layers and several 内核 subsystems. The foundation you have built in Chapters 21 through 26 will be the common ground across all of that work.
+第7、8和9部分然后涵盖更专业的主题：内核服务和高级内核惯用法、深入调试和测试，以及分发和打包。到本书结束时，你将在多个传输层和多个内核子系统上编写和维护驱动程序。你在第21章到第26章中建立的基础将是所有这些工作的共同基础。
 
-For now, keep your `myfirst_usb` 驱动程序. You will not extend it in later chapters, but the patterns it demonstrates will appear again in network, storage, and 内核-service contexts. Having your own working example on hand, something you wrote and understand completely, is a resource that pays back many times over as the book progresses.
+现在，保留你的 `myfirst_usb` 驱动程序。你不会在后续章节中扩展它，但它展示的模式将再次出现在网络、存储和内核服务的上下文中。手头有你自己的工作示例，一些你编写并完全理解的东西，是一种随着书籍的进展而多次回报的资源。
 
 ## 快速参考
 
-This reference collects the most important APIs, constants, and file locations from 第26章 into one place. Keep it open while writing or reading a 驱动程序; it is faster than rediscovering each name from the source tree.
+本参考将第26章中最重要的API、常量和文件位置收集到一处。在编写或阅读驱动程序时保持打开；它比从源代码树中重新发现每个名称更快。
 
-### USB Driver APIs
+### USB驱动程序API
 
-| Function | Purpose |
+| 函数 | 用途 |
 |----------|---------|
-| `usbd_lookup_id_by_uaa(table, size, uaa)` | Match 附加 arg against 匹配表 |
-| `usbd_transfer_setup(udev, &ifidx, xfer, config, n, priv, mtx)` | Allocate transfer channels |
-| `usbd_transfer_unsetup(xfer, n)` | Free transfer channels |
-| `usbd_transfer_submit(xfer)` | Queue a transfer for execution |
-| `usbd_transfer_start(xfer)` | Activate a channel |
-| `usbd_transfer_stop(xfer)` | Deactivate a channel |
-| `usbd_transfer_pending(xfer)` | Query whether a transfer is outstanding |
-| `usbd_transfer_drain(xfer)` | Wait for any pending transfer to complete |
-| `usbd_xfer_softc(xfer)` | Retrieve the softc from a transfer |
-| `usbd_xfer_status(xfer, &actlen, &sumlen, &a帧, &n帧)` | Query transfer results |
-| `usbd_xfer_get_帧(xfer, i)` | Get page-cache pointer for 帧 i |
-| `usbd_xfer_set_帧_len(xfer, i, len)` | Set length of 帧 i |
-| `usbd_xfer_set_帧(xfer, n)` | Set total 帧 count |
-| `usbd_xfer_max_len(xfer)` | Query max transfer length |
-| `usbd_xfer_set_stall(xfer)` | Schedule clear-stall on this pipe |
-| `usbd_copy_in(pc, offset, src, len)` | Copy into 框架 缓冲区 |
-| `usbd_copy_out(pc, offset, dst, len)` | Copy out of 框架 缓冲区 |
-| `usbd_errstr(err)` | Error code to string |
-| `USB_GET_STATE(xfer)` | Current 回调 state |
-| `USB_VPI(vendor, product, info)` | Compact 匹配表 entry |
+| `usbd_lookup_id_by_uaa(table, size, uaa)` | 将附加参数与匹配表匹配 |
+| `usbd_transfer_setup(udev, &ifidx, xfer, config, n, priv, mtx)` | 分配传输通道 |
+| `usbd_transfer_unsetup(xfer, n)` | 释放传输通道 |
+| `usbd_transfer_submit(xfer)` | 将传输排队等待执行 |
+| `usbd_transfer_start(xfer)` | 激活通道 |
+| `usbd_transfer_stop(xfer)` | 停用通道 |
+| `usbd_transfer_pending(xfer)` | 查询传输是否正在进行 |
+| `usbd_transfer_drain(xfer)` | 等待任何待处理传输完成 |
+| `usbd_xfer_softc(xfer)` | 从传输中检索softc |
+| `usbd_xfer_status(xfer, &actlen, &sumlen, &a帧, &n帧)` | 查询传输结果 |
+| `usbd_xfer_get_帧(xfer, i)` | 获取帧i的页缓存指针 |
+| `usbd_xfer_set_帧_len(xfer, i, len)` | 设置帧i的长度 |
+| `usbd_xfer_set_帧(xfer, n)` | 设置总帧数 |
+| `usbd_xfer_max_len(xfer)` | 查询最大传输长度 |
+| `usbd_xfer_set_stall(xfer)` | 在此管道上安排清除停顿 |
+| `usbd_copy_in(pc, offset, src, len)` | 复制到框架缓冲区 |
+| `usbd_copy_out(pc, offset, dst, len)` | 从框架缓冲区复制出来 |
+| `usbd_errstr(err)` | 将错误码转为字符串 |
+| `USB_GET_STATE(xfer)` | 当前回调状态 |
+| `USB_VPI(vendor, product, info)` | 紧凑的匹配表条目 |
 
-### USB Transfer Types (`usb.h`)
+### USB传输类型 (`usb.h`)
 
-- `UE_CONTROL`: 控制传输 (request-response)
-- `UE_ISOCHRONOUS`: isochronous (periodic, no retry)
-- `UE_BULK`: bulk (reliable, no timing guarantee)
-- `UE_INTERRUPT`: interrupt (periodic, reliable)
+- `UE_CONTROL`: 控制传输（请求-响应）
+- `UE_ISOCHRONOUS`: 等时传输（周期性，无重试）
+- `UE_BULK`: 批量传输（可靠，无时序保证）
+- `UE_INTERRUPT`: 中断传输（周期性，可靠）
 
-### USB Transfer Direction
+### USB传输方向
 
-- `UE_DIR_IN`: 设备 to host
-- `UE_DIR_OUT`: host to 设备
-- `UE_ADDR_ANY`: 框架 picks any matching 端点
+- `UE_DIR_IN`: 设备到主机
+- `UE_DIR_OUT`: 主机到设备
+- `UE_ADDR_ANY`: 框架选择任何匹配的端点
 
-### USB Callback States (`usbdi.h`)
+### USB回调状态 (`usbdi.h`)
 
-- `USB_ST_SETUP`: ready to submit a new transfer
-- `USB_ST_TRANSFERRED`: previous transfer succeeded
-- `USB_ST_ERROR`: previous transfer failed
+- `USB_ST_SETUP`: 准备提交新传输
+- `USB_ST_TRANSFERRED`: 前一次传输成功
+- `USB_ST_ERROR`: 前一次传输失败
 
-### USB Error Codes (`usbdi.h`)
+### USB错误码 (`usbdi.h`)
 
-- `USB_ERR_NORMAL_COMPLETION`: success
-- `USB_ERR_PENDING_REQUESTS`: outstanding work
-- `USB_ERR_NOT_STARTED`: transfer not started
-- `USB_ERR_CANCELLED`: transfer cancelled (e.g., 分离)
-- `USB_ERR_STALLED`: 端点 stalled
-- `USB_ERR_TIMEOUT`: timeout expired
-- `USB_ERR_SHORT_XFER`: received less data than requested
-- `USB_ERR_NOMEM`: out of memory
-- `USB_ERR_NO_PIPE`: no matching 端点
+- `USB_ERR_NORMAL_COMPLETION`: 成功
+- `USB_ERR_PENDING_REQUESTS`: 有未完成的工作
+- `USB_ERR_NOT_STARTED`: 传输未启动
+- `USB_ERR_CANCELLED`: 传输被取消（例如分离时）
+- `USB_ERR_STALLED`: 端点停顿
+- `USB_ERR_TIMEOUT`: 超时已过期
+- `USB_ERR_SHORT_XFER`: 接收到的数据少于请求量
+- `USB_ERR_NOMEM`: 内存不足
+- `USB_ERR_NO_PIPE`: 没有匹配的端点
 
-### Registration Macros
+### 注册宏
 
-- `DRIVER_MODULE(name, parent, 驱动程序, evh, arg)`: 注册 驱动程序 with 内核
-- `MODULE_DEPEND(name, dep, min, pref, max)`: declare module dependency
-- `MODULE_VERSION(name, version)`: declare module version
-- `USB_PNP_HOST_INFO(table)`: export 匹配表 to `devd`
-- `DEVMETHOD(name, func)`: declare method in method table
-- `DEVMETHOD_END`: terminate method table
+- `DRIVER_MODULE(name, parent, 驱动程序, evh, arg)`: 在内核中注册驱动程序
+- `MODULE_DEPEND(name, dep, min, pref, max)`: 声明模块依赖
+- `MODULE_VERSION(name, version)`: 声明模块版本
+- `USB_PNP_HOST_INFO(table)`: 向 `devd` 导出匹配表
+- `DEVMETHOD(name, func)`: 在方法表中声明方法
+- `DEVMETHOD_END`: 终止方法表
 
-### UART Framework APIs
+### UART框架API
 
-| Function | Header | Purpose |
+| 函数 | 头文件 | 用途 |
 |----------|--------|---------|
-| `uart_getreg(bas, offset)` | `uart.h` | Read a UART 注册 |
-| `uart_setreg(bas, offset, value)` | `uart.h` | Write a UART 注册 |
-| `uart_barrier(bas)` | `uart.h` | Memory barrier for 注册 access |
-| `uart_总线_探测(dev, regshft, regiowidth, rclk, rid, chan, quirks)` | `uart_总线.h` | Framework 探测 helper |
-| `uart_总线_附加(dev)` | `uart_总线.h` | Framework 附加 helper |
-| `uart_总线_分离(dev)` | `uart_总线.h` | Framework 分离 helper |
+| `uart_getreg(bas, offset)` | `uart.h` | 读取UART寄存器 |
+| `uart_setreg(bas, offset, value)` | `uart.h` | 写入UART寄存器 |
+| `uart_barrier(bas)` | `uart.h` | 寄存器访问的内存屏障 |
+| `uart_bus_probe(dev, regshft, regiowidth, rclk, rid, chan, quirks)` | `uart_bus.h` | 框架探测辅助函数 |
+| `uart_bus_attach(dev)` | `uart_bus.h` | 框架附加辅助函数 |
+| `uart_bus_detach(dev)` | `uart_bus.h` | 框架分离辅助函数 |
 
-### `uart_ops` Methods
+### `uart_ops` 方法
 
-- `探测(bas)`: chip present?
-- `init(bas, baud, databits, stopbits, 奇偶校验)`: initialise chip
-- `term(bas)`: shut down chip
-- `putc(bas, c)`: send one character (polling)
-- `rxready(bas)`: is data available?
-- `getc(bas, mtx)`: read one character (polling)
+- `probe(bas)`: 芯片是否存在？
+- `init(bas, baud, databits, stopbits, parity)`: 初始化芯片
+- `term(bas)`: 关闭芯片
+- `putc(bas, c)`: 发送一个字符（轮询）
+- `rxready(bas)`: 数据是否可用？
+- `getc(bas, mtx)`: 读取一个字符（轮询）
 
-### `ucom_回调` Methods
+### `ucom_callback` 方法
 
-- `ucom_cfg_open`, `ucom_cfg_close`: open/close hooks
-- `ucom_cfg_param`: termios changed
-- `ucom_cfg_set_dtr`, `ucom_cfg_set_rts`, `ucom_cfg_set_break`, `ucom_cfg_set_ring`: signal control
-- `ucom_cfg_get_status`: read line and modem status bytes
-- `ucom_pre_open`, `ucom_pre_param`: validation hooks (return errno)
-- `ucom_ioctl`: chip-specific ioctl handler
-- `ucom_start_read`, `ucom_stop_read`: enable/disable read
-- `ucom_start_write`, `ucom_stop_write`: enable/disable write
-- `ucom_tty_name`: customise the TTY 设备-node name
-- `ucom_poll`: poll for events
-- `ucom_free`: final cleanup
+- `ucom_cfg_open`, `ucom_cfg_close`: 打开/关闭钩子
+- `ucom_cfg_param`: termios已更改
+- `ucom_cfg_set_dtr`, `ucom_cfg_set_rts`, `ucom_cfg_set_break`, `ucom_cfg_set_ring`: 信号控制
+- `ucom_cfg_get_status`: 读取线路和调制解调器状态字节
+- `ucom_pre_open`, `ucom_pre_param`: 验证钩子（返回errno）
+- `ucom_ioctl`: 芯片特定的ioctl处理程序
+- `ucom_start_read`, `ucom_stop_read`: 启用/禁用读取
+- `ucom_start_write`, `ucom_stop_write`: 启用/禁用写入
+- `ucom_tty_name`: 自定义TTY设备节点名称
+- `ucom_poll`: 轮询事件
+- `ucom_free`: 最终清理
 
-### Key Source Files
+### 关键源文件
 
-- `/usr/src/sys/dev/usb/usb.h`: USB protocol definitions
-- `/usr/src/sys/dev/usb/usbdi.h`: USB驱动程序 接口, `USB_ERR_*` codes
-- `/usr/src/sys/dev/usb/usbdi_util.h`: convenience helpers
-- `/usr/src/sys/dev/usb/usbdevs.h`: Vendor/product constants (build-generated by the FreeBSD build system from `/usr/src/sys/dev/usb/usbdevs`; not present in a clean source tree until the 内核 or 驱动程序 is built)
-- `/usr/src/sys/dev/usb/controller/`: Host controller 驱动程序
-- `/usr/src/sys/dev/usb/misc/uled.c`: Simple LED 驱动程序 (reference)
-- `/usr/src/sys/dev/usb/serial/uftdi.c`: FTDI 驱动程序 (reference)
-- `/usr/src/sys/dev/usb/serial/usb_serial.h`: `ucom_回调` definition
-- `/usr/src/sys/dev/usb/serial/usb_serial.c`: ucom 框架
+- `/usr/src/sys/dev/usb/usb.h`: USB协议定义
+- `/usr/src/sys/dev/usb/usbdi.h`: USB驱动程序接口, `USB_ERR_*` 错误码
+- `/usr/src/sys/dev/usb/usbdi_util.h`: 便利辅助函数
+- `/usr/src/sys/dev/usb/usbdevs.h`: 厂商/产品常量（由FreeBSD构建系统从 `/usr/src/sys/dev/usb/usbdevs` 构建生成；在干净源代码树中不存在，直到内核或驱动程序被构建）
+- `/usr/src/sys/dev/usb/controller/`: 主机控制器驱动程序
+- `/usr/src/sys/dev/usb/misc/uled.c`: 简单LED驱动程序（参考）
+- `/usr/src/sys/dev/usb/serial/uftdi.c`: FTDI驱动程序（参考）
+- `/usr/src/sys/dev/usb/serial/usb_serial.h`: `ucom_callback` 定义
+- `/usr/src/sys/dev/usb/serial/usb_serial.c`: ucom框架
 - `/usr/src/sys/dev/uart/uart.h`: `uart_getreg`, `uart_setreg`, `uart_barrier`
-- `/usr/src/sys/dev/uart/uart_总线.h`: `uart_class`, `uart_softc`, 总线 helpers
-- `/usr/src/sys/dev/uart/uart_cpu.h`: `uart_ops`, CPU-side glue
-- `/usr/src/sys/dev/uart/uart_core.c`: UART 框架 body
-- `/usr/src/sys/dev/uart/uart_tty.c`: UART-TTY integration
-- `/usr/src/sys/dev/uart/uart_dev_ns8250.c`: ns8250 reference 驱动程序
-- `/usr/src/sys/dev/ic/ns16550.h`: 16550 注册 definitions
-- `/usr/src/sys/dev/nmdm/nmdm.c`: null-modem 驱动程序
+- `/usr/src/sys/dev/uart/uart_bus.h`: `uart_class`, `uart_softc`, 总线辅助函数
+- `/usr/src/sys/dev/uart/uart_cpu.h`: `uart_ops`, CPU侧胶水代码
+- `/usr/src/sys/dev/uart/uart_core.c`: UART框架主体
+- `/usr/src/sys/dev/uart/uart_tty.c`: UART-TTY集成
+- `/usr/src/sys/dev/uart/uart_dev_ns8250.c`: ns8250参考驱动程序
+- `/usr/src/sys/dev/ic/ns16550.h`: 16550寄存器定义
+- `/usr/src/sys/dev/nmdm/nmdm.c`: 空调制解调器驱动程序
 
-### Userland Diagnostic Commands
+### 用户态诊断命令
 
-| Command | Purpose |
+| 命令 | 用途 |
 |---------|---------|
-| `usbconfig list` | List USB 设备 |
-| `usbconfig -d ugenN.M dump_all_config_desc` | Dump 描述符 |
-| `usbconfig -d ugenN.M dump_stats` | Transfer statistics |
-| `usbconfig -d ugenN.M reset` | Reset 设备 |
-| `stty -a -f /dev/设备` | Show termios settings |
-| `stty 115200 -f /dev/设备` | Set 波特率 |
-| `comcontrol /dev/设备` | Show modem signals |
-| `cu -l /dev/设备 -s speed` | Interactive session |
-| `tip name` | Named connection (via `/etc/remote`) |
-| `kldload mod.ko` | Load 内核模块 |
-| `kldunload mod` | Unload 内核模块 |
-| `kldstat` | List loaded modules |
-| `dmesg -w` | Stream 内核 messages |
-| `sysctl hw.usb.*` | Query USB 框架 |
-| `sysctl dev.uart.*` | Query UART instances |
+| `usbconfig list` | 列出USB设备 |
+| `usbconfig -d ugenN.M dump_all_config_desc` | 转储描述符 |
+| `usbconfig -d ugenN.M dump_stats` | 传输统计信息 |
+| `usbconfig -d ugenN.M reset` | 重置设备 |
+| `stty -a -f /dev/设备` | 显示termios设置 |
+| `stty 115200 -f /dev/设备` | 设置波特率 |
+| `comcontrol /dev/设备` | 显示调制解调器信号 |
+| `cu -l /dev/设备 -s speed` | 交互式会话 |
+| `tip name` | 命名连接（通过 `/etc/remote`） |
+| `kldload mod.ko` | 加载内核模块 |
+| `kldunload mod` | 卸载内核模块 |
+| `kldstat` | 列出已加载模块 |
+| `dmesg -w` | 流式传输内核消息 |
+| `sysctl hw.usb.*` | 查询USB框架 |
+| `sysctl dev.uart.*` | 查询UART实例 |
 
-### Standard Development Flags
+### 标准开发选项
 
-Debug-mode 内核 options to enable during development:
-- `options INVARIANTS`: assertion checking
-- `options INVARIANT_SUPPORT`: required alongside INVARIANTS
-- `options WITNESS`: lock order checking
-- `options WITNESS_SKIPSPIN`: skip spin locks in WITNESS (perf)
-- `options WITNESS_CHECKORDER`: verify every lock acquisition
-- `options DDB`: 内核 debugger
-- `options KDB`: 内核 debugger support
-- `options USB_DEBUG`: extensive USB logging
+开发期间应启用的调试模式内核选项：
+- `options INVARIANTS`: 断言检查
+- `options INVARIANT_SUPPORT`: 与INVARIANTS一同需要
+- `options WITNESS`: 锁顺序检查
+- `options WITNESS_SKIPSPIN`: 在WITNESS中跳过自旋锁（性能）
+- `options WITNESS_CHECKORDER`: 验证每次锁获取
+- `options DDB`: 内核调试器
+- `options KDB`: 内核调试器支持
+- `options USB_DEBUG`: 广泛的USB日志记录
 
-These options should be enabled on development machines, not production.
+这些选项应在开发机器上启用，而不是生产环境。
 
 ## 术语表
 
-The following terms appeared in this chapter. Some are new; others were introduced earlier and are repeated here for convenience. Definitions are brief and intended as a quick reminder, not as a replacement for the main-text explanations.
+以下术语出现在本章中。有些是新术语；其他在之前已介绍过，为方便起见在此重复。定义简洁明了，旨在作为快速提醒，而非替代正文中的解释。
 
-**Address (USB).** A number from 1 to 127 that the host assigns to a 设备 during enumeration. Each physical 设备 on a 总线 has a unique address.
+**Address (地址，USB)。** 主机在枚举期间分配给设备的1到127之间的数字。总线上的每个物理设备都有唯一地址。
 
-**Attach.** The 框架-called method where a 驱动程序 takes ownership of a newly discovered 设备, allocates resources, initialises state, and begins operation. Paired with `分离`.
+**Attach (附加)。** 框架调用的方法，驱动程序在此获取新发现设备的所有权、分配资源、初始化状态并开始操作。与 `分离` 配对。
 
-**Bulk transfer.** A USB transfer type designed for reliable, high-throughput, non-time-critical data. Used for mass storage, printers, network adapters.
+**Bulk transfer (批量传输)。** 一种USB传输类型，专为可靠、高吞吐量、非时间关键的数据设计。用于大容量存储、打印机、网络适配器。
 
-**Callout.** A FreeBSD mechanism for scheduling a function to run after a specific delay. Used by 驱动程序 for timeouts and periodic tasks.
+**Callout (超时回调)。** FreeBSD的一种机制，用于在特定延迟后调度函数运行。驱动程序用于超时和周期性任务。
 
-**Callin node.** A TTY 设备 node (usually `/dev/ttyuN`) where opening 块 until carrier detect is asserted. Historically used for answering incoming modem calls.
+**Callin node (呼入节点)。** TTY设备节点（通常是 `/dev/ttyuN`），打开时会阻塞直到载波检测信号有效。历史上用于应答传入的调制解调器呼叫。
 
-**Callout node.** A TTY 设备 node (usually `/dev/cuauN`) where opening does not wait for carrier detect. Used for initiating connections or for non-modem 设备.
+**Callout node (呼出节点)。** TTY设备节点（通常是 `/dev/cuauN`），打开时不等待载波检测。用于发起连接或非调制解调器设备。
 
-**CDC ACM.** Communication Device Class, Abstract Control Model. The USB standard for virtual 串行端口s. Handled in FreeBSD by the `u3g` 驱动程序.
+**CDC ACM。** 通信设备类，抽象控制模型。虚拟串行端口的USB标准。在FreeBSD中由 `u3g` 驱动程序处理。
 
-**Character 设备.** A UNIX 设备 abstraction for byte-oriented 设备. Exposed to userland through `/dev` entries. Introduced in Chapter 24.
+**Character device (字符设备)。** UNIX中面向字节设备的设备抽象。通过 `/dev` 条目向用户态暴露。在第24章介绍。
 
-**Class 驱动程序.** A USB驱动程序 that handles an entire class of 设备 (all HID 设备, all mass-storage 设备) rather than a single vendor's product. Matches on 接口 class/subclass/protocol.
+**Class driver (类驱动程序)。** 处理整个设备类别（所有HID设备、所有大容量存储设备）而非单个厂商产品的USB驱动程序。通过接口类/子类/协议进行匹配。
 
-**Clear-stall.** A USB operation that clears a stall condition on an 端点. Handled by the FreeBSD USB 框架 when `usbd_xfer_set_stall` is called.
+**Clear-stall (清除停顿)。** 清除端点上停顿条件的USB操作。当调用 `usbd_xfer_set_stall` 时由FreeBSD USB框架处理。
 
-**Configuration (USB).** A named set of 接口 and 端点 a USB 设备 can expose. A 设备 usually has one configuration but may have several.
+**Configuration (配置，USB)。** USB设备可以暴露的一组命名的接口和端点。设备通常有一个配置，但可能有多个。
 
-**Control transfer.** A USB transfer type designed for small, infrequent, request-response exchanges. Used for configuration and status.
+**Control transfer (控制传输)。** 一种USB传输类型，专为小规模、不频繁的请求-响应交换设计。用于配置和状态。
 
-**`cuau`.** Naming prefix for the callout-side TTY 设备 of a 总线-附加ed UART. Example: `/dev/cuau0`.
+**`cuau`。** 总线附加的UART的呼出端TTY设备的命名前缀。示例：`/dev/cuau0`。
 
-**`cuaU`.** Naming prefix for the callout-side TTY 设备 of a USB-provided 串行端口. Example: `/dev/cuaU0`.
+**`cuaU`。** USB提供的串行端口的呼出端TTY设备的命名前缀。示例：`/dev/cuaU0`。
 
-**Descriptor (USB).** A small data structure a USB 设备 provides, describing itself or one of its components. Types include 设备, configuration, 接口, 端点, and string 描述符.
+**Descriptor (描述符，USB)。** USB设备提供的小型数据结构，描述自身或其组件之一。类型包括设备、配置、接口、端点和字符串描述符。
 
-**Detach.** The 框架-called method where a 驱动程序 releases all resources and prepares for the 设备 to vanish. Paired with `附加`.
+**Detach (分离)。** 框架调用的方法，驱动程序在此释放所有资源并为设备消失做准备。与 `附加` 配对。
 
-**`devd`.** The FreeBSD 设备-event daemon that reacts to 内核 notifications about 设备 附加 and 分离. Responsible for auto-loading modules for newly-discovered 设备.
+**`devd`。** FreeBSD设备事件守护进程，响应内核关于设备附加和分离的通知。负责为新发现的设备自动加载模块。
 
-**Device (USB).** A single physical USB peripheral connected to a port. Contains one or more configurations.
+**Device (设备，USB)。** 连接到端口的单个物理USB外设。包含一个或多个配置。
 
-**DMA.** Direct Memory Access. A mechanism where hardware can read or write memory without CPU involvement. Used by high-performance USB 主机控制器s and PCIe network cards.
+**DMA。** 直接内存访问。硬件无需CPU参与即可读写内存的机制。由高性能USB主机控制器和PCIe网卡使用。
 
-**Echo loopback.** A test configuration in which a 设备 echoes whatever it receives, used to validate bidirectional data flow.
+**Echo loopback (回环)。** 一种测试配置，设备回显其收到的任何内容，用于验证双向数据流。
 
-**Endpoint.** A USB communication channel within an 接口. Each 端点 has a direction (IN or OUT) and a transfer type. Matches one hardware FIFO on the 设备.
+**Endpoint (端点)。** 接口内的USB通信通道。每个端点有方向（IN或OUT）和传输类型。匹配设备上的一个硬件FIFO。
 
-**Enumeration.** The USB process by which a newly 附加ed 设备 is discovered, assigned an address, and has its 描述符 read by the host.
+**Enumeration (枚举)。** USB过程，新附加的设备被发现、分配地址，并由主机读取其描述符。
 
-**FIFO (hardware).** A small 缓冲区 on a UART or USB chip that holds bytes during transfer. Typical 16550 FIFO is 16 bytes; many modern UARTs have 64 or 128.
+**FIFO (硬件)。** UART或USB芯片上的小型缓冲区，在传输期间保存字节。典型的16550 FIFO为16字节；许多现代UART有64或128字节。
 
-**FTDI.** A company that makes popular USB-to-serial adapter chips. Drivers for FTDI chips are in `/usr/src/sys/dev/usb/serial/uftdi.c`.
+**FTDI。** 一家制造流行的USB转串口适配器芯片的公司。FTDI芯片的驱动程序在 `/usr/src/sys/dev/usb/serial/uftdi.c` 中。
 
-**`ifnet(9)`.** The FreeBSD 框架 for network 设备驱动程序. Covered in 第27章.
+**`ifnet(9)`。** FreeBSD的网络设备驱动程序框架。在第27章中介绍。
 
-**Interface (USB).** A logical grouping of 端点 within a USB 设备. A multi-function 设备 can expose multiple 接口.
+**Interface (接口，USB)。** USB设备内端点的逻辑分组。多功能设备可以暴露多个接口。
 
-**Interrupt handler.** A function the 内核 runs in response to a hardware interrupt. In the UART context, the 框架 provides a default 中断处理程序.
+**Interrupt handler (中断处理程序)。** 内核响应硬件中断而运行的函数。在UART上下文中，框架提供了默认的中断处理程序。
 
-**Interrupt transfer.** A USB transfer type designed for low-bandwidth, periodic, latency-critical data. Used for keyboards, mice, HIDs.
+**Interrupt transfer (中断传输)。** 一种USB传输类型，专为低带宽、周期性、延迟关键的数据设计。用于键盘、鼠标、HID设备。
 
-**Isochronous transfer.** A USB transfer type designed for real-time streams with guaranteed bandwidth but no delivery guarantee. Used for audio and video.
+**Isochronous transfer (等时传输)。** 一种USB传输类型，专为实时流设计，保证带宽但不保证交付。用于音频和视频。
 
-**`kldload`, `kldunload`.** FreeBSD commands for loading and unloading 内核模块.
+**`kldload`, `kldunload`。** 用于加载和卸载内核模块的FreeBSD命令。
 
-**`kobj`.** FreeBSD's object-oriented 内核 框架. Used for method dispatch in New总线 and other subsystems.
+**`kobj`。** FreeBSD的面向对象内核框架。用于New总线和其他子系统中的方法分发。
 
-**Match table.** An array of `STRUCT_USB_HOST_ID` (for USB) or equivalent entries that a 驱动程序 uses to declare which 设备 it supports.
+**Match table (匹配表)。** `STRUCT_USB_HOST_ID`（对于USB）或等效条目的数组，驱动程序用于声明其支持的设备。
 
-**Modem control 注册 (MCR).** A 16550 注册 that controls modem output signals (DTR, RTS).
+**Modem control register (调制解调器控制寄存器，MCR)。** 控制调制解调器输出信号（DTR、RTS）的16550寄存器。
 
-**Modem status 注册 (MSR).** A 16550 注册 that reports modem input signals (CTS, DSR, CD, RI).
+**Modem status register (调制解调器状态寄存器，MSR)。** 报告调制解调器输入信号（CTS、DSR、CD、RI）的16550寄存器。
 
-**`nmdm(4)`.** FreeBSD's null-modem 驱动程序. Creates pairs of linked virtual TTYs for testing. Loaded with `kldload nmdm`.
+**`nmdm(4)`。** FreeBSD的空调制解调器驱动程序。创建一对链接的虚拟TTY用于测试。使用 `kldload nmdm` 加载。
 
-**ns8250.** A canonical 16550-compatible UART 驱动程序 for FreeBSD. At `/usr/src/sys/dev/uart/uart_dev_ns8250.c`.
+**ns8250。** FreeBSD的规范16550兼容UART驱动程序。位于 `/usr/src/sys/dev/uart/uart_dev_ns8250.c`。
 
-**Pipe.** A term for a bidirectional USB transfer channel from the host's perspective. A host has one pipe per 端点.
+**Pipe (管道)。** 从主机的角度表示双向USB传输通道的术语。每个端点主机有一个管道。
 
-**Port (USB).** A downstream 附加ment point on a hub. Each port can have one 设备 (which may itself be a hub).
+**Port (端口，USB)。** 集线器上的下游连接点。每个端口可以有一个设备（其本身可能是一个集线器）。
 
-**Probe.** The 框架-called method where a 驱动程序 examines a candidate 设备 and decides whether to 附加. Returns zero for a match, nonzero errno for a reject.
+**Probe (探测)。** 框架调用的方法，驱动程序在此检查候选设备并决定是否附加。匹配时返回零，拒绝时返回非零errno。
 
-**Probe-and-附加.** The two-phase handshake by which New总线 binds 驱动程序 to 设备. Probe tests the match; 附加 does the work.
+**Probe-and-attach (探测和附加)。** New总线将驱动程序绑定到设备的两阶段握手。探测测试匹配；附加执行工作。
 
-**Retry policy.** A 驱动程序's rule for what to do when a transfer fails. Common policies: rearm on every error, rearm up to N times then give up, rearm only for specific errors.
+**Retry policy (重试策略)。** 驱动程序在传输失败时采取的动作规则。常见策略：每次错误都重新准备、重试N次后放弃、仅对特定错误重新准备。
 
-**Ring 缓冲区.** A fixed-size circular 缓冲区 used by the UART 框架 to 缓冲区 data between the chip and the TTY layer.
+**Ring buffer (环形缓冲区)。** UART框架使用的固定大小循环缓冲区，用于在芯片和TTY层之间缓冲数据。
 
-**RTS/CTS.** Request To Send / Clear To Send. Hardware flow-control signals on a 串行端口.
+**RTS/CTS。** 请求发送/清除发送。串行端口上的硬件流控制信号。
 
-**Softc.** The per-设备 state a 驱动程序 maintains. Named after "software context" by analogy with hardware 注册 state.
+**Softc。** 驱动程序维护的每设备状态。名称源自"software context"（软件上下文），与硬件寄存器状态类似。
 
-**Stall (USB).** A signal from a USB 端点 that it is not ready to accept more data until explicitly cleared by the host.
+**Stall (停顿，USB)。** USB端点发出的信号，表示在主机显式清除之前无法接受更多数据。
 
-**`stty(1)`.** Userland utility for inspecting and changing TTY settings. Maps directly onto `termios` fields.
+**`stty(1)`。** 用于检查和更改TTY设置的用户态工具。直接映射到 `termios` 字段。
 
-**Taskqueue.** A FreeBSD mechanism for deferring work to a worker thread. Used by 驱动程序 that need to do something that cannot run in an interrupt context.
+**Taskqueue。** FreeBSD用于将工作延迟到工作者线程的机制。由需要执行无法在中断上下文中运行的操作的驱动程序使用。
 
-**`termios`.** A POSIX structure that describes a TTY's configuration: 波特率, 奇偶校验, 流控制, line discipline flags, and many others. Set and queried by `tcsetattr(3)` and `tcgetattr(3)` from userland, or by `stty(1)`.
+**`termios`。** 描述TTY配置的POSIX结构：波特率、奇偶校验、流控制、线路规程标志等。由用户态的 `tcsetattr(3)` 和 `tcgetattr(3)` 或 `stty(1)` 设置和查询。
 
-**Transfer (USB).** A single logical operation on a USB channel. Can be a single 数据包 or many.
+**Transfer (传输，USB)。** USB通道上的单个逻辑操作。可以是单个数据包或多个数据包。
 
-**TTY.** Teletype. The UNIX abstraction for a serial 设备. Character-at-a-time I/O, line discipline, signal generation, terminal control.
+**TTY。** 电传打字机。UNIX中串行设备的抽象。逐字符I/O、线路规程、信号生成、终端控制。
 
-**`ttydevsw`.** The structure a TTY 驱动程序 uses to 注册 its operations with the TTY layer. Analogous to `cdevsw` for 字符设备.
+**`ttydevsw`。** TTY驱动程序用于向TTY层注册其操作的结构。类似于字符设备的 `cdevsw`。
 
-**`ttyu`.** Naming prefix for the callin-side TTY 设备 of a 总线-附加ed UART. Example: `/dev/ttyu0`.
+**`ttyu`。** 总线附加的UART的呼入端TTY设备的命名前缀。示例：`/dev/ttyu0`。
 
-**`uart(4)`.** FreeBSD's 框架 for UART 驱动程序. Handles registration, 缓冲区ing, TTY integration. Drivers implement `uart_ops` hardware methods.
+**`uart(4)`。** FreeBSD的UART驱动程序框架。处理注册、缓冲、TTY集成。驱动程序实现 `uart_ops` 硬件方法。
 
-**`uart_bas`.** "UART Bus Access Structure." The 框架's abstraction for 注册 access to a UART, hiding whether the 寄存器 are in I/O space or memory-mapped.
+**`uart_bas`。** "UART总线访问结构。"框架对UART寄存器访问的抽象，隐藏寄存器是在I/O空间还是内存映射中。
 
-**`uart_class`.** The 框架 描述符 that identifies a UART chip family. Pairs with `uart_ops` to give the 框架 everything it needs.
+**`uart_class`。** 标识UART芯片系列的框架描述符。与 `uart_ops` 配对，为框架提供所需的一切。
 
-**`uart_ops`.** The table of six hardware-specific methods (`探测`, `init`, `term`, `putc`, `rxready`, `getc`) that a UART 驱动程序 implements.
+**`uart_ops`。** UART驱动程序实现的六个硬件特定方法（`probe`、`init`、`term`、`putc`、`rxready`、`getc`）的表格。
 
-**`ucom(4)`.** FreeBSD's 框架 for USB-to-serial 设备驱动程序. Sits on top of USB transfers, provides TTY integration.
+**`ucom(4)`。** FreeBSD的USB转串口设备驱动程序框架。位于USB传输之上，提供TTY集成。
 
-**`ucom_回调`.** The structure a `ucom(4)` client uses to 注册 its 回调 with the 框架.
+**`ucom_callback`。** `ucom(4)` 客户端用于向框架注册其回调的结构。
 
-**`ugen(4)`.** FreeBSD's generic USB驱动程序. Exposes raw USB access through `/dev/ugenN.M` for userland programs. Used when no specific 驱动程序 matches.
+**`ugen(4)`。** FreeBSD的通用USB驱动程序。通过 `/dev/ugenN.M` 为用户态程序暴露原始USB访问。用于没有特定驱动程序匹配时。
 
-**`uhub`.** The FreeBSD 驱动程序 for USB hubs (including the root hub). A class 驱动程序 附加 to `uhub`, not to the USB 总线 directly.
+**`uhub`。** FreeBSD的USB集线器驱动程序（包括根集线器）。附加到 `uhub` 的类驱动程序，而非直接附加到USB总线。
 
-**`usbconfig(8)`.** Userland utility for inspecting and controlling USB 设备. Can dump 描述符, reset 设备, enumerate state.
+**`usbconfig(8)`。** 用于检查和控制USB设备的用户态工具。可以转储描述符、重置设备、枚举状态。
 
-**`usb_config`.** A C structure a USB驱动程序 uses to declare each of its transfer channels: type, 端点, direction, 缓冲区 size, flags, 回调.
+**`usb_config`。** USB驱动程序用于声明其每个传输通道的C结构：类型、端点、方向、缓冲区大小、标志、回调。
 
-**`usb_fifo`.** A USB 框架 abstraction for byte-stream `/dev` nodes. Generic alternative to writing a custom `cdevsw`.
+**`usb_fifo`。** USB框架对字节流 `/dev` 节点的抽象。编写自定义 `cdevsw` 的通用替代方案。
 
-**`usb_template(4)`.** FreeBSD's USB 设备-side (gadget) 框架. Used on hardware that can act as both USB host and USB 设备.
+**`usb_template(4)`。** FreeBSD的USB设备端（gadget）框架。用于可以同时充当USB主机和USB设备的硬件。
 
-**`usb_xfer`.** An opaque structure representing a single USB transfer channel. Allocated by `usbd_transfer_setup`, freed by `usbd_transfer_unsetup`.
+**`usb_xfer`。** 表示单个USB传输通道的不透明结构。由 `usbd_transfer_setup` 分配，由 `usbd_transfer_unsetup` 释放。
 
-**`usbd_copy_in`, `usbd_copy_out`.** Helpers for copying data between plain C 缓冲区 and USB 框架 缓冲区. Must be used instead of direct pointer access.
+**`usbd_copy_in`, `usbd_copy_out`。** 在普通C缓冲区和USB框架缓冲区之间复制数据的辅助函数。必须使用而非直接指针访问。
 
-**`usbd_lookup_id_by_uaa`.** Framework helper that compares a USB 附加 argument against a 匹配表 and returns zero on match.
+**`usbd_lookup_id_by_uaa`。** 将USB附加参数与匹配表比较并在匹配时返回零的框架辅助函数。
 
-**`usbd_transfer_setup`, `_unsetup`.** The calls that allocate and free transfer channels. Called from `附加` and `分离` respectively.
+**`usbd_transfer_setup`, `_unsetup`。** 分配和释放传输通道的调用。分别从 `附加` 和 `分离` 中调用。
 
-**`usbd_transfer_submit`.** The call that hands a transfer to the 框架 for execution on the hardware.
+**`usbd_transfer_submit`。** 将传输交给框架在硬件上执行的调用。
 
-**`usbd_transfer_start`, `_stop`.** The calls that activate or deactivate a channel. Activate triggers a 回调 in `USB_ST_SETUP`; deactivate cancels in-flight transfers.
+**`usbd_transfer_start`, `_stop`。** 激活或停用通道的调用。激活在 `USB_ST_SETUP` 中触发回调；停用取消正在进行的传输。
 
-**`USB_ST_SETUP`, `_TRANSFERRED`, `_ERROR`.** The three states of a USB 传输回调, as returned by `USB_GET_STATE(xfer)`.
+**`USB_ST_SETUP`, `_TRANSFERRED`, `_ERROR`。** USB传输回调的三种状态，由 `USB_GET_STATE(xfer)` 返回。
 
-**`USB_ERR_CANCELLED`.** The error code the 框架 passes to a 回调 when a transfer is being torn down (typically during 分离).
+**`USB_ERR_CANCELLED`。** 传输被拆除时（通常在分离期间）框架传递给回调的错误码。
 
-**`USB_ERR_STALLED`.** The error code when a USB 端点 returns a STALL handshake. Usually handled by calling `usbd_xfer_set_stall`.
+**`USB_ERR_STALLED`。** USB端点返回STALL握手时的错误码。通常通过调用 `usbd_xfer_set_stall` 处理。
 
-**VID/PID.** Vendor ID / Product ID. A pair of 16-bit numbers that uniquely identifies a USB 设备 model.
+**VID/PID。** 厂商ID/产品ID。唯一标识USB设备型号的一对16位数字。
 
-**`WITNESS`.** A FreeBSD 内核 debugging option that tracks lock acquisition order and warns about violations.
+**`WITNESS`。** FreeBSD的内核调试选项，跟踪锁获取顺序并警告违规。
 
-**Callin 设备.** A TTY 设备 (named `/dev/ttyuN` or `/dev/ttyUN`) that 块 on open until the modem's carrier detect (CD) signal is asserted. Used by programs that accept incoming calls.
+**Callin device (呼入设备)。** TTY设备（名为 `/dev/ttyuN` 或 `/dev/ttyUN`），打开时会阻塞直到调制解调器的载波检测（CD）信号有效。由接受传入呼叫的程序使用。
 
-**Callout 设备.** A TTY 设备 (named `/dev/cuauN` or `/dev/cuaUN`) that opens immediately without waiting for carrier detect. Used by programs that initiate connections.
+**Callout device (呼出设备)。** TTY设备（名为 `/dev/cuauN` 或 `/dev/cuaUN`），立即打开而不等待载波检测。由发起连接的程序使用。
 
-**`comcontrol(8)`.** Userland utility for controlling TTY options (drain behaviour, DTR, 流控制) that are not exposed through `stty`.
+**`comcontrol(8)`。** 用于控制TTY选项（排空行为、DTR、流控制）的用户态工具，这些选项不通过 `stty` 暴露。
 
-**Descriptor (USB).** A data structure that a USB 设备 returns when the host asks for its identity, configuration, 接口, or 端点. Hierarchical: 设备 描述符 contains configuration 描述符; configurations contain 接口; 接口 contain 端点.
+**Descriptor (描述符，USB)。** USB设备在主机询问其标识、配置、接口或端点时返回的数据结构。层次结构：设备描述符包含配置描述符；配置包含接口；接口包含端点。
 
-**Endpoint (USB).** A named, typed communication channel inside a USB 设备. Has an address (1 through 15), a direction (IN or OUT), a type (control, bulk, interrupt, isochronous), and a maximum 数据包 size.
+**Endpoint (端点，USB)。** USB设备内部命名的、类型化的通信通道。有地址（1到15）、方向（IN或OUT）、类型（控制、批量、中断、等时）和最大数据包大小。
 
-**Line discipline.** The TTY layer's pluggable layer between the 驱动程序 and userland. Standard disciplines include `termios` (canonical and raw modes). Line disciplines translate between raw bytes and the behaviour a user program expects.
+**Line discipline (线路规程)。** TTY层在驱动程序和用户态之间的可插拔层。标准规程包括 `termios`（规范模式和原始模式）。线路规程在原始字节和用户程序期望的行为之间进行转换。
 
-**`msleep(9)`.** The 内核 sleep primitive used to 块 a thread on a channel with a 互斥锁 held. Paired with `wakeup(9)`, it implements producer-consumer patterns inside 驱动程序.
+**`msleep(9)`。** 内核睡眠原语，用于在持有互斥锁的情况下将线程阻塞在通道上。与 `wakeup(9)` 配对，在驱动程序内部实现生产者-消费者模式。
 
-**`mtx_sleep`.** A synonym for `msleep` used in some parts of the tree. Functionally identical.
+**`mtx_sleep`。** 树中某些部分使用的 `msleep` 的同义词。功能上相同。
 
-**Open/close pair.** The 字符设备 methods `d_open` and `d_close`. Every 驱动程序 that exposes a `/dev` node must handle these. Opens are usually where channels are started; closes are usually where channels are stopped.
+**Open/close pair (打开/关闭对)。** 字符设备方法 `d_open` 和 `d_close`。每个暴露 `/dev` 节点的驱动程序必须处理这些。打开通常是启动通道的地方；关闭通常是停止通道的地方。
 
-**Short transfer.** A USB transfer that completes with fewer bytes than requested. Normal for bulk IN (where the 设备 sends a short 数据包 to signal "end of message") and for interrupt IN (where the 设备 sends a short 数据包 when it has less data than the maximum). Always check `actlen`.
+**Short transfer (短传输)。** 以少于请求的字节数完成的USB传输。对于批量IN（设备发送短数据包以表示"消息结束"）和中断IN（设备在数据少于最大值时发送短数据包）是正常的。始终检查 `actlen`。
 
-**`USETW`.** A FreeBSD macro for setting a little-endian 16-bit field inside a USB 描述符 缓冲区. The USB wire format is always little-endian, so `USETW` hides the byte-swap.
+**`USETW`。** FreeBSD的宏，用于在USB描述符缓冲区中设置小端16位字段。USB线路格式始终是小端，因此 `USETW` 隐藏了字节交换。
 
-This glossary is not exhaustive; it covers the terms this chapter actually used. For a broader FreeBSD USB reference, the `usbdi(9)` manual page is the definitive source. For the UART 框架, the source in `/usr/src/sys/dev/uart/` is the reference. When you encounter an unfamiliar term in either place, check here first; if not defined, go to the source.
+本术语表并非详尽无遗；它涵盖了本章实际使用的术语。对于更广泛的FreeBSD USB参考，`usbdi(9)` 手册页是权威来源。对于UART框架，`/usr/src/sys/dev/uart/` 中的源代码是参考。当你在这两者中的任一处遇到不熟悉的术语时，先在这里查找；如果未定义，则查看源代码。
 
-### A Closing Note on Terminology Precision
+### 关于术语精度的结束语
 
-One last piece of advice on vocabulary. The USB, TTY, and FreeBSD communities each have their own careful distinctions between terms that sound like synonyms. Confusing these in conversation with more experienced developers is a quick way to sound unsure; using them precisely is a quick way to sound at home.
+关于词汇的最后一条建议。USB、TTY和FreeBSD社区各自对听起来像同义词的术语有谨慎的区分。在与更有经验的开发者交流时混淆这些术语是显得不确定的快速方式；而精确地使用它们则是显得熟练的快速方式。
 
-"Device" in the USB context means the whole USB peripheral (the keyboard, the mouse, the serial adapter). "Interface" means a logical grouping of 端点 inside the 设备. An 接口 implements one function; a 设备 can have multiple 接口. When you say "the USB 设备 is a composite 设备," you are saying it has multiple 接口.
+"Device"（设备）在USB上下文中指整个USB外设（键盘、鼠标、串行适配器）。"Interface"（接口）指设备内端点的逻辑分组。一个接口实现一个功能；一个设备可以有多个接口。当你说"USB设备是复合设备"时，你是在说它有多个接口。
 
-"Endpoint" and "pipe" are related but distinct. An 端点 is on the 设备; a pipe is the host's view of a connection to that 端点. In FreeBSD 驱动程序 code, the term "transfer channel" is often used in place of "pipe," because "pipe" overloads a more common meaning in UNIX.
+"Endpoint"（端点）和"pipe"（管道）相关但不同。端点在设备上；管道是主机对该端点连接的视图。在FreeBSD驱动程序代码中，术语"transfer channel"（传输通道）常用来替代"pipe"，因为"pipe"在UNIX中重载了更常见的含义。
 
-"Transfer" and "transaction" are also distinct. A transfer is a logical operation (a read request for N bytes); a transaction is the USB-level 数据包 exchange that realises it. A 批量传输 of 64 bytes to an 端点 with a maximum 数据包 size of 64 is one transfer and one transaction. A 批量传输 of 512 bytes to the same 端点 is one transfer and eight transactions.
+"Transfer"（传输）和"transaction"（事务）也不同。传输是逻辑操作（对N字节的读取请求）；事务是实现它的USB级数据包交换。对最大数据包大小为64的端点进行64字节的批量传输是一次传输和一次事务。对同一端点进行512字节的批量传输是一次传输和八次事务。
 
-"UART" and "串行端口" are closely related but not identical. A UART is the chip (or the chip's logic 块); a 串行端口 is the physical connector and its wiring. One UART can back multiple 串行端口s in some configurations; one 串行端口 is always backed by exactly one UART.
+"UART"和"串行端口"密切相关但不相同。UART是芯片（或芯片的逻辑块）；串行端口是物理连接器及其布线。在某些配置中，一个UART可以支持多个串行端口；一个串行端口总是恰好由一个UART支持。
 
-"TTY" and "terminal" are related. A TTY is the 内核 abstraction for character-at-a-time I/O; a terminal is the userland view. A TTY has a controlling terminal property; a terminal has a TTY that it uses. In 驱动程序 code, TTY is almost always the more precise term.
+"TTY"和"terminal"（终端）相关。TTY是内核中逐字符I/O的抽象；终端是用户态视角。TTY有控制终端属性；终端有其使用的TTY。在驱动程序代码中，TTY几乎总是更精确的术语。
 
-Getting these right in writing and in code comments signals that you understand the design. And when you read someone else's code or documentation, noticing which term they chose tells you which layer of abstraction they are thinking about.
+在写作和代码注释中正确使用这些术语表明你理解设计。当你阅读别人的代码或文档时，注意他们选择了哪个术语会告诉你他们在思考哪个抽象层。
