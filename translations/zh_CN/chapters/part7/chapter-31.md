@@ -141,7 +141,7 @@ language: "zh-CN"
 
 这种特权正是拥有内核的全部意义。没有它，内核将无法强制执行使多用户系统成为可能的边界。有了它，内核承担着没有任何用户空间程序承担的责任：每一行内核代码都以整个系统的权限运行，每一行内核代码中的漏洞，原则上都可以被提升为整个系统的权限。
 
-A driver is part of the kernel. Once loaded, a driver's code runs with the same privilege as the rest of the kernel. There is no finer-grained boundary inside the kernel that says "this code is only a driver, so it cannot touch the scheduler." A pointer dereference in your driver, if it lands on the wrong address, can corrupt any data structure the kernel uses. A buffer overflow in your driver, if it is large enough, can overwrite any function pointer the kernel uses. An uninitialised value in your driver, if it flows into the right place, can leak a neighbour's secrets. The kernel trusts the driver completely, because it has no mechanism to distrust it.
+驱动程序是内核的一部分。一旦加载，驱动程序的代码以与内核其余部分相同的特权运行。内核内部没有更细粒度的边界会说"这段代码只是驱动程序，所以它不能触及调度器"。你的驱动程序中的指针解引用，如果落在错误的地址上，可能损坏内核使用的任何数据结构。你的驱动程序中的缓冲区溢出，如果足够大，可能覆盖内核使用的任何函数指针。你的驱动程序中未初始化的值，如果流入正确的位置，可能泄露邻居的秘密。内核完全信任驱动程序，因为它没有不信任它的机制。
 
 这种不对称性是首先要内化的东西。用户空间程序在内核之下运行，内核可以对它们强制执行规则。驱动程序在内核内部运行，除了驱动程序作者自己之外，没有人对它们强制执行规则。
 
@@ -155,7 +155,7 @@ A driver is part of the kernel. Once loaded, a driver's code runs with the same 
 
 这不是假设性的扩展。这是内核漏洞被转化为利用的标准方式。内核的数据结构在内存中彼此相邻。能够在内核某处写入单个字节的攻击者通常可以——通过足够的巧妙手段——将该字节引导到重要的结构中。在正确的数据结构中几个字节错位就变成了一个可工作的利用。在正确的位置几个字节可以造成"我的编辑器崩溃了"和"攻击者现在拥有这台机器"之间的区别。
 
-This is why the mental framing of security must shift when you move from user-space to the kernel. You are not asking "what is the worst that can happen if this code goes wrong?" You are asking "what is the worst thing that someone could do to the system if they could steer this code to go wrong in exactly the way they wanted?" Those are different questions, and the second one is always the right one to ask inside the kernel.
+这就是为什么从用户空间转向内核时，安全的心智框架必须改变。你不是在问"如果这段代码出了问题，最坏的情况是什么"。你是在问"如果有人能够引导这段代码精确地按照他们想要的方式出错，他们对系统能做的最坏的事情是什么"。这些是不同的问题，第二个问题在内核内部永远是正确的问题。
 
 ### 风险清单
 
@@ -249,25 +249,25 @@ C 中的缓冲区是具有特定大小的内存区域。在驱动程序中，缓
 
 所有缓冲区共有的一件事是大小。写入超过缓冲区末尾，或在其开头之前读取，或使用不适合的值进行索引，就是缓冲区溢出（或下溢）。溢出本身是机制；溢出写入的内容和写入的位置决定了严重程度。
 
-A stack overflow in a driver is the most dangerous kind, because the stack holds return addresses, saved registers, and local variables for the whole call chain. A write past the end of a stack buffer can reach into the caller's return address, and from there into arbitrary code execution. A heap overflow is less directly exploitable, but heap buffers are often adjacent to other kernel data structures, and a heap overflow that lands on the right structure is a clear path to compromise. A static-buffer overflow is the least common but can still lead to compromise if the static buffer is next to other writeable module data.
+驱动程序中的栈溢出是最危险的类型，因为栈保存着整个调用链的返回地址、保存的寄存器和局部变量。写入超过栈缓冲区末尾可能触及调用者的返回地址，从那里可以实现任意代码执行。堆溢出的直接可利用性较低，但堆缓冲区通常与其他内核数据结构相邻，落在正确结构上的堆溢出是通向入侵的明确路径。静态缓冲区溢出最不常见，但如果静态缓冲区旁边是其他可写模块数据，仍然可能导致入侵。
 
-The vocabulary of "stack" and "heap" overflow should feel familiar from user-space work. The mechanism is the same. The consequences are worse, because the kernel's code and data share an address space with everything else it does.
+"栈"和"堆"溢出的词汇应该让你感到熟悉，因为这在用户空间工作中也是如此。机制是相同的。后果更严重，因为内核的代码和数据与它所做的一切共享一个地址空间。
 
 ### 内核代码中溢出是如何发生的
 
 溢出不是因为作者写入了他们不打算写入的内存。它们发生是因为作者写入了他们确实打算写入的内存，但长度或偏移量是错误的。最常见的错误形式是：
 
-**Trusting a length from user space.** The driver's `ioctl` argument contains a length field, and the driver uses that length to decide how much to `copyin` or how large a buffer to allocate. If the length is not bounded, the user can pick a length that makes the copy misbehave.
+**信任来自用户空间的长度。** 驱动程序的 `ioctl` 参数包含一个长度字段，驱动程序使用该长度来决定 `copyin` 多少数据或分配多大的缓冲区。如果长度没有边界，用户可以选择一个使复制行为异常的长度。
 
-**Off-by-one in a loop.** A loop that iterates over an array uses `<=` where `<` was intended, or `<` where `<=` was intended. The extra iteration touches memory just past the end of the array.
+**循环中的差一错误。** 遍历数组的循环在应该使用 `<` 的地方使用了 `<=`，或者在应该使用 `<=` 的地方使用了 `<`。额外的迭代触及了数组末尾之外的内存。
 
-**Incorrect buffer size in a call.** A call to `copyin`, `strlcpy`, `snprintf`, or similar takes a size argument. The author passes `sizeof(buf)` for a pointer-typed buf, which yields the pointer's size (four or eight bytes) rather than the buffer's size. The call writes far too many bytes.
+**调用中缓冲区大小不正确。** 对 `copyin`、`strlcpy`、`snprintf` 或类似函数的调用接受一个大小参数。作者为指针类型的 buf 传递 `sizeof(buf)`，这产生的是指针的大小（四或八字节）而不是缓冲区的大小。该调用写入了过多的字节。
 
-**Arithmetic overflow in a length calculation.** The author multiplies or adds lengths to compute a buffer size, and the multiplication overflows a 32-bit integer. The resulting "size" is small, the allocation succeeds, and the subsequent copy writes far more than was allocated.
+**长度计算中的算术溢出。** 作者将长度相乘或相加以计算缓冲区大小，而乘法溢出了 32 位整数。结果的"大小"很小，分配成功，随后的复制写入了远超已分配量的数据。
 
-**Truncating a string without terminating it.** The author uses `strncpy` or similar, but `strncpy` does not guarantee a null terminator; a later string operation reads past the end of the buffer.
+**截断字符串但未终止。** 作者使用 `strncpy` 或类似函数，但 `strncpy` 不保证空终止符；后续的字符串操作会读取超过缓冲区末尾的内容。
 
-**Skipping a length check because the code "obviously" cannot reach a bad state.** The author convinces themselves that a given path cannot produce a length greater than some bound, so no check is needed. The path can produce such a length, because the author missed a case.
+**因为代码"显然"不可能达到错误状态而跳过长度检查。** 作者说服自己给定路径不能产生超过某个界限的长度，因此不需要检查。该路径确实可以产生这样的长度，因为作者遗漏了一种情况。
 
 每一种都是有对策的漏洞类别。本节的其余部分将逐步介绍这些对策。
 
@@ -275,7 +275,7 @@ The vocabulary of "stack" and "heap" overflow should feel familiar from user-spa
 
 最简单和最有效的对策是限制每个长度。在使用来自不可信来源的长度之前，将其与已知最大值进行比较。在分配大小来自不可信来源的缓冲区之前，将大小与已知最大值进行比较。在复制到缓冲区之前，确认复制大小合适。
 
-Concretely, if your `ioctl` handler takes a structure with a `u_int32_t len` field, add a check like this at the very top of the handler:
+具体来说，如果你的 `ioctl` 处理程序接受一个包含 `u_int32_t len` 字段的结构，在处理程序的最顶部添加一个这样的检查：
 
 ```c
 #define SECDEV_MAX_LEN    4096
@@ -306,15 +306,15 @@ secdev_ioctl_set_name(struct secdev_softc *sc, struct secdev_ioctl_args *args)
 
 函数的第一行就是边界。无论调用者传递什么，`args->len` 现在最多是 `SECDEV_MAX_LEN`。分配是有界的，复制是有界的，空终止在缓冲区内。这种模式是安全驱动程序代码的主力。
 
-What should the bound be? It depends on the semantics of the argument. A name of a device might reasonably be bounded to a few hundred bytes. A configuration blob might be bounded to a few kilobytes. A firmware blob might be bounded to a few megabytes. Pick a number that is generous enough to accommodate legitimate use and small enough that its consequences, if reached, are bearable. If the bound is too small, users will complain about legitimate failures; if it is too large, an attacker can use the bound itself as an amplifier for denial of service. A generous bound is almost always the right choice.
+边界应该是什么？这取决于参数的语义。设备名称可以合理地限制在几百字节。配置块可以限制在几千字节。固件块可以限制在几兆字节。选择一个足够宽松以容纳合法使用且足够小以至于达到该上限时后果可承受的数字。如果边界太小，用户会抱怨合法操作失败；如果太大，攻击者可以将边界本身用作拒绝服务的放大器。一个宽松的边界几乎总是正确的选择。
 
-Some drivers derive the bound from the structure of the hardware. A driver for a fixed-size register bank might bound reads and writes to the bank's size. A driver for a ring with 256 entries might bound the index to 255. Bounds derived from hardware structure are particularly robust, because they correspond to a physical constraint rather than an arbitrary choice.
+有些驱动程序从硬件结构中推导边界。固定大小寄存器组的驱动程序可能将读写限制在寄存器组的大小。具有 256 个条目的环形缓冲区的驱动程序可能将索引限制为 255。从硬件结构推导出的边界特别稳健，因为它们对应于物理约束而非任意选择。
 
 ### `sizeof(buf)` 陷阱
 
 C 代码中最常见的缓冲区大小漏洞之一是 `sizeof(buf)` 和 `sizeof(*buf)` 之间的混淆，或者 `sizeof(buf)` 和 `buf` 指向的内存长度之间的混淆。当缓冲区传递给函数时，这个陷阱最常出现。
 
-Consider this unsafe function:
+考虑这个不安全的函数：
 
 ```c
 static void
@@ -324,9 +324,9 @@ bad_copy(char *dst, const char *src)
 }
 ```
 
-Here, `dst` is a `char *`, so `sizeof(dst)` is the size of a pointer: 4 on 32-bit systems, 8 on 64-bit systems. The call to `strlcpy` tells it that the destination is 8 bytes long, regardless of how big the real buffer is. On a 64-bit system, the function writes up to 8 bytes and terminates, and the caller's 4096-byte buffer now contains a short string, which is probably not what anyone wanted. On any system, if the caller's buffer was less than 8 bytes, the call overflows it.
+这里，`dst` 是一个 `char *`，所以 `sizeof(dst)` 是指针的大小：在 32 位系统上是 4，在 64 位系统上是 8。对 `strlcpy` 的调用告诉它目标只有 8 字节长，无论实际缓冲区有多大。在 64 位系统上，该函数最多写入 8 字节然后终止，调用者的 4096 字节缓冲区现在包含一个短字符串，这可能不是任何人想要的。在任何系统上，如果调用者的缓冲区小于 8 字节，调用就会溢出它。
 
-The fix is to pass the buffer size explicitly:
+修复方法是显式传递缓冲区大小：
 
 ```c
 static void
@@ -336,7 +336,7 @@ good_copy(char *dst, size_t dstlen, const char *src)
 }
 ```
 
-The callers then use `sizeof(their_buf)` at the call site, where `their_buf` is known to be the array:
+然后调用者在调用点使用 `sizeof(their_buf)`，其中 `their_buf` 已知是数组：
 
 ```c
 char name[64];
@@ -347,21 +347,21 @@ good_copy(name, sizeof(name), user_input);
 
 ### 有界字符串函数
 
-C's traditional string functions, `strcpy`, `strcat`, `sprintf`, were designed in an era when nobody took buffer overflows seriously. They do not take a size argument; they write until they see a null terminator. In kernel code, they are trouble, because the null terminator can be far away or absent entirely.
+C 语言的传统字符串函数 `strcpy`、`strcat`、`sprintf` 设计于没有人认真对待缓冲区溢出的时代。它们不接受大小参数；它们写入直到看到空终止符。在内核代码中，它们是麻烦，因为空终止符可能很远或者完全不存在。
 
-FreeBSD provides bounded alternatives:
+FreeBSD 提供了有界的替代方案：
 
-- `strlcpy(dst, src, dstsize)`: copy at most `dstsize - 1` bytes plus a null terminator. Returns the length of the source string. Safe to use when you know `dstsize` correctly.
-- `strlcat(dst, src, dstsize)`: append `src` to `dst`, ensuring the result is at most `dstsize - 1` bytes plus a null terminator. Like `strlcpy`, this is safe when `dstsize` is correct.
-- `snprintf(dst, dstsize, fmt, ...)`: format into `dst`, writing at most `dstsize` bytes including the terminator. Returns the number of bytes that would have been written, which may be larger than `dstsize`. Check the return value if you need to know about truncation.
+- `strlcpy(dst, src, dstsize)`：最多复制 `dstsize - 1` 字节加一个空终止符。返回源字符串的长度。当你正确知道 `dstsize` 时使用是安全的。
+- `strlcat(dst, src, dstsize)`：将 `src` 追加到 `dst`，确保结果最多是 `dstsize - 1` 字节加一个空终止符。与 `strlcpy` 一样，当 `dstsize` 正确时这是安全的。
+- `snprintf(dst, dstsize, fmt, ...)`：格式化到 `dst` 中，最多写入 `dstsize` 字节（包括终止符）。返回本应写入的字节数，可能大于 `dstsize`。如果你需要知道是否发生了截断，检查返回值。
 
-`strncpy` and `strncat` also exist, but they have surprising semantics. `strncpy` pads with nulls if the source is shorter than the destination size, and, more dangerously, it does not null-terminate if the source is longer. `strncat` is confusing in a different way. Prefer `strlcpy` and `strlcat` in new code.
+`strncpy` 和 `strncat` 也存在，但它们有令人惊讶的语义。`strncpy` 在源字符串短于目标大小时用空字节填充，更危险的是，当源字符串更长时不添加空终止符。`strncat` 以另一种方式令人困惑。在新代码中优先使用 `strlcpy` 和 `strlcat`。
 
-For longer formatted output, the `sbuf(9)` API is safer still. It manages an auto-growing buffer with a clean interface for appending strings, printing formatted output, and bounding the final size. It is overkill for small fixed-size copies but excellent for anything that builds up a longer message. Section 8 returns to `sbuf` in the context of logging.
+对于更长的格式化输出，`sbuf(9)` API 更安全。它管理一个自动增长的缓冲区，具有用于追加字符串、打印格式化输出和限制最终大小的简洁接口。对于小的固定大小复制来说是大材小用，但对于构建较长消息的任何内容来说非常出色。第8节在日志记录的上下文中将再次讨论 `sbuf`。
 
 ### 算术与溢出
 
-A subtler class of buffer bug comes from arithmetic on sizes. The classic example is:
+一类更微妙的缓冲区错误来自大小算术。经典的例子是：
 
 ```c
 uint32_t total = count * elem_size;          /* may overflow */
@@ -369,9 +369,9 @@ buf = malloc(total, M_SECDEV, M_WAITOK);
 copyin(user_buf, buf, total);
 ```
 
-If `count * elem_size` overflows a 32-bit `uint32_t`, `total` wraps around to a small number. The `malloc` succeeds with that small number. The `copyin` is asked for the same small number of bytes, which makes the allocation-and-copy pair itself safe. But a later piece of the driver may treat `count * elem_size` as if it produced the full amount, and write past the end of the buffer.
+如果 `count * elem_size` 溢出 32 位的 `uint32_t`，`total` 回绕到一个小的数字。`malloc` 以该小数字成功。`copyin` 被要求复制同样小数量的字节，这使得分配加复制对本身是安全的。但驱动程序后面的部分可能将 `count * elem_size` 视为产生了完整数量，从而写入超过缓冲区末尾。
 
-The fix is to check for overflow explicitly:
+修复方法是显式检查溢出：
 
 ```c
 #include <sys/limits.h>
@@ -383,21 +383,21 @@ if (count > SIZE_MAX / elem_size)
 size_t total = count * elem_size;
 ```
 
-The division is exact (no rounding) for integer types, and the test `count > SIZE_MAX / elem_size` is equivalent to "would the multiplication overflow `size_t`?" This pattern is well worth memorising. It is one of those idioms that appears unnecessary in the common case and essential in the exceptional case.
+对于整数类型，除法是精确的（没有舍入），测试 `count > SIZE_MAX / elem_size` 等价于"乘法会溢出 `size_t` 吗？"。这个模式非常值得记住。它是那种在常见情况下看似不必要但在异常情况下至关重要的惯用法之一。
 
-On modern compilers, FreeBSD also has `__builtin_mul_overflow` and its siblings, which perform the arithmetic and report overflow in a single operation. They are a little more convenient when you have them, but the explicit division check works everywhere.
+在现代编译器上，FreeBSD 还有 `__builtin_mul_overflow` 及其兄弟函数，它们在单个操作中执行算术并报告溢出。当你有这些函数时它们更方便一些，但显式的除法检查在任何地方都有效。
 
 ### 整数类型很重要
 
-Closely related is the choice of integer types for lengths and offsets. If a length is stored as `int`, it can be negative, and a negative value sneaking into a call that expects an unsigned length can cause spectacular misbehaviour. If a length is stored as `short`, it can only represent values up to 32767, and a caller passing a value near that limit can cause truncation.
+与此密切相关的是长度和偏移量的整数类型选择。如果长度存储为 `int`，它可以是负数，而一个潜入期望无符号长度的调用的负值可能导致灾难性的异常行为。如果长度存储为 `short`，它只能表示到 32767 的值，接近该限制的调用者可能导致截断。
 
-The safe types for lengths in FreeBSD are `size_t` (unsigned, at least 32 bits, often 64 on 64-bit platforms) and `ssize_t` (signed `size_t`, usually for return values that may be negative to indicate error). Use them consistently. When you take a length as input, convert it to `size_t` at the earliest opportunity. When you store a length, store it as `size_t`. When you pass a length to a FreeBSD primitive, pass a `size_t`.
+FreeBSD 中安全的长度类型是 `size_t`（无符号，至少 32 位，在 64 位平台上通常是 64 位）和 `ssize_t`（有符号的 `size_t`，通常用于可能为负以指示错误的返回值）。一致地使用它们。当你接受长度作为输入时，尽早将其转换为 `size_t`。当你存储长度时，存储为 `size_t`。当你向 FreeBSD 原语传递长度时，传递 `size_t`。
 
-If the length comes from user space and the user-facing structure uses a `uint32_t`, the conversion on a 64-bit kernel is safe (no truncation), and you should still validate the value before using it. If the user-facing structure uses `int64_t` and the kernel needs a `size_t`, check for negatives and for overflow before the conversion.
+如果长度来自用户空间且面向用户的结构使用 `uint32_t`，在 64 位内核上的转换是安全的（没有截断），但你仍然应该在使用前验证该值。如果面向用户的结构使用 `int64_t` 而内核需要 `size_t`，在转换前检查负数和溢出。
 
 ### 栈缓冲区廉价但有限
 
-A stack buffer is a local array:
+栈缓冲区是局部数组：
 
 ```c
 static int
@@ -415,15 +415,15 @@ secdev_read_name(struct secdev_softc *sc, struct uio *uio)
 }
 ```
 
-Stack buffers are allocated automatically, freed automatically when the function returns, and are essentially free to use. They are ideal for small, short-lived data that does not need to outlive the function call.
+栈缓冲区自动分配，在函数返回时自动释放，使用基本上是免费的。它们非常适合不需要超出函数调用生命周期的短生命周期小数据。
 
-The limit on stack buffers is the size of the kernel stack itself. FreeBSD's kernel stack is small, typically 16 KiB or 32 KiB depending on the architecture, and that stack must accommodate the whole call chain, including nested calls into the VFS, the scheduler, interrupt handlers, and so on. A driver function that declares a 4 KiB local buffer is already using a quarter of the stack. A driver function that declares a 32 KiB local buffer has almost certainly blown the stack, and the kernel will panic or corrupt memory when it happens.
+栈缓冲区的限制是内核栈本身的大小。FreeBSD 的内核栈很小，通常为 16 KiB 或 32 KiB，具体取决于架构，而且该栈必须容纳整个调用链，包括对 VFS、调度器、中断处理程序等的嵌套调用。声明 4 KiB 局部缓冲区的驱动程序函数已经使用了栈的四分之一。声明 32 KiB 局部缓冲区的驱动程序函数几乎肯定会炸毁栈，内核会在那时崩溃或损坏内存。
 
-A safe rule of thumb: keep local buffers under 512 bytes, and preferably under 256 bytes. For anything larger, allocate on the heap. The compiler will not warn you when you declare a stack buffer that is too large; it is the author's responsibility to keep stack usage bounded.
+一个安全的经验法则：保持局部缓冲区在 512 字节以下，最好在 256 字节以下。对于更大的需求，在堆上分配。编译器在你声明过大的栈缓冲区时不会警告你；保持栈使用有界是作者的责任。
 
 ### 堆缓冲区及其生命周期
 
-A heap buffer is allocated dynamically:
+堆缓冲区是动态分配的：
 
 ```c
 char *buf;
@@ -433,20 +433,20 @@ buf = malloc(size, M_SECDEV, M_WAITOK | M_ZERO);
 free(buf, M_SECDEV);
 ```
 
-Heap buffers can be arbitrarily large (up to the available memory), can outlive the function that allocates them, and give the author explicit control over when they are freed. They come at the cost of requiring deliberate attention: every allocation must be paired with a free, every free must happen after the last use, and every free must happen only once.
+堆缓冲区可以任意大（最大到可用内存），可以比分配它们的函数活得更久，并给作者对何时释放它们的显式控制。它们的代价是需要刻意的关注：每次分配必须与一次释放配对，每次释放必须在最后一次使用之后，每次释放只能发生一次。
 
-The rules for heap buffers are:
+堆缓冲区的规则是：
 
-1. Always check the allocation if you used `M_NOWAIT`. With `M_WAITOK`, the allocation cannot fail; with `M_NOWAIT`, it can return `NULL` and your code must handle that.
-2. Pair every `malloc` with exactly one `free`. Not zero, not two.
-3. After calling `free`, do not access the buffer. If the pointer may be reused, set it to `NULL` immediately after the free, so that accidental use triggers a null-pointer panic rather than a subtle corruption.
-4. If the buffer held sensitive data, zero it with `explicit_bzero` or use `zfree` before freeing.
+1. 如果你使用了 `M_NOWAIT`，始终检查分配结果。使用 `M_WAITOK` 时，分配不会失败；使用 `M_NOWAIT` 时，它可能返回 `NULL`，你的代码必须处理这种情况。
+2. 将每次 `malloc` 与恰好一次 `free` 配对。不是零次，也不是两次。
+3. 调用 `free` 之后，不要访问缓冲区。如果指针可能被重用，在释放后立即将其设置为 `NULL`，这样意外使用会触发空指针崩溃而不是微妙的损坏。
+4. 如果缓冲区保存了敏感数据，在释放前用 `explicit_bzero` 清零或使用 `zfree`。
 
-Section 4 covers these rules in more depth, including the FreeBSD-specific flags on `malloc(9)`.
+第4节更深入地涵盖这些规则，包括 `malloc(9)` 上 FreeBSD 特定的标志。
 
 ### 完整示例：安全和不安全的复制例程
 
-To make the patterns concrete, here is an unsafe copy routine that you might find in a first-draft driver, followed by a safe rewrite. Read the unsafe version carefully and see if you can spot all the bugs before looking at the commentary.
+为了使模式具体化，这里有一个你可能在一个初稿驱动程序中发现的不安全复制例程，后面跟着一个安全的重写。仔细阅读不安全版本，在查看注释之前看看你是否能发现所有错误。
 
 ```c
 /* UNSAFE: do not use */
@@ -462,17 +462,17 @@ secdev_bad_copy(struct secdev_softc *sc, struct secdev_ioctl_args *args)
 }
 ```
 
-There are at least four bugs in those four lines.
+这四行代码中至少有四个错误。
 
-First, `copyin`'s return value is ignored. If the user supplied a bad pointer, `copyin` returns `EFAULT`, but the function continues as if the copy succeeded. The subsequent operations on `buf` operate on whatever garbage the stack happened to hold.
+第一，`copyin` 的返回值被忽略了。如果用户提供了一个错误的指针，`copyin` 返回 `EFAULT`，但函数继续执行，好像复制成功了一样。对 `buf` 的后续操作操作的是栈上碰巧保存的任何垃圾数据。
 
-Second, `args->len` is not bounded. If the user supplies a `len` of 1000, `copyin` writes 1000 bytes into a 256-byte stack buffer. The stack is corrupted. The driver has just become a vehicle for privilege escalation.
+第二，`args->len` 没有边界。如果用户提供 `len` 为 1000，`copyin` 向 256 字节的栈缓冲区写入 1000 字节。栈被损坏。驱动程序刚刚成为权限提升的载体。
 
-Third, `buf[args->len] = '\0'` writes past the end of the buffer even in the non-malicious case. If `args->len == sizeof(buf)`, the assignment is to `buf[256]`, which is one past the end of the 256-byte array.
+第三，即使在非恶意情况下，`buf[args->len] = '\0'` 也会写入超过缓冲区末尾。如果 `args->len == sizeof(buf)`，赋值目标是 `buf[256]`，这是超出 256 字节数组末尾一个位置的地方。
 
-Fourth, the function returns 0 regardless of whether anything went wrong. A caller receives a success code and has no way to know that the driver silently dropped their input.
+第四，无论是否出了问题，函数都返回 0。调用者收到一个成功代码，没有办法知道驱动程序默默丢弃了他们的输入。
 
-Here is a safe rewrite:
+这里是一个安全的重写：
 
 ```c
 /* SAFE */
@@ -499,13 +499,13 @@ secdev_copy_name(struct secdev_softc *sc, struct secdev_ioctl_args *args)
 }
 ```
 
-The bound is now `args->len >= sizeof(buf)`, which ensures that the terminator at `buf[args->len]` fits. The `copyin` return value is checked and propagated. The write to `sc->sc_name` happens under the mutex that protects it, ensuring that another thread reading the field at the same time sees a consistent value. The function returns the error code the caller needs to understand what happened.
+现在的边界是 `args->len >= sizeof(buf)`，这确保了 `buf[args->len]` 处的终止符能够放下。检查了 `copyin` 的返回值并向上传播。对 `sc->sc_name` 的写入在保护它的互斥锁下进行，确保同时读取该字段的其他线程看到一致的值。函数返回调用者需要的错误代码以理解发生了什么。
 
-The unsafe version is eight lines; the safe version is thirteen. The five extra lines are the difference between a working driver and a security incident.
+不安全版本是八行；安全版本是十三行。多出的五行就是一个能工作的驱动程序和一个安全事故之间的区别。
 
 ### 第二个完整示例：描述符长度
 
-Here is a different class of bug that shows up in drivers for devices that present descriptor-like data (USB, virtio, PCIe configuration):
+这里有一个不同类型的错误，出现在处理描述符类数据的设备驱动程序中（USB、virtio、PCIe 配置）：
 
 ```c
 /* UNSAFE */
@@ -520,9 +520,9 @@ parse_descriptor(struct secdev_softc *sc, const uint8_t *buf, size_t buflen)
 }
 ```
 
-The length is taken from the first byte of the buffer, which is a value the device (or an attacker impersonating it) can set arbitrarily. If `buf[0]` is 200, the `memcpy` copies 200 bytes, regardless of whether `buf` actually contains 200 bytes of valid data or whether `sc->sc_descriptor` is that large. If `buflen` is less than `buf[0] + 1`, the `memcpy` reads past the end of the caller's buffer. If `sizeof(sc->sc_descriptor)` is less than `buf[0]`, the `memcpy` writes past the end of the destination.
+长度取自缓冲区的第一个字节，这是设备（或冒充它的攻击者）可以任意设置的值。如果 `buf[0]` 是 200，`memcpy` 复制 200 字节，无论 `buf` 是否实际包含 200 字节的有效数据，或 `sc->sc_descriptor` 是否有那么大。如果 `buflen` 小于 `buf[0] + 1`，`memcpy` 会读取超过调用者缓冲区末尾的内容。如果 `sizeof(sc->sc_descriptor)` 小于 `buf[0]`，`memcpy` 会写入超过目标末尾的内容。
 
-The safe version validates both sides of the copy:
+安全版本验证复制的两端：
 
 ```c
 /* SAFE */
@@ -544,51 +544,51 @@ parse_descriptor(struct secdev_softc *sc, const uint8_t *buf, size_t buflen)
 }
 ```
 
-Three checks, each guarding a different invariant: the buffer has at least one byte, the stated length fits in the buffer, and the stated length fits in the destination. Each check protects against a different adversarial or accidental input.
+三个检查，每个守护一个不同的不变量：缓冲区至少有一个字节，声明的长度适合缓冲区，声明的长度适合目标。每个检查保护免受不同的对抗性或意外输入。
 
-A careful reader may notice that `len + 1 > buflen` can itself overflow if `len` is `SIZE_MAX`. For a `size_t` taken from a byte, `len` is at most 255, so the overflow cannot happen here; but if you write the same code for a 32-bit length field, the check should be rearranged to `len > buflen - 1` with an explicit `buflen >= 1` check. The habit of watching for arithmetic overflow is the same habit, applied at different scales.
+细心的读者可能会注意到，如果 `len` 是 `SIZE_MAX`，`len + 1 > buflen` 本身可能溢出。对于从字节获取的 `size_t`，`len` 最多是 255，所以溢出不可能在这里发生；但如果你为 32 位长度字段编写相同的代码，应该将检查重新排列为 `len > buflen - 1` 并加上显式的 `buflen >= 1` 检查。关注算术溢出的习惯是相同的习惯，只是应用于不同的规模。
 
 ### 缓冲区溢出作为一类漏洞
 
-Stepping back from the specific examples: buffer overflows are not a single bug. They are a family of bugs whose members share a structure: the code writes to or reads from a buffer with an incorrect size or offset. The concrete examples above show several members of the family, but the underlying pattern is the same: a length came from somewhere less trustworthy than the code believed it was, and the code was not prepared.
+从具体例子退后一步：缓冲区溢出不是一个单一的漏洞。它们是一个共享结构的漏洞家族，其成员共享一个结构：代码以错误的大小或偏移量写入或读取缓冲区。上面的具体例子展示了家族中的几个成员，但底层模式是相同的：长度来自一个比代码认为的更不可信的地方，而代码没有做好准备。
 
-The countermeasures also share a structure. They all amount to: do not trust the length; check it against a known bound before you use it; keep the bound tight; propagate errors when the check fails; use bounded primitives (`strlcpy`, `snprintf`, `sbuf(9)`) when you have a choice; watch for arithmetic overflow in length calculations; and keep stack buffers small. That short list, consistently applied, eliminates most buffer overflow bugs before they are written.
+对策也共享一个结构。它们都归结为：不要信任长度；在使用前将其与已知边界进行比较；保持边界紧凑；当检查失败时传播错误；当有选择时使用有界原语（`strlcpy`、`snprintf`、`sbuf(9)`）；注意长度计算中的算术溢出；保持栈缓冲区小。这个简短的列表，如果一致应用，可以在大多数缓冲区溢出漏洞被写入之前消除它们。
 
 ### 溢出之外的内存损坏
 
-Not every memory-corruption bug is a buffer overflow. Drivers can corrupt memory in several other ways, and a complete treatment of safety must mention them.
+并非每个内存损坏漏洞都是缓冲区溢出。驱动程序可以以其他几种方式损坏内存，对安全性的完整讨论必须提及它们。
 
-**Use-after-free** is writing to, or reading from, a buffer after it has been freed. The allocator has almost certainly handed that memory to some other part of the kernel by now, so the write corrupts whatever that part of the kernel is doing. Section 4 covers use-after-free in depth.
+**释放后使用** 是在缓冲区被释放后写入或读取它。分配器几乎肯定已经将该内存交给了内核的其他部分，因此写入会损坏该内核部分正在做的任何事情。第4节深入讨论释放后使用。
 
-**Double-free** is calling `free` twice on the same pointer. Depending on the allocator, this can corrupt the allocator's own data structures, leading to hard-to-diagnose panics minutes or hours later. Section 4 covers prevention.
+**双重释放** 是对同一个指针调用两次 `free`。根据分配器的不同，这可能损坏分配器自身的数据结构，导致几分钟或几小时后难以诊断的崩溃。第4节讨论预防措施。
 
-**Out-of-bounds read** is the read-only cousin of buffer overflow. It does not corrupt memory directly, but it can leak information (see Section 7) and can cause the kernel to read from an unmapped page, which is a panic. It deserves the same countermeasures as overflow.
+**越界读取** 是缓冲区溢出的只读表亲。它不直接损坏内存，但可能泄露信息（见第7节），并可能导致内核从未映射的页读取，这就是崩溃。它值得与溢出相同的对策。
 
-**Type confusion** is treating a block of memory as if it had a different type from what it actually has. For example, casting a pointer to the wrong structure type and accessing fields. In kernel C, type confusion is usually caught by the compiler, but it can still happen when a driver deals with void pointers or with structures shared across versions.
+**类型混淆** 是将一块内存视为与其真实类型不同的类型。例如，将指针转换为错误的结构类型并访问字段。在内核 C 中，类型混淆通常被编译器捕获，但当驱动程序处理 void 指针或跨版本共享的结构时仍然可能发生。
 
-**Uninitialised memory use** is reading from a variable before assigning it a value. The value read is whatever happened to be in memory at that location, which may be previous callers' data. Section 7 covers this from the information-leak perspective.
+**未初始化内存使用** 是在赋值之前从变量读取。读取的值是该位置内存中碰巧存在的任何内容，可能是前一个调用者的数据。第7节从信息泄露的角度讨论这一点。
 
-Each of these has its own countermeasures, but the single most effective tool across all of them is the set of kernel sanitizers FreeBSD provides: `INVARIANTS`, `WITNESS`, `KASAN`, `KMSAN`, and `KCOV`. Section 10 covers these tools in depth. The short version: build your driver against a kernel with `INVARIANTS` and `WITNESS` always. Build it against a `KASAN`-enabled kernel during development. Run your tests under the sanitized kernel. The sanitizers will find bugs you would otherwise not find until a customer did.
+这些中的每一个都有自己的对策，但在所有这些中最有效的单一工具是 FreeBSD 提供的内核净化器集：`INVARIANTS`、`WITNESS`、`KASAN`、`KMSAN` 和 `KCOV`。第10节深入讨论这些工具。简要版本：始终在使用 `INVARIANTS` 和 `WITNESS` 的内核上构建你的驱动程序。在开发期间在启用 `KASAN` 的内核上构建它。在净化后的内核下运行你的测试。净化器会找到你否则只有在客户报告时才能找到的漏洞。
 
 ### 编译器保护如何提供帮助，以及在哪里停止
 
-FreeBSD kernels are usually compiled with several exploit-mitigation features enabled in the compiler. Understanding what they do is part of understanding why certain defensive habits matter more than others.
+FreeBSD 内核通常在编译时启用了几种利用缓解功能。理解它们的作用是理解为什么某些防御习惯比其他习惯更重要的一部分。
 
-**Stack-smashing protection (SSP)** inserts a canary value on the stack between local variables and the saved return address. When the function returns, the canary is checked against a reference value; if it has been modified (because a stack-buffer overflow clobbered it), the kernel panics. SSP does not prevent the overflow from happening, but it prevents many overflows from gaining control of execution. Without SSP, overwriting the return address would redirect execution to attacker-controlled code on return. With SSP, the overwrite is detected and the kernel stops.
+**栈粉碎保护 (SSP)** 在栈上局部变量和保存的返回地址之间插入一个金丝雀值。当函数返回时，金丝雀与参考值进行检查；如果它被修改了（因为栈缓冲区溢出覆盖了它），内核崩溃。SSP 不阻止溢出的发生，但它阻止许多溢出获得执行控制权。没有 SSP，覆盖返回地址会在返回时将执行重定向到攻击者控制的代码。有了 SSP，覆盖被检测到，内核停止。
 
-SSP is heuristic. Not every function gets a canary: functions without stack-allocated buffers, for example, do not need protection. The compiler applies SSP to functions that look risky. A driver author should not assume SSP will catch any particular bug; SSP catches some stack overflows, not all, and catches them only at function return, not at the moment of the overflow.
+SSP 是启发式的。并非每个函数都有金丝雀：例如，没有栈分配缓冲区的函数不需要保护。编译器基于看起来有风险的函数应用 SSP。驱动程序作者不应假设 SSP 会捕获任何特定的漏洞；SSP 捕获一些栈溢出，不是全部，而且只在函数返回时捕获它们，而不是在溢出发生的时刻。
 
-**kASLR** is orthogonal to SSP. It randomizes the base address of the kernel, loadable modules, and the stack. An attacker who wants to jump to a specific kernel function (say, to bypass a check) must first learn where that function is. kASLR makes this difficult. An information leak that exposes any kernel pointer can undo kASLR for the whole kernel: once you know one function's address, you know the offsets to all the others, and you can compute every other address.
+**kASLR** 与 SSP 是正交的。它随机化内核的基地址、可加载模块和栈。想要跳转到特定内核函数的攻击者（例如，绕过检查）必须首先了解该函数在哪里。kASLR 使这变得困难。泄露任何内核指针的信息泄露可以撤销整个内核的 kASLR：一旦你知道一个函数的地址，你就知道所有其他函数的偏移量，你可以计算每个其他地址。
 
-**W^X enforcement** ensures that memory is either writable or executable, never both at once. Historically, attackers would overflow a buffer, write shellcode into the overflowed region, and jump to it. W^X breaks this by refusing to execute from writable memory. Modern attacks therefore use return-oriented programming (ROP), which chains together small snippets of existing code rather than introducing new code. ROP is still possible under W^X, but it is harder, and it is defeated by kASLR (ROP needs to know where the snippets are).
+**W^X 强制执行** 确保内存要么可写要么可执行，不能同时兼具。历史上，攻击者会溢出缓冲区，将 shellcode 写入溢出区域，然后跳转到它。W^X 通过拒绝从可写内存执行来打破这一点。现代攻击因此使用面向返回的编程 (ROP)，它将现有代码的小片段链接在一起而不是引入新代码。ROP 在 W^X 下仍然可能，但更难，而且它被 kASLR 击败（ROP 需要知道片段在哪里）。
 
-**Guard pages** surround kernel stacks with unmapped pages. A write past the end of the stack hits an unmapped page, causing a page fault that the kernel catches and turns into a panic. This prevents certain stack-smashing attacks from silently corrupting memory adjacent to the stack. The cost is one unusable page per kernel stack, which is cheap.
+**保护页** 在内核栈周围包围未映射的页面。写入超过栈末尾会触及未映射的页面，导致内核捕获并转变为崩溃的页面错误。这防止某些栈粉碎攻击默默地损坏栈相邻的内存。代价是每个内核栈一个不可用的页面，这很便宜。
 
-**Shadow stacks and CFI (control-flow integrity)** are under discussion and partial deployment in modern kernels. They aim to prevent attackers from redirecting execution by verifying that every indirect jump lands at a legitimate target. They are not yet standard in FreeBSD, but the direction of the industry is clear: more compiler-enforced restrictions on what exploit writers can do.
+**影子栈和 CFI（控制流完整性）** 在现代内核中正在讨论和部分部署中。它们旨在通过验证每个间接跳转落在合法目标处来防止攻击者重定向执行。它们尚未成为 FreeBSD 的标准，但行业的方向是明确的：对利用编写者能做的事情施加更多编译器强制执行的限制。
 
-The lesson for driver authors: these protections are real, and they raise the cost of exploitation. But they do not prevent bugs. A buffer overflow is still a bug, even if SSP catches it. An information leak is still a bug, even if kASLR makes it less useful. The compiler protections are a last line of defense; the first line is still your careful code.
+对驱动程序作者的教训：这些保护是真实的，它们提高了利用的成本。但它们不阻止漏洞。缓冲区溢出仍然是漏洞，即使 SSP 捕获了它。信息泄露仍然是漏洞，即使 kASLR 使它不那么有用。编译器保护是最后一道防线；第一道防线仍然是你仔细的代码。
 
-When the first line fails, the protections buy time: time for the bug to be found and fixed before an attacker chains it into a complete exploit. An information leak that, combined with a buffer overflow, would have been trivially exploitable in 1995 now requires both bugs to exist in the same driver and several more mitigations to fall. The effect is that bug reports that once meant "this is a root exploit" now often mean "this is a pre-condition for a root exploit". That is progress. But it is progress bought by the compiler, not by the code.
+当第一道防线失败时，保护争取了时间：在攻击者将漏洞链成完整利用之前找到并修复漏洞的时间。一个信息泄露，加上缓冲区溢出，在 1995 年会轻易可利用的漏洞现在需要两个漏洞存在于同一个驱动程序中，并且还需要更多缓解措施失败。效果是，曾经意味着"这是一个 root 利用"的错误报告现在通常意味着"这是 root 利用的前提条件"。这是进步。但这是编译器带来的进步，不是代码带来的。
 
 ### 第2节总结
 
@@ -627,7 +627,7 @@ int copyout(const void *kaddr, void *udaddr, size_t len);
 
 签名在 `/usr/src/sys/sys/systm.h` 中声明。像大多数内核原语一样，它们名称简短，只做一件事。然而，它们做的那一件事是必不可少的。如果驱动程序通过任何其他方式读取或写入用户内存，驱动程序几乎肯定是错误的。
 
-**Always check the return value.** This is the single most common source of copyin/copyout bugs: a driver calls `copyin` and proceeds as if it succeeded, when in fact it might have returned `EFAULT`. If the copy failed, the destination buffer contains whatever was there before (possibly uninitialised), and operating on it is a recipe for either a crash or an information disclosure. Every call to `copyin` or `copyout` must check the return value and either proceed with success or propagate the error:
+**始终检查返回值。** 这是 `copyin/copyout` 漏洞最常见的来源：驱动程序调用 `copyin` 并假设它成功继续执行，而实际上它可能已经返回了 `EFAULT`。如果复制失败，目标缓冲区包含之前的任何内容（可能未初始化），对其操作会导致崩溃或信息泄露。每次调用 `copyin` 或 `copyout` 都必须检查返回值，要么在成功时继续，要么传播错误：
 
 ```c
 error = copyin(args->data, kbuf, args->len);
@@ -639,11 +639,11 @@ if (error != 0) {
 
 这种模式在 FreeBSD 内核中出现了数百次。学习它并在每个调用点使用它。
 
-**Never reuse a pointer after a failed copy.** If `copyin` returned `EFAULT`, the buffer may have been partially written. Do not try to "rescue" a partial result; do not assume that the first few bytes are valid. Discard the buffer, zero it if the remains may be sensitive, and return the error.
+**复制失败后绝不重用指针。** 如果 `copyin` 返回了 `EFAULT`，缓冲区可能已被部分写入。不要试图"挽救"部分结果；不要假设前几个字节是有效的。丢弃缓冲区，如果残留可能敏感则清零，并返回错误。
 
-**Always validate lengths before calling.** We have seen this in Section 2, but it bears repeating here. The `len` you pass to `copyin` comes from somewhere; if it comes from the caller's structure, it must be bounded before the call. An unbounded `len` in a `copyin` is one of the most dangerous patterns in a driver.
+**调用前始终验证长度。** 我们在第2节已经看到了这一点，但值得在这里重申。你传递给 `copyin` 的 `len` 来自某处；如果它来自调用者的结构，它必须在调用前被限制。`copyin` 中未限制的 `len` 是驱动程序中最危险的模式之一。
 
-**`copyin` and `copyout` can sleep.** These primitives may cause the calling thread to sleep while waiting for a user page to be resident. This means they cannot be called from contexts where sleeping is forbidden: interrupt handlers, spin-mutex critical sections, and the like. If you need to transfer data to or from user space from such a context, defer the work to a different context (typically a taskqueue or a regular process context) and have that context do the copy.
+**`copyin` 和 `copyout` 可能睡眠。** 这些原语可能导致调用线程在等待用户页驻留时睡眠。这意味着它们不能从禁止睡眠的上下文调用：中断处理程序、自旋互斥锁临界区等。如果你需要从这样的上下文向用户空间传输数据或从用户空间获取数据，将工作推迟到不同的上下文（通常是 taskqueue 或常规进程上下文），让该上下文执行复制。
 
 ### 用于字符串的 `copyinstr(9)`
 
@@ -657,13 +657,13 @@ int copyinstr(const void *udaddr, void *kaddr, size_t len, size_t *lencopied);
 
 `copyinstr` 从 `udaddr` 复制字节到 `kaddr`，直到遇到空字节或复制了 `len` 字节，以先到者为准。如果 `lencopied` 不为 NULL，`*lencopied` 设置为复制的字节数（包括终止符，如果找到的话）。返回值成功时为0，出错时为 `EFAULT`，如果在 `len` 字节内未找到终止符则为 `ENAMETOOLONG`。
 
-The key safety rule is: **always pass a bounded `len`**. `copyinstr` without a bound (or with a huge bound) can cause large amounts of kernel memory to be written, and in older kernels could cause the kernel to scan huge amounts of user memory before giving up. In modern FreeBSD the scan itself is bounded by `len`, but you should still pass a tight bound appropriate to the string's expected size. A path name might reasonably be bounded to `MAXPATHLEN` (which is `PATH_MAX`, currently 1024 on FreeBSD). A device name might be bounded to 64. A command name might be bounded to 32. Pick a bound that fits the use and pass it.
+关键的安全规则是：**始终传递有界的 `len`**。没有边界的 `copyinstr`（或使用巨大的边界）可能导致大量内核内存被写入，在较旧的内核中还可能导致内核在放弃前扫描大量用户内存。在现代 FreeBSD 中，扫描本身受 `len` 限制，但你仍应传递适合字符串预期大小的紧凑边界。路径名称可以合理地限制为 `MAXPATHLEN`（即 `PATH_MAX`，在 FreeBSD 上当前为 1024）。设备名称可以限制为 64。命令名称可以限制为 32。选择适合用途的边界并传递它。
 
-A second safety rule is: **always check the return value**, and treat `ENAMETOOLONG` as a distinct condition from `EFAULT`. The former means the user tried to pass a longer string than you were willing to accept, which is plausibly a legitimate mistake. The latter means the user's pointer was invalid, which may or may not be a legitimate mistake. Your driver may want to return a different error to user space depending on which condition occurred.
+第二条安全规则是：**始终检查返回值**，并将 `ENAMETOOLONG` 视为与 `EFAULT` 不同的条件。前者意味着用户试图传递比你愿意接受的更长的字符串，这可能是合法的错误。后者意味着用户的指针无效，这可能是也可能不是合法的错误。你的驱动程序可能希望根据发生的是哪种条件向用户空间返回不同的错误。
 
-A third safety rule is: **check the copied length if you care**. The `lencopied` parameter tells you how many bytes were actually written, including the terminator. If your code depends on knowing the exact length, check it. If your buffer is exactly `len` bytes long and `copyinstr` returned 0, the terminator is at `kbuf[lencopied - 1]`, and the string is `lencopied - 1` bytes long.
+第三条安全规则是：**如果你关心，检查复制的长度**。`lencopied` 参数告诉你实际写入了多少字节，包括终止符。如果你的代码依赖于知道确切长度，检查它。如果你的缓冲区恰好是 `len` 字节长且 `copyinstr` 返回了 0，终止符在 `kbuf[lencopied - 1]`，字符串长度为 `lencopied - 1` 字节。
 
-A safe use of `copyinstr`:
+`copyinstr` 的安全使用：
 
 ```c
 static int
@@ -692,21 +692,21 @@ secdev_ioctl_set_name(struct secdev_softc *sc,
 }
 ```
 
-The function takes a fixed-size stack buffer, calls `copyinstr` with a tight bound, handles the two error cases distinctly, asserts the invariants that `copyinstr` promises (`namelen > 0`, terminator at `name[namelen - 1]`), and copies into the softc under the lock. This is the canonical pattern.
+该函数接受一个固定大小的栈缓冲区，以紧凑边界调用 `copyinstr`，区分处理两种错误情况，断言 `copyinstr` 承诺的不变量（`namelen > 0`，`name[namelen - 1]` 处的终止符），并在锁下复制到 softc 中。这是经典模式。
 
 ### 用于流的 `uiomove(9)`
 
-`read` and `write` entry points do not use `copyin`/`copyout` directly; they use `uiomove(9)`, which is a wrapper that handles the iteration over a `struct uio` descriptor. A `uio` describes an I/O operation with potentially multiple buffers (scatter-gather) and tracks how much has been transferred so far.
+`read` 和 `write` 入口点不直接使用 `copyin`/`copyout`；它们使用 `uiomove(9)`，它是一个处理对 `struct uio` 描述符迭代的封装。`uio` 描述一个可能具有多个缓冲区（分散-聚集）的 I/O 操作，并跟踪到目前为止已传输的数据量。
 
 ```c
 int uiomove(void *cp, int n, struct uio *uio);
 ```
 
-`uiomove` copies up to `n` bytes between the kernel buffer `cp` and whatever is described by `uio`. If `uio->uio_rw == UIO_READ`, the copy is kernel-to-user; if `UIO_WRITE`, user-to-kernel. The function updates `uio->uio_offset`, `uio->uio_resid`, and `uio->uio_iov` to reflect the bytes transferred.
+`uiomove` 在内核缓冲区 `cp` 和 `uio` 描述的任何内容之间最多复制 `n` 字节。如果 `uio->uio_rw == UIO_READ`，复制方向是内核到用户；如果是 `UIO_WRITE`，则是用户到内核。该函数更新 `uio->uio_offset`、`uio->uio_resid` 和 `uio->uio_iov` 以反映已传输的字节数。
 
-Like `copyin`, `uiomove` returns 0 on success and an error code on failure. Like `copyin`, it can sleep. Like `copyin`, the caller must check the return value.
+与 `copyin` 一样，`uiomove` 成功时返回 0，失败时返回错误代码。与 `copyin` 一样，它可能睡眠。与 `copyin` 一样，调用者必须检查返回值。
 
-A typical `read` implementation:
+典型的 `read` 实现：
 
 ```c
 static int
@@ -732,13 +732,13 @@ secdev_read(struct cdev *dev, struct uio *uio, int flag)
 }
 ```
 
-This handles the case where the user reads past the end of the data (returning 0 to indicate EOF), bounds the copy to the size of the kernel buffer, and propagates any error from `uiomove`. It is a safe pattern for short, fixed data; longer data typically uses `sbuf(9)` internally and copies out with `sbuf_finish`/`sbuf_len`/`uiomove` at the end.
+这处理了用户读取超过数据末尾的情况（返回 0 表示 EOF），将复制限制在内核缓冲区的大小内，并传播 `uiomove` 的任何错误。这是短固定数据的安全模式；较长的数据通常内部使用 `sbuf(9)`，最后通过 `sbuf_finish`/`sbuf_len`/`uiomove` 复制出去。
 
 ### 验证每个结构的每个字段
 
 当 `ioctl` 接受结构时，驱动程序必须在信任任何字段之前验证每个字段。一个常见的错误是只验证驱动程序立即使用的字段，而忽略稍后使用的字段。结构在 `ioctl` 调用期间存在，驱动程序最终可能使用它未检查的字段。
 
-Concretely, if your `ioctl` takes this structure:
+具体来说，如果你的 `ioctl` 接受这个结构：
 
 ```c
 struct secdev_config {
@@ -750,7 +750,7 @@ struct secdev_config {
 };
 ```
 
-validate every field at the top of the handler:
+在处理程序顶部验证每个字段：
 
 ```c
 static int
@@ -776,18 +776,18 @@ secdev_ioctl_config(struct secdev_softc *sc, struct secdev_config *cfg)
 
 四个不变量，每个都被检查和强制执行。驱动程序现在知道 `version`、`flags`、`len` 和 `name` 都在预期范围内。它可以在没有进一步验证的情况下使用它们。没有这些检查，函数中后面的每次使用都变成另一个潜在的漏洞来源。
 
-An important subtlety: when a structure includes reserved fields or padding, the driver must decide what to do when those fields are non-zero. The safe choice is usually to require them to be zero:
+一个重要的微妙之处：当结构包含保留字段或填充时，驱动程序必须决定当这些字段非零时该怎么办。安全的选择通常是要求它们为零：
 
 ```c
 if (cfg->reserved1 != 0 || cfg->reserved2 != 0)
     return (EINVAL);
 ```
 
-This preserves the possibility of using those fields in a future version of the protocol without breaking compatibility: if every current caller passes zero, any future non-zero value is necessarily from a caller that knows about the new version. Without the check, the driver cannot later distinguish old callers (who happened to leave garbage in the reserved fields) from new callers (who are using the field for a new purpose).
+这保留了在协议的未来版本中使用这些字段的可能性而不破坏兼容性：如果每个当前调用者都传递零，任何未来的非零值必然来自了解新版本的调用者。没有这个检查，驱动程序以后无法区分旧调用者（碰巧在保留字段中留下垃圾）和新调用者（正在为新的目的使用该字段）。
 
 ### 验证分多部分传入的结构
 
-Some `ioctl`s take a structure that contains a pointer to another block of data. The outer structure is copied in first; the pointer inside it then needs to be followed with a second `copyin`. Every field of both structures must be validated.
+有些 `ioctl` 接受一个包含指向另一个数据块的指针的结构。外部结构首先被复制进来；然后需要通过第二次 `copyin` 来跟踪其中的指针。两个结构的每个字段都必须被验证。
 
 ```c
 struct secdev_ioctl_args {
@@ -827,39 +827,39 @@ secdev_ioctl_something(struct secdev_softc *sc,
 }
 ```
 
-The `uintptr_t` cast is worth commenting on. The user pointer arrives as a `uint64_t` in the structure, to avoid portability issues between 32-bit and 64-bit userlands. The cast to `uintptr_t` and then to `const void *` converts the integer representation back into a pointer. On a 64-bit kernel, this is a no-op; on a 32-bit kernel, the high bits of the `uint64_t` must be validated or dropped. FreeBSD runs on both, and 32-bit userland on a 64-bit kernel (via `COMPAT_FREEBSD32`) is a real case. Be explicit about the cast, and document the assumption.
+`uintptr_t` 转换值得解释。用户指针在结构中作为 `uint64_t` 到达，以避免 32 位和 64 位用户态之间的可移植性问题。转换为 `uintptr_t` 然后转换为 `const void *` 将整数表示转换回指针。在 64 位内核上，这是一个空操作；在 32 位内核上，`uint64_t` 的高位必须被验证或丢弃。FreeBSD 在两者上运行，64 位内核上的 32 位用户态（通过 `COMPAT_FREEBSD32`）是一个真实的情况。显式处理转换，并记录假设。
 
 ### "冻结"问题
 
-Some drivers have fields in user-space structures that are pointers, and the driver's convention is that the user-space memory stays valid until a particular operation completes. This pattern is common in drivers that do DMA directly from user memory.
+有些驱动程序在用户空间结构中有指针字段，驱动程序的约定是用户空间内存在特定操作完成之前保持有效。这种模式在做直接从用户内存进行 DMA 的驱动程序中很常见。
 
-The pattern is tricky because the user can, in principle, change the memory between the driver's validation and the driver's use. Pointer-based DMA is also the wrong idea in modern drivers; safer alternatives include:
+这种模式很棘手，因为用户原则上可以在驱动程序验证和驱动程序使用之间更改内存。基于指针的 DMA 在现代驱动程序中也是错误的做法；更安全的替代方案包括：
 
-- `mmap`, in which the driver maps kernel memory into user space for direct access, with the kernel retaining ownership of the memory and its validity.
-- A copy-through-kernel approach, in which the driver always copies in, validates, and operates on the kernel copy.
-- The `busdma(9)` framework, which handles user-space buffers correctly when they need to be DMA'd to hardware.
+- `mmap`，驱动程序将内核内存映射到用户空间以供直接访问，内核保留内存的所有权及其有效性。
+- 通过内核复制的方法，驱动程序始终复制进来、验证并操作内核副本。
+- `busdma(9)` 框架，当需要将用户空间缓冲区 DMA 到硬件时正确处理它们。
 
-If you find yourself writing code that keeps a user-space pointer around and uses it at a later moment, stop and think. It is almost always the wrong design. Section 5 returns to this issue as a TOCTOU problem.
+如果你发现自己编写保持用户空间指针并在稍后使用它的代码，停下来想一想。这几乎总是错误的设计。第5节将此问题作为 TOCTOU 问题再次讨论。
 
 ### 内核地址不会泄露到用户指针中
 
-A recurring class of bug is when a driver, trying to communicate a pointer to user space, copies out a kernel address. The user receives a pointer to kernel memory, which is a spectacular information leak (it reveals the kernel's layout, defeating KASLR) and, if the user can somehow convince the kernel to treat the copied pointer as a user pointer, can become an arbitrary kernel-memory access.
+一类反复出现的漏洞是驱动程序试图向用户空间传递指针时，复制出了内核地址。用户收到一个指向内核内存的指针，这是一个严重的信息泄露（它暴露了内核的布局，使 KASLR 失效），如果用户能以某种方式说服内核将复制的指针视为用户指针，就可能变成任意的内核内存访问。
 
-The mistake is usually inadvertent. A common case is a structure that is shared between kernel and user space, and one of its fields is a pointer. If the driver fills in the field with a kernel pointer and then copies the structure to user space, the leak has happened.
+这个错误通常是无意的。一种常见情况是一个在内核和用户空间之间共享的结构，其中一个字段是指针。如果驱动程序用内核指针填充该字段然后将结构复制到用户空间，泄露就发生了。
 
-The fix is structural: do not share structures between kernel and user that contain pointer fields intended to be used in either space. If a pointer field exists, make it `uint64_t` and treat it as an opaque integer. When the kernel fills in a user-visible pointer-like field, it must pick a value meaningful to user space, not reveal its own internal pointer.
+修复是结构性的：不要在内核和用户之间共享包含打算在任一空间使用的指针字段的结构。如果存在指针字段，将其设为 `uint64_t` 并将其视为不透明整数。当内核填充用户可见的类似指针的字段时，它必须选择对用户空间有意义的值，而不是暴露自己的内部指针。
 
-A second class of leak is when a driver copies out a structure that contains uninitialised fields, and one of those fields happens to contain a kernel pointer (for example, because the allocator returned memory that was previously used for something that held a kernel pointer). Section 7 covers this in depth.
+第二类泄露是当驱动程序复制出包含未初始化字段的结构，其中一个字段碰巧包含内核指针时（例如，因为分配器返回了之前用于保存内核指针的内存）。第7节深入讨论这一点。
 
 ### `compat32` 和结构大小
 
-FreeBSD supports running 32-bit user-space programs on a 64-bit kernel through the `COMPAT_FREEBSD32` machinery. For a driver, this means that the structure the caller passes may be a 32-bit structure, with different layout and size from the 64-bit version. If the driver expects the 64-bit structure and the caller passed the 32-bit one, the fields the driver reads will be at the wrong offsets, and the driver will read garbage.
+FreeBSD 通过 `COMPAT_FREEBSD32` 机制支持在 64 位内核上运行 32 位用户空间程序。对于驱动程序来说，这意味着调用者传递的结构可能是 32 位结构，与 64 位版本有不同的布局和大小。如果驱动程序期望 64 位结构而调用者传递了 32 位结构，驱动程序读取的字段将在错误的偏移量处，驱动程序将读取垃圾。
 
-Handling this is outside the scope of a typical driver; the framework helps by offering `ioctl32` entry points and automatic translation for many common cases. If your driver is used from 32-bit user-space and uses custom structures, consult the `freebsd32(9)` manual page and the `sys/compat/freebsd32` subsystem for guidance. Be aware of the issue, and test your driver from a 32-bit userland in the lab environment.
+处理这超出了典型驱动程序的范围；框架通过为许多常见情况提供 `ioctl32` 入口点和自动转换来帮助。如果你的驱动程序从 32 位用户空间使用并使用自定义结构，请查阅 `freebsd32(9)` 手册页和 `sys/compat/freebsd32` 子系统以获取指导。了解这个问题，并在实验室环境中从 32 位用户态测试你的驱动程序。
 
 ### 更大的示例：完整的 `ioctl` 处理程序
 
-Combining the patterns in this section, here is what a complete, safe `ioctl` handler looks like for a hypothetical operation:
+结合本节的模式，这里是一个完整的、安全的 `ioctl` 处理程序对于假设操作的样子：
 
 ```c
 static int
@@ -919,32 +919,32 @@ secdev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag,
 }
 ```
 
-Each numbered step is a distinct concern. Each step handles errors locally and propagates them. The allocation is bounded by the validated length; the copy is bounded by the same length; the permission check is explicit; the cleanup is symmetric with the allocation; the final return code communicates success or the specific failure. This is what a safe ioctl handler looks like. It is not short, but every line is there for a reason.
+每个编号的步骤是一个不同的关注点。每个步骤在本地处理错误并传播它们。分配受已验证长度的限制；复制受相同长度的限制；权限检查是显式的；清理与分配对称；最终返回代码传达成功或特定的失败。这就是一个安全的 ioctl 处理程序的样子。它不短，但每一行都有其存在的理由。
 
 ### 用户输入处理中的常见错误
 
-A short checklist of the patterns to watch for, as a reference you can return to while reviewing your own code:
+一个简短的模式检查清单，作为你在审查自己代码时可以返回的参考：
 
-- `copyin` with a length from the user, without a prior bound check.
-- `copyinstr` without an explicit bound.
-- Return value of `copyin`, `copyout`, or `copyinstr` ignored.
-- Structure fields used before they are validated.
-- Pointer field cast from `uint64_t` to `void *` without thinking about 32-bit-userland compatibility.
-- String field assumed null-terminated without a `memchr` check.
-- Length used in arithmetic before being bounded.
-- User-space pointer kept around and used later (TOCTOU territory).
-- Kernel data structure (with pointer fields) directly copied out.
-- Uninitialised fields copied out to user space.
+- `copyin` 使用来自用户的长度，没有事先的边界检查。
+- `copyinstr` 没有显式边界。
+- `copyin`、`copyout` 或 `copyinstr` 的返回值被忽略。
+- 结构字段在验证之前就被使用。
+- 指针字段从 `uint64_t` 转换为 `void *` 而没有考虑 32 位用户态兼容性。
+- 字符串字段被假定为空终止而没有 `memchr` 检查。
+- 长度在有界之前被用于算术。
+- 用户空间指针被保持并在稍后使用（TOCTOU 领域）。
+- 内核数据结构（带指针字段）被直接复制出去。
+- 未初始化的字段被复制到用户空间。
 
-If a code review turns up any of these, pause the review, fix the pattern, and then continue.
+如果代码审查发现其中任何一个，暂停审查，修复模式，然后继续。
 
 ### 详细演示：从零开始设计安全的 Ioctl
 
-The accumulated techniques of this section can feel like a long checklist. To show how they come together in practice, let us design a single ioctl carefully, from the user-space interface down to the kernel implementation.
+本节积累的技术可能感觉像一份长长的检查清单。为了展示它们在实践中如何组合，让我们仔细地从头设计一个 ioctl，从用户空间接口到内核实现。
 
-**The problem.** Our driver needs an ioctl that lets a user set a configuration parameter consisting of a name string (bounded length), a mode (enum), and an opaque data blob (variable length). It should also return the driver's interpretation of the configuration (for example, the canonicalized form of the name).
+**问题。** 我们的驱动程序需要一个 ioctl，让用户设置一个配置参数，由名称字符串（有界长度）、模式（枚举）和不透明数据块（可变长度）组成。它还应返回驱动程序对配置的解释（例如，名称的规范化形式）。
 
-**Defining the interface.** The user-visible structure, defined in a header that will ship with the driver, looks like:
+**定义接口。** 用户可见的结构定义在随驱动程序发布的头文件中，如下所示：
 
 ```c
 #define SECDEV_NAME_MAX   64
@@ -966,17 +966,17 @@ struct secdev_config {
 };
 ```
 
-Notes on the design:
+关于设计的说明：
 
-The name is a fixed-size inline buffer, not a pointer. This is deliberate: it avoids a separate `copyin` for the name and makes the interface simpler. The trade-off is that the buffer is always copied even if the name is short, but for 64 bytes that is negligible.
+名称是固定大小的内联缓冲区，不是指针。这是深思熟虑的：它避免了单独为名称进行 `copyin` 并使接口更简单。权衡是即使名称很短也总是复制整个缓冲区，但对于 64 字节来说可以忽略不计。
 
-The mode is `uint32_t` rather than `enum secdev_mode` directly, because struct members that cross the user/kernel boundary should have explicit widths. The kernel validates that the value is one of the known enum values.
+模式是 `uint32_t` 而不是直接使用 `enum secdev_mode`，因为跨越用户/内核边界的结构成员应该有显式宽度。内核验证该值是已知枚举值之一。
 
-The blob uses a separate pointer (`sc_blob`) and a length (`sc_bloblen`). The user sets both, and the kernel uses a second `copyin` to pull the data. The length is bounded by `SECDEV_BLOB_MAX`, a value we (the driver authors) choose based on what the driver is actually going to do with the data.
+数据块使用单独的指针（`sc_blob`）和长度（`sc_bloblen`）。用户设置两者，内核使用第二次 `copyin` 来拉取数据。长度受 `SECDEV_BLOB_MAX` 限制，这是我们（驱动程序作者）基于驱动程序实际要对数据做什么而选择的值。
 
-The canonical output is another fixed inline buffer. The user-space caller may or may not care about this output, but the kernel always fills it.
+规范化输出是另一个固定的内联缓冲区。用户空间调用者可能关心也可能不关心这个输出，但内核总是填充它。
 
-**The kernel handler.** Let us walk through the implementation step by step. The ioctl framework will copy the structure into the kernel for us, so by the time our handler runs, `cfg` points to kernel memory. The `sc_blob` field, however, is still a user-space pointer that we must handle ourselves.
+**内核处理程序。** 让我们逐步了解实现。ioctl 框架会为我们复制结构到内核，所以当我们的处理程序运行时，`cfg` 指向内核内存。然而，`sc_blob` 字段仍然是用户空间指针，我们必须自己处理。
 
 ```c
 static int
@@ -1057,31 +1057,31 @@ out:
 }
 ```
 
-Now review this against the patterns we have discussed.
+现在对照我们讨论过的模式审查这段代码。
 
-Privilege check. `priv_check(PRIV_DRIVER)` is the first line of business. No unprivileged caller ever reaches the rest.
+权限检查。`priv_check(PRIV_DRIVER)` 是第一件事。没有非特权调用者能到达其余部分。
 
-Jail check. `jailed()` before any host-affecting work.
+Jail 检查。在做任何影响主机的工作之前检查 `jailed()`。
 
-Name validation. The name is read from the already-copied-in `cfg`, forced NUL-terminated (defensive, in case the user did not terminate it), and whitelisted through `secdev_is_valid_name` (which presumably refuses non-alphanumeric characters).
+名称验证。名称从已经复制进来的 `cfg` 中读取，强制 NUL 终止（防御性的，以防用户没有终止它），并通过 `secdev_is_valid_name` 进行白名单检查（它大概拒绝非字母数字字符）。
 
-Mode validation. An explicit whitelist of known mode values. An unknown value returns `EINVAL` immediately.
+模式验证。已知模式值的显式白名单。未知值立即返回 `EINVAL`。
 
-Length validation. The blob length is checked against a defined maximum before being used for allocation. Without this check, a user could request a multi-gigabyte allocation.
+长度验证。数据块长度在用于分配之前对照定义的最大值进行检查。没有这个检查，用户可能请求多 GB 的分配。
 
-Allocation with `M_ZERO`. The blob buffer is zeroed so that even if `copyin` fails partway, the contents are deterministic.
+使用 `M_ZERO` 分配。数据块缓冲区被清零，即使 `copyin` 中途失败，内容也是确定性的。
 
-Error path cleanup. The `out:` label frees `kblob` if we did not transfer ownership. The `kblob = NULL` after transfer prevents a double-free. Every path through the function reaches `out:` with `kblob` in a consistent state.
+错误路径清理。`out:` 标签在我们未转移所有权时释放 `kblob`。转移后的 `kblob = NULL` 防止双重释放。通过函数的每条路径都以 `kblob` 处于一致状态到达 `out:`。
 
-Explicit zeroing before free. The old blob (if any) is zeroed before being replaced, on the assumption that it may have contained sensitive data. The new blob on error path is also zeroed for the same reason.
+释放前显式清零。旧的数据块（如果有的话）在替换前被清零，假设它可能包含敏感数据。错误路径上的新数据块也因同样的原因被清零。
 
-Locking. The softc is updated under `sc_mtx`. The canonical form is computed under the lock so the name and canonical match.
+加锁。softc 在 `sc_mtx` 下更新。规范化形式在锁下计算，以便名称和规范化匹配。
 
-Output zeroing. `cfg->sc_canonical` is zeroed before being filled, so padding and any fields the canonicalizer did not set are guaranteed zero.
+输出清零。`cfg->sc_canonical` 在填充前被清零，因此填充和规范化器未设置的任何字段保证为零。
 
-This function has about forty lines of actual code and roughly a dozen security-relevant decisions. Each decision individually is small; the compound effect is a function that is defensible against nearly every pattern discussed in this chapter. This is what secure driver code looks like in practice: not flashy, not tricky, just careful.
+这个函数有大约四十行实际代码和大约一打安全相关的决策。每个决策单独来看都很小；复合效果是一个能够防御本章讨论的几乎所有模式的函数。这就是安全的驱动程序代码在实践中的样子：不华丽，不取巧，只是仔细。
 
-The key insight is that the careful code is the easiest to review, the easiest to maintain, and the one that tends to keep working as the driver evolves. Clever tricks, by contrast, are where bugs hide.
+关键的洞察是，仔细的代码是最容易审查的，最容易维护的，并且在驱动程序演进过程中倾向于持续工作的代码。相比之下，巧妙的技巧正是漏洞隐藏的地方。
 
 ### 第3节总结
 
@@ -1112,27 +1112,27 @@ MALLOC_DECLARE(M_SECDEV);
 MALLOC_DEFINE(M_SECDEV, "secdev", "Secure example driver");
 ```
 
-The first argument, `M_SECDEV`, is the identifier; the second, `"secdev"`, is the short name that appears in `vmstat -m`; the third is a longer description. Use a naming scheme that makes it easy to find the driver's allocations in system output, especially when you are diagnosing a leak.
+第一个参数 `M_SECDEV` 是标识符；第二个 `"secdev"` 是出现在 `vmstat -m` 中的短名称；第三个是更长的描述。使用使命名方案易于在系统输出中找到驱动程序分配的方案，特别是在你诊断泄漏时。
 
 `flags` 参数控制分配的行为。三个标志是必不可少的：
 
-- `M_WAITOK`: the allocator may sleep to satisfy the allocation. The call cannot fail; it either returns a valid pointer or the kernel panics (which it does only under very unusual circumstances).
-- `M_NOWAIT`: the allocator must not sleep. If memory is not immediately available, the call returns `NULL`. The caller must check and handle the `NULL` case.
-- `M_ZERO`: the returned memory is zeroed before being returned. Use this whenever the caller will fill in some but not all of the memory, to avoid leaking garbage.
+- `M_WAITOK`：分配器可能睡眠以满足分配。调用不会失败；它要么返回有效指针，要么内核崩溃（这仅在非常不寻常的情况下发生）。
+- `M_NOWAIT`：分配器不得睡眠。如果内存不是立即可用的，调用返回 `NULL`。调用者必须检查并处理 `NULL` 情况。
+- `M_ZERO`：返回的内存返回前被清零。当调用者将填充部分但不是全部内存时使用此标志，以避免泄露垃圾。
 
-There are others (`M_USE_RESERVE`, `M_NODUMP`, `M_NOWAIT`, `M_EXEC`), but these three are the ones a driver uses daily.
+还有其他标志（`M_USE_RESERVE`、`M_NODUMP`、`M_NOWAIT`、`M_EXEC`），但这三个是驱动程序日常使用的。
 
 ### 何时使用 `M_WAITOK`，何时使用 `M_NOWAIT`
 
-The choice between `M_WAITOK` and `M_NOWAIT` is dictated by context, not preference.
+在 `M_WAITOK` 和 `M_NOWAIT` 之间的选择由上下文决定，不是偏好。
 
-Use `M_WAITOK` when the driver is in a context that can sleep. This is the case in most driver entry points: `open`, `close`, `read`, `write`, `ioctl`, `attach`, `detach`. In these contexts, sleeping is allowed, and the allocator's ability to sleep until memory is available is a significant simplification.
+当驱动程序处于可以睡眠的上下文时使用 `M_WAITOK`。在大多数驱动程序入口点中是这种情况：`open`、`close`、`read`、`write`、`ioctl`、`attach`、`detach`。在这些上下文中，睡眠是允许的，分配器能够睡眠直到内存可用是一个显著的简化。
 
-Use `M_NOWAIT` when the driver is in a context that cannot sleep. This is the case in interrupt handlers, inside spin-mutex critical sections, and inside certain callback paths that the kernel specifies as non-sleeping. In these contexts, `M_WAITOK` would trigger a `WITNESS` assertion and a panic. Even if `WITNESS` is not enabled, sleeping in a non-sleeping context can deadlock the system.
+当驱动程序处于不能睡眠的上下文时使用 `M_NOWAIT`。在中断处理程序、自旋互斥锁临界区内以及内核指定为不可睡眠的某些回调路径中是这种情况。在这些上下文中，`M_WAITOK` 会触发 `WITNESS` 断言和崩溃。即使没有启用 `WITNESS`，在不可睡眠的上下文中睡眠也可能死锁系统。
 
-The rule of thumb: if you can use `M_WAITOK`, use it. It removes a whole class of error handling (the NULL check), and it makes the driver's behaviour more predictable under memory pressure. Only fall back to `M_NOWAIT` when the context forces it.
+经验法则：如果你能使用 `M_WAITOK`，就使用它。它消除了一整类错误处理（NULL 检查），并使驱动程序在内存压力下的行为更可预测。只有当上下文强制时才回退到 `M_NOWAIT`。
 
-With `M_NOWAIT`, you must check the return value:
+使用 `M_NOWAIT` 时，你必须检查返回值：
 
 ```c
 buf = malloc(size, M_SECDEV, M_NOWAIT);
@@ -1140,13 +1140,13 @@ if (buf == NULL)
     return (ENOMEM);
 ```
 
-Failure to check is a null-pointer panic waiting to happen. The compiler will not warn you about it.
+不检查返回值就是等待发生的空指针崩溃。编译器不会对此发出警告。
 
 ### `M_ZERO` 是你的朋友
 
-One of the subtlest classes of driver bug is the one where the driver allocates memory, fills in some fields, and then uses or exposes the rest. The "rest" is whatever the allocator happened to return, which in FreeBSD is whatever the allocator's free list last had there. If that memory held another subsystem's data before being freed, a driver that fails to clear it may accidentally expose that data (an information leak) or may behave incorrectly because a field it did not set has a non-zero value.
+最微妙的驱动程序漏洞类别之一是驱动程序分配内存、填充一些字段、然后使用或暴露其余部分的那些。"其余部分"是分配器碰巧返回的任何内容，在 FreeBSD 中是分配器空闲列表上次放在那里的任何内容。如果该内存在被释放前保存了另一个子系统的数据，未清零它的驱动程序可能意外暴露该数据（信息泄露），或者可能因为未设置的字段具有非零值而行为不正确。
 
-`M_ZERO` prevents both problems:
+`M_ZERO` 防止这两个问题：
 
 ```c
 struct secdev_state *st;
@@ -1154,15 +1154,15 @@ struct secdev_state *st;
 st = malloc(sizeof(*st), M_SECDEV, M_WAITOK | M_ZERO);
 ```
 
-After this call, every byte of `*st` is zero. The driver can then fill in specific fields and trust that everything else is either zero or set explicitly. This is so important for safety that many FreeBSD driver authors treat `M_ZERO` as the default, adding it unless there is a specific reason not to.
+此调用之后，`*st` 的每个字节都是零。驱动程序然后可以填充特定字段并信任其他所有内容要么为零要么被显式设置。这对安全性如此重要，以至于许多 FreeBSD 驱动程序作者将 `M_ZERO` 视为默认选项，除非有特定原因否则都会添加它。
 
-The exception is large allocations where you are certain you will overwrite every byte before use (for example, a buffer that is immediately filled by `copyin`). In that case, `M_ZERO` is a small waste, and you can omit it. In all other cases, prefer `M_ZERO` and accept the small cost.
+例外是你确定在使用前会覆盖每个字节的大型分配（例如，一个立即被 `copyin` 填充的缓冲区）。在这种情况下，`M_ZERO` 是小的浪费，你可以省略它。在所有其他情况下，优先使用 `M_ZERO` 并接受小的成本。
 
-A particularly important case: **any structure that will be copied to user space must either have been `M_ZERO`'d at allocation time or have had every byte explicitly set before the copy**. Otherwise the structure may include kernel data that was there before. Section 7 returns to this.
+一个特别重要的情况：**任何将被复制到用户空间的结构必须在分配时被 `M_ZERO` 或在复制前显式设置了每个字节**。否则结构可能包含之前在那里的内核数据。第7节将回到这一点。
 
 ### 用于高频分配的 `uma_zone`
 
-For allocations that happen many times per second with a fixed size, FreeBSD offers the UMA zone allocator:
+对于每秒发生多次固定大小分配的情况，FreeBSD 提供 UMA 区域分配器：
 
 ```c
 uma_zone_t uma_zcreate(const char *name, size_t size, ...);
@@ -1170,17 +1170,17 @@ void *uma_zalloc(uma_zone_t zone, int flags);
 void uma_zfree(uma_zone_t zone, void *item);
 ```
 
-UMA zones are significantly faster than `malloc` for repeated small allocations, because they maintain per-CPU caches and avoid the global allocator lock for most operations. Drivers that handle network packets, I/O requests, or other high-frequency events typically use UMA zones instead of `malloc`.
+UMA 区域对于重复的小分配明显比 `malloc` 更快，因为它们维护每 CPU 缓存并在大多数操作中避免全局分配器锁。处理网络数据包、I/O 请求或其他高频事件的驱动程序通常使用 UMA 区域而不是 `malloc`。
 
-The security properties of UMA zones are similar to those of `malloc`. You still pass `M_WAITOK` or `M_NOWAIT`. You still may pass `M_ZERO` (or you may use `uma_zcreate_arg`'s `uminit`/`ctor`/`dtor` arguments to manage initial state). You still must check NULL on `M_NOWAIT`.
+UMA 区域的安全属性与 `malloc` 类似。你仍然传递 `M_WAITOK` 或 `M_NOWAIT`。你仍然可以传递 `M_ZERO`（或者你可以使用 `uma_zcreate_arg` 的 `uminit`/`ctor`/`dtor` 参数来管理初始状态）。你仍然必须在 `M_NOWAIT` 上检查 NULL。
 
-UMA has one additional security consideration worth knowing: **items returned to a zone are not zeroed by default**. An item freed with `uma_zfree` may retain its previous contents and be handed out to a subsequent `uma_zalloc` with that same content. If the item held sensitive data, the driver must zero it before freeing, or must pass `M_ZERO` on every allocation, or must use the `uminit` constructor machinery to zero on allocation. The safest default is to use `explicit_bzero` on the item before calling `uma_zfree`.
+UMA 有一个值得了解的额外安全考虑：**返回到区域的对象默认不被清零**。用 `uma_zfree` 释放的对象可能保留其之前的内容，并在随后的 `uma_zalloc` 中以该内容被分配出去。如果对象保存了敏感数据，驱动程序必须在释放前清零，或者每次分配时传递 `M_ZERO`，或者使用 `uminit` 构造器机制在分配时清零。最安全的默认做法是在调用 `uma_zfree` 前对对象使用 `explicit_bzero`。
 
 ### 释放后使用：它是什么以及为什么重要
 
-A use-after-free bug occurs when a driver frees a pointer and then uses it. The allocator has, by now, almost certainly handed that memory to some other part of the kernel. Writes to the freed pointer corrupt that other part of the kernel; reads from it return whatever is now stored there.
+释放后使用漏洞发生在驱动程序释放指针然后使用它时。分配器到现在几乎肯定已经将该内存交给了内核的其他部分。对已释放指针的写入损坏了内核那个其他部分正在做的事情；从中读取返回的是现在存储在那里的任何内容。
 
-The classic pattern:
+经典模式：
 
 ```c
 /* UNSAFE */
@@ -1195,80 +1195,80 @@ secdev_cleanup(struct secdev_softc *sc)
 }
 ```
 
-The fix has two parts. First, set the pointer to NULL immediately after freeing it, so that any subsequent use is a null-pointer dereference (an immediate, diagnosable crash) rather than a dangling-pointer access (silent corruption):
+修复有两个部分。首先，释放后立即将指针设置为 NULL，这样任何后续使用都是空指针解引用（立即的、可诊断的崩溃）而不是悬空指针访问（静默损坏）：
 
 ```c
 free(sc->sc_buf, M_SECDEV);
 sc->sc_buf = NULL;
 ```
 
-Second, audit the code paths that might still hold references to the freed memory. The NULL-assignment prevents crashes at `sc->sc_buf` accesses, but a local variable or a caller's parameter that still holds the old pointer is not protected. The discipline is to free memory only when you are sure no one else holds a pointer to it. Reference counts (`refcount(9)`) are the FreeBSD primitive for this.
+其次，审计可能仍然持有对已释放内存引用的代码路径。NULL 赋值防止了 `sc->sc_buf` 访问处的崩溃，但仍然持有旧指针的局部变量或调用者的参数不受保护。纪律是只在确定没有其他人持有指向它的指针时才释放内存。引用计数（`refcount(9)`）是 FreeBSD 用于此目的的原语。
 
-A variant of the bug is the **use-after-detach** pattern, in which a driver frees its softc during `detach` but an interrupt handler or a callback still runs and accesses the freed softc. The fix is to drain all asynchronous activity before freeing in `detach`: cancel outstanding callouts with `callout_drain`, drain taskqueues with `taskqueue_drain`, teardown interrupt handlers with `bus_teardown_intr`, and so on. Once all async paths are quiesced, the free is safe.
+该漏洞的一个变体是**释放后使用-detach**模式，其中驱动程序在 `detach` 期间释放其 softc 但中断处理程序或回调仍然运行并访问已释放的 softc。修复方法是在 `detach` 中释放之前排空所有异步活动：用 `callout_drain` 取消未完成的 callout，用 `taskqueue_drain` 排空 taskqueue，用 `bus_teardown_intr` 拆除中断处理程序等。一旦所有异步路径静止，释放就是安全的。
 
 ### 双重释放：它是什么以及为什么重要
 
-A double-free occurs when a driver calls `free` twice on the same pointer. The first `free` hands the memory back to the allocator. The second `free` corrupts the allocator's internal bookkeeping, because it tries to insert the same memory into the free list twice.
+双重释放在驱动程序对同一指针调用两次 `free` 时发生。第一次 `free` 将内存交还给分配器。第二次 `free` 损坏分配器的内部簿记，因为它试图将同一内存两次插入空闲列表。
 
-FreeBSD's allocator detects many double-frees and panics immediately (especially with `INVARIANTS` enabled). But some double-frees slip past the detection, and the consequences are subtle: a later allocation may return memory that is claimed to be available but is actually still in use somewhere.
+FreeBSD 的分配器检测到许多双重释放并立即崩溃（特别是在启用 `INVARIANTS` 时）。但一些双重释放逃脱了检测，后果是微妙的：后续分配可能返回声称可用但实际上仍在某处使用的内存。
 
-The prevention is the same NULL-assignment pattern:
+预防是相同的 NULL 赋值模式：
 
 ```c
 free(sc->sc_buf, M_SECDEV);
 sc->sc_buf = NULL;
 ```
 
-`free(NULL, ...)` is defined to be a no-op in FreeBSD (as in most allocators), so a second call with `sc->sc_buf == NULL` does nothing. The NULL-assignment turns double-free into a safe no-op.
+`free(NULL, ...)` 在 FreeBSD 中被定义为空操作（与大多数分配器一样），所以当 `sc->sc_buf == NULL` 时的第二次调用什么也不做。NULL 赋值将双重释放变成了安全的空操作。
 
-A related pattern is the **error-path double-free**, in which a function's cleanup logic frees a pointer, and then an outer function also frees the same pointer. The defence is to decide, explicitly, which function owns each allocation, and to have ownership transferred at clear moments. "Who frees this?" is a question that should have a clear answer at every line of the code.
+一个相关的模式是**错误路径双重释放**，即函数的清理逻辑释放了一个指针，然后外部函数也释放了同一个指针。防御是显式地决定哪个函数拥有每个分配，并在明确的时刻转移所有权。"谁释放这个？"这个问题的答案应该在代码的每一行都有明确的回答。
 
 ### 内存泄漏是安全问题
 
-A memory leak is a piece of memory that is allocated and never freed. In a long-running driver, leaks accumulate. Eventually the kernel runs out of memory, either for the driver's subsystem or for the system as a whole, and bad things happen.
+内存泄漏是分配了但从未释放的内存。在长期运行的驱动程序中，泄漏会累积。最终内核耗尽内存，要么是驱动程序子系统的内存，要么是整个系统的内存，然后糟糕的事情就会发生。
 
-Why is a leak a security problem? Two reasons. First, a leak is a denial-of-service vector: an attacker who can trigger an allocation without a corresponding free can exhaust memory. If the attacker is unprivileged but the driver's `ioctl` allocates memory on each call, the attacker can loop on `ioctl` until the kernel OOM-kills something important. Second, a leak often hides other bugs: the leak's accumulation pressure changes the behaviour of subsequent allocations (more frequent `M_NOWAIT` failures, more unpredictable page cache), which can make racy or allocation-dependent bugs surface in production.
+为什么泄漏是安全问题？两个原因。第一，泄漏是拒绝服务向量：可以触发分配而不相应释放的攻击者可以耗尽内存。如果攻击者是非特权的但驱动程序的 `ioctl` 在每次调用时分配内存，攻击者可以循环调用 `ioctl` 直到内核 OOM-kill 重要进程。第二，泄漏经常隐藏其他漏洞：泄漏的累积压力改变了后续分配的行为（更频繁的 `M_NOWAIT` 失败，更不可预测的页缓存），这可以使竞态或依赖分配的漏洞在生产环境中浮出水面。
 
-The prevention is discipline in allocation ownership: for every `malloc`, there must be exactly one `free`, reachable on every code path. The FreeBSD `vmstat -m` tool makes leak tracking easier in practice: `vmstat -m | grep secdev` shows, per type, how many allocations are outstanding. A driver with a leak will show a steadily rising number under load; a driver without will show a stable number.
+预防是分配所有权的纪律：对于每个 `malloc`，必须有恰好一个 `free`，在每条代码路径上可达。FreeBSD 的 `vmstat -m` 工具使实际中的泄漏跟踪更容易：`vmstat -m | grep secdev` 按类型显示有多少分配未完成。有泄漏的驱动程序在负载下会显示持续上升的数字；没有泄漏的会显示稳定的数字。
 
-For new drivers, it is worth stress-testing the driver in the lab for leaks: open and close the device a million times in a loop, run the full `ioctl` matrix repeatedly, watch `vmstat -m` for the driver's type, and look for growth. Any sustained growth is a leak. Leaks found in the lab are a thousand times cheaper to fix than leaks found in production.
+对于新驱动程序，值得在实验室中对驱动程序进行压力测试以查找泄漏：在一百万次循环中打开和关闭设备，重复运行完整的 `ioctl` 矩阵，观察 `vmstat -m` 中驱动程序类型的增长。任何持续增长都是泄漏。在实验室中发现的泄漏比在生产环境中发现的泄漏修复成本低一千倍。
 
 ### 用于敏感数据的 `explicit_bzero` 和 `zfree`
 
-Some data should not be allowed to linger in memory after the driver is done with it. Cryptographic keys, user passwords, device secrets, anything whose exposure in a memory snapshot would be harmful, must be erased before the memory is freed.
+有些数据不应该在驱动程序使用完毕后继续留在内存中。加密密钥、用户密码、设备秘密、任何在内存快照中暴露会有害的东西，都必须在内存释放前被擦除。
 
-The naive approach is to use `bzero` or `memset(buf, 0, len)` before the free. This works, but it has a subtle flaw: the optimiser may remove the `bzero` if it can prove that the memory is not read after. The optimiser's logic is correct as far as language semantics go, but it defeats the security intent.
+天真的方法是使用 `bzero` 或 `memset(buf, 0, len)` 然后释放。这可行，但有一个微妙的缺陷：如果优化器能证明内存在之后没有被读取，它可能移除 `bzero`。优化器的逻辑就语言语义而言是正确的，但它违背了安全意图。
 
-The correct primitive is `explicit_bzero(9)`:
+正确的原语是 `explicit_bzero(9)`：
 
 ```c
 void explicit_bzero(void *buf, size_t len);
 ```
 
-`explicit_bzero` is declared in `/usr/src/sys/sys/systm.h`. It performs the zeroing and is guaranteed by the compiler not to be optimised away, even if the memory is not read after. Use it for any buffer that holds sensitive data:
+`explicit_bzero` 在 `/usr/src/sys/sys/systm.h` 中声明。它执行清零并由编译器保证不会被优化掉，即使内存之后没有被读取。将它用于保存敏感数据的任何缓冲区：
 
 ```c
 explicit_bzero(key_buf, sizeof(key_buf));
 free(key_buf, M_SECDEV);
 ```
 
-FreeBSD also provides `zfree(9)`, which zeros the memory before freeing:
+FreeBSD 还提供 `zfree(9)`，它在释放前清零内存：
 
 ```c
 void zfree(void *addr, struct malloc_type *type);
 ```
 
-`zfree` is convenient: it combines the zero and the free into one call. It first zeros the memory using `explicit_bzero`, then frees it. Use `zfree` when you are about to free a buffer that held sensitive data. Use `explicit_bzero` followed by `free` if you need to zero the buffer without freeing it, or if you are working with memory from a source other than `malloc`.
+`zfree` 很方便：它将清零和释放合并到一个调用中。它首先使用 `explicit_bzero` 清零内存，然后释放它。当你即将释放保存了敏感数据的缓冲区时使用 `zfree`。如果你需要在不释放的情况下清零缓冲区，或者你正在使用来自 `malloc` 以外来源的内存时，使用 `explicit_bzero` 后跟 `free`。
 
-A common question: what is "sensitive data"? The conservative answer is that any data that came from user space should be treated as sensitive, because you cannot know what it represents to the user. A more pragmatic answer is that data that is obviously a secret (a key, a password hash, a nonce, authentication material) must be zeroed, and data that might reveal information about the user's activities (file contents, network payloads, command text) should be zeroed when the driver is finished with it. When in doubt, zero. The cost is small.
+一个常见问题：什么是"敏感数据"？保守的答案是来自用户空间的任何数据都应被视为敏感的，因为你不知道它对用户代表什么。更务实的答案是，显然是秘密的数据（密钥、密码哈希、随机数、认证材料）必须被清零，可能泄露用户活动信息的数据（文件内容、网络载荷、命令文本）应该在驱动程序使用完毕后清零。有疑问时，清零。成本很小。
 
 ### `malloc_type` 标签与可追溯性
 
-The `malloc_type` tag on every allocation serves several purposes. It makes allocations visible in `vmstat -m`. It helps with panic debugging, because the tag is recorded in the allocator's metadata. It helps the allocator's own accounting, and in some configurations it enables per-type memory limits.
+每次分配上的 `malloc_type` 标签有几个用途。它使分配在 `vmstat -m` 中可见。它有助于崩溃调试，因为标签被记录在分配器的元数据中。它有助于分配器自身的记账，在某些配置中它启用按类型的内存限制。
 
-A driver that uses a single `malloc_type` for all its allocations is easier to audit than a driver that uses many. Create one tag per logical subsystem within the driver, not one per allocation site. For small drivers, a single tag is usually enough.
+使用单一 `malloc_type` 的驱动程序比使用多个的更容易审计。为驱动程序内的每个逻辑子系统创建一个标签，而不是每个分配点一个。对于小型驱动程序，单个标签通常就够了。
 
-The declaration pattern:
+声明模式：
 
 ```c
 /* At the top of the driver source file: */
@@ -1279,15 +1279,15 @@ MALLOC_DEFINE(M_SECDEV, "secdev", "Secure example driver");
 buf = malloc(size, M_SECDEV, M_WAITOK | M_ZERO);
 ```
 
-The `MALLOC_DECLARE` declares the tag for external visibility; the `MALLOC_DEFINE` actually allocates it (and registers it with the accounting system). Both are needed. Do not put `MALLOC_DEFINE` in a header, because the kernel linker will complain about duplicate definitions if multiple object files include the header.
+`MALLOC_DECLARE` 声明标签以供外部可见；`MALLOC_DEFINE` 实际分配它（并将其注册到记账系统）。两者都需要。不要将 `MALLOC_DEFINE` 放在头文件中，因为如果多个目标文件包含该头文件，内核链接器会抱怨重复定义。
 
 ### Softc 的生命周期
 
-The softc is the driver's per-instance state. It is typically allocated during `attach` and freed during `detach`. The softc's lifetime is one of the most important things to get right in a driver.
+softc 是驱动程序的每实例状态。它通常在 `attach` 期间分配并在 `detach` 期间释放。softc 的生命周期是驱动程序中最重要的正确事项之一。
 
-The allocation usually happens via `device_get_softc`, which returns a pointer to a structure whose size was declared at driver-registration time. This means the softc memory is owned by the bus, not by the driver; the driver does not call `malloc` for it, and the driver does not call `free`. The bus allocates the softc when the driver is bound to the device and frees it when the driver is detached.
+分配通常通过 `device_get_softc` 进行，它返回一个指向在驱动程序注册时声明大小的结构的指针。这意味着 softc 内存由总线拥有，而不是驱动程序；驱动程序不为它调用 `malloc`，也不调用 `free`。总线将 softc 分配给驱动程序绑定到设备时，并在驱动程序分离时释放它。
 
-But the softc often contains pointers to other memory that the driver did allocate. Those pointers must be freed in `detach`, in the reverse order of their allocation. A typical pattern:
+但 softc 通常包含指向驱动程序确实分配的其他内存的指针。这些指针必须在 `detach` 中以分配顺序的逆序释放。典型模式：
 
 ```c
 static int
@@ -1321,13 +1321,13 @@ secdev_detach(device_t dev)
 }
 ```
 
-Each step handles a specific concern. The order matters: destroy the device node before freeing resources the device callbacks depend on; drain async activity before freeing data the async paths might touch; destroy synchronization primitives last.
+每一步处理一个特定的关注点。顺序很重要：在释放设备回调依赖的资源之前销毁设备节点；在释放异步路径可能触及的数据之前排干异步活动；最后销毁同步原语。
 
-A slip in any of these orderings is a bug. The wrong order can produce use-after-free or double-free patterns. The lab later in the chapter walks through a detach function that has subtle ordering bugs and asks you to fix them.
+这些排序中的任何错误都是漏洞。错误的顺序可能产生释放后使用或双重释放模式。本章后面的实验室会引导你通过一个有微妙排序错误的 detach 函数并要求你修复它们。
 
 ### 完整的分配/释放模式
 
-Pulling the patterns together, here is a safe allocation and use sequence:
+将模式整合在一起，这里是一个安全的分配和使用序列：
 
 ```c
 static int
@@ -1369,17 +1369,17 @@ done:
 }
 ```
 
-The function has a single exit point via the `done` label. The `blob = NULL` after ownership transfer ensures that the cleanup at `done` sees the transfer and does not re-free. The `explicit_bzero` before every `free` zeroes the buffer in case it held sensitive data. The existing `sc->sc_blob`, if present, is zeroed and freed before being replaced, to avoid leaking the old blob's contents.
+该函数通过 `done` 标签有单一出口点。所有权转移后的 `blob = NULL` 确保清理在 `done` 处看到转移并不重新释放。每次 `free` 前的 `explicit_bzero` 清零缓冲区以防它保存了敏感数据。现有的 `sc->sc_blob`（如果存在）在替换前被清零并释放，以避免泄漏旧数据块的内容。
 
-This pattern (single exit point, ownership transfer, explicit zeroing, checked allocation, checked copyin) appears in variations throughout the FreeBSD kernel. Learn it well.
+这个模式（单一出口点、所有权转移、显式清零、检查分配、检查 copyin）在整个 FreeBSD 内核中以变体形式出现。好好学习它。
 
 ### 深入了解 UMA 区域
 
-`malloc(9)` is a general-purpose allocator suited to varying sizes. For fixed-size objects that are allocated and freed frequently, the UMA zone allocator is often the better choice. UMA stands for Universal Memory Allocator, and it is declared in `/usr/src/sys/vm/uma.h`.
+`malloc(9)` 是适合可变大小的通用分配器。对于频繁分配和释放的固定大小对象，UMA 区域分配器通常是更好的选择。UMA 代表通用内存分配器，在 `/usr/src/sys/vm/uma.h` 中声明。
 
-A UMA zone is created once, at module load, and holds a pool of objects of a fixed size. `uma_zalloc(9)` returns an object from the pool (allocating a fresh one if necessary). `uma_zfree(9)` returns an object to the pool (or frees it back to the kernel if the pool is full). Because allocations come from a pre-configured pool, they are faster than general `malloc` and have better cache locality.
+UMA 区域在模块加载时创建一次，持有固定大小对象的池。`uma_zalloc(9)` 从池中返回一个对象（必要时分配新的）。`uma_zfree(9)` 将对象返回到池中（如果池满了则释放回内核）。因为分配来自预配置的池，它们比通用 `malloc` 更快，缓存局部性更好。
 
-Creating a zone:
+创建区域：
 
 ```c
 static uma_zone_t secdev_packet_zone;
@@ -1406,7 +1406,7 @@ secdev_modevent(module_t mod, int event, void *arg)
 }
 ```
 
-Using a zone:
+使用区域：
 
 ```c
 struct secdev_packet *pkt;
@@ -1416,32 +1416,32 @@ pkt = uma_zalloc(secdev_packet_zone, M_WAITOK | M_ZERO);
 uma_zfree(secdev_packet_zone, pkt);
 ```
 
-The security advantages of a UMA zone over `malloc`:
+UMA 区域相对于 `malloc` 的安全优势：
 
-A zone can have a constructor and destructor that initialize or finalize objects. This can guarantee that every object returned to the caller is in a known state.
+区域可以有构造函数和析构函数来初始化或终结对象。这可以保证返回给调用者的每个对象都处于已知状态。
 
-A zone is named, so `vmstat -z` attributes allocations to it. This helps detect leaks and unusual memory patterns in specific subsystems.
+区域是有名称的，所以 `vmstat -z` 将分配归属到它。这有助于检测特定子系统中的泄漏和异常内存模式。
 
-The pool of objects can be drained under memory pressure. A malloc allocation is held for its lifetime; a UMA zone object can be returned to the kernel when freed if the pool is above its high-water mark.
+对象池可以在内存压力下被排干。`malloc` 分配在其生命周期内被持有；UMA 区域对象在释放时如果池超过其高水位标记就可以返回给内核。
 
-The security pitfalls:
+安全陷阱：
 
-An object returned to the zone is not automatically zeroed. If the zone holds objects that may contain sensitive data, either add a destructor that zeros, or zero explicitly before freeing:
+返回到区域的对象不会自动清零。如果区域保存可能包含敏感数据的对象，要么添加清零的析构函数，要么在释放前显式清零：
 
 ```c
 explicit_bzero(pkt, sizeof(*pkt));
 uma_zfree(secdev_packet_zone, pkt);
 ```
 
-Because UMA reuses objects quickly, an object you just freed may be handed to another caller almost immediately. If the other caller is a different thread in another subsystem, residual data could flow between them. The fix, again, is explicit zeroing.
+因为 UMA 快速重用对象，你刚释放的对象可能几乎立即被交给另一个调用者。如果另一个调用者是另一个子系统中的不同线程，残留数据可能流经它们之间。修复方法同样是显式清零。
 
-A destructor function passed to `uma_zcreate` is called when an object is about to be freed back to the kernel (not when it returns to the pool). For zeroing on every free, use `M_ZERO` on `uma_zalloc` (which zeros on allocation, equivalent to `bzero` immediately after) or zero explicitly.
+传递给 `uma_zcreate` 的析构函数在对象即将被释放回内核时被调用（不是当它返回到池时）。对于每次释放时的清零，在 `uma_zalloc` 上使用 `M_ZERO`（等同于分配后立即 `bzero`）或显式清零。
 
-UMA zones are not appropriate for every driver allocation. For one-off or irregular allocations, `malloc(9)` is simpler. For high-frequency fixed-size objects, UMA wins on performance and makes memory accounting easier. Choose based on access pattern.
+UMA 区域不适合每个驱动程序分配。对于一次性或不规则分配，`malloc(9)` 更简单。对于高频固定大小对象，UMA 在性能上获胜并使内存记账更容易。基于访问模式选择。
 
 ### 共享对象的引用计数
 
-When an object in your driver can be held by multiple contexts (a softc that is referenced by both a callout and user-space file descriptors, for example), reference counting is the canonical tool for lifetime management. The `refcount(9)` family in `/usr/src/sys/sys/refcount.h` provides simple atomic helpers:
+当驱动程序中的对象可以被多个上下文持有（例如，同时被 callout 和用户空间文件描述符引用的 softc）时，引用计数是生命周期管理的标准工具。`/usr/src/sys/sys/refcount.h` 中的 `refcount(9)` 系列提供了简单的原子辅助函数：
 
 ```c
 refcount_init(&obj->refcnt, 1);  /* initial reference */
@@ -1452,17 +1452,17 @@ if (refcount_release(&obj->refcnt)) {
 }
 ```
 
-The invariant is simple: each context that holds a pointer to the object also holds a reference. When it finishes, it releases. Whichever context is last to release is responsible for freeing.
+不变量很简单：每个持有指向对象指针的上下文也持有一个引用。当它完成时，释放。最后释放的上下文负责释放对象。
 
-Used correctly, refcounts prevent the classic "who frees it" ambiguity. Used incorrectly (unbalanced acquires and releases), they produce leaks or use-after-frees. The discipline is:
+正确使用时，引用计数防止了经典的"谁来释放"歧义。错误使用时（不平衡的获取和释放），它们会产生泄漏或释放后使用。纪律是：
 
-Every path that obtains a pointer to the object acquires a reference.
+每个获取指向对象指针的路径获取一个引用。
 
-Every path that releases the pointer calls `refcount_release` and checks the return value.
+每个释放指针的路径调用 `refcount_release` 并检查返回值。
 
-A single "owning" reference is held by whoever created the object; the owner is the default releaser.
+一个单一的"拥有"引用由创建对象的人持有；拥有者是默认的释放者。
 
-Even simple refcount usage catches a large class of lifetime bugs. For complex drivers with multiple concurrent contexts, refcounts are indispensable.
+即使是简单的引用计数使用也能捕获一大类生命周期漏洞。对于具有多个并发上下文的复杂驱动程序，引用计数是不可或缺的。
 
 ### 第4节总结
 
@@ -1480,19 +1480,19 @@ Even simple refcount usage catches a large class of lifetime bugs. For complex d
 
 FreeBSD 驱动程序在多线程环境中运行。有几件事可以同时发生：
 
-Two different user processes can call `read(2)`, `write(2)`, or `ioctl(2)` on the same device file. If the driver has a single `softc`, both calls run against the same state.
+两个不同的用户进程可以在同一设备文件上调用 `read(2)`、`write(2)` 或 `ioctl(2)`。如果驱动程序有单个 `softc`，两个调用都针对相同的状态运行。
 
-One thread can be running your ioctl handler while an interrupt handler for the same device fires on another CPU.
+一个线程可能正在运行你的 ioctl 处理程序，而同一设备的中断处理程序在另一个 CPU 上触发。
 
-A user thread can be in the middle of your driver while a callout or taskqueue entry scheduled earlier also runs.
+用户线程可能在你的驱动程序中间，而之前调度的 callout 或 taskqueue 条目也在运行。
 
-The device can be unplugged, causing `detach` to run while any of the above is still in progress.
+设备可能被拔出，导致 `detach` 在上述任何操作仍在进行时运行。
 
 在没有适当同步的情况下被多个上下文触及的任何共享数据都是潜在的竞态。当共享数据控制访问、验证输入、跟踪缓冲区大小或保存生命周期信息时，竞态就变成了安全问题。
 
 ### TOCTOU 模式
 
-The simplest TOCTOU pattern in a driver looks like this:
+驱动程序中最简单的 TOCTOU 模式看起来像这样：
 
 ```c
 if (sc->sc_initialized) {
@@ -1500,9 +1500,9 @@ if (sc->sc_initialized) {
 }
 ```
 
-Read it carefully. Nothing about it is obviously wrong. The driver checks that the buffer is initialized, then uses it. But if another thread can set `sc->sc_initialized` to `false` and free `sc->sc_buffer` between the check and the use, the use touches freed memory. The attacker does not need to corrupt the flag or the pointer. They only need to arrange timing.
+仔细阅读。它没有任何明显错误。驱动程序检查缓冲区是否已初始化，然后使用它。但如果另一个线程可以在检查和使用之间将 `sc->sc_initialized` 设为 `false` 并释放 `sc->sc_buffer`，使用操作就触及了已释放的内存。攻击者不需要损坏标志或指针。他们只需要安排时序。
 
-A more subtle TOCTOU happens with user memory:
+更微妙的 TOCTOU 发生在用户内存上：
 
 ```c
 if (args->len > MAX_LEN)
@@ -1510,13 +1510,13 @@ if (args->len > MAX_LEN)
 error = copyin(args->data, kbuf, args->len);
 ```
 
-Look at `args`. If it was already copied in, this is safe. But if `args` still points into user space, a second user thread can change `args->len` between the check and the `copyin`. The check validates the old length. The copy uses the new length. If the new length exceeds `MAX_LEN`, the `copyin` overruns `kbuf`.
+看看 `args`。如果它已经被复制进来了，这是安全的。但如果 `args` 仍然指向用户空间，第二个用户线程可以在检查和 `copyin` 之间更改 `args->len`。检查验证的是旧长度。复制使用的是新长度。如果新长度超过 `MAX_LEN`，`copyin` 就会越过 `kbuf`。
 
-The fix is copy-then-check, which we already covered in Section 3. The reason this technique exists is precisely because TOCTOU on user memory is a real attack vector. Always copy user data into kernel space first, then validate, then use.
+修复是先复制再检查，我们已经在第3节讨论过。这种技术存在的原因正是因为对用户内存的 TOCTOU 是一个真实的攻击向量。始终先将用户数据复制到内核空间，然后验证，然后使用。
 
 ### 真实世界示例：带路径的 Ioctl
 
-Imagine an ioctl that takes a path and does something with the file:
+想象一个接受路径并对文件做某些操作的 ioctl：
 
 ```c
 /* UNSAFE */
@@ -1536,7 +1536,7 @@ secdev_open_path(struct secdev_softc *sc, struct secdev_path_arg *args)
 }
 ```
 
-This has two races. First, `args->path` is still in user space if `args` was not copied in; a user thread can change it between the `strnlen` check and `namei`. Second, even if `args` was copied, using `UIO_USERSPACE` tells the VFS layer to read the path from user space, at which point the process can modify it again before VFS reads it. The fix is to copy the path into kernel space with `copyinstr(9)`, validate it as a kernel string, then pass it to VFS with `UIO_SYSSPACE`.
+这有两个竞态。第一，如果 `args` 没有被复制进来，`args->path` 仍然在用户空间；用户线程可以在 `strnlen` 检查和 `namei` 之间更改它。第二，即使 `args` 被复制了，使用 `UIO_USERSPACE` 告诉 VFS 层从用户空间读取路径，此时进程可以在 VFS 读取之前再次修改它。修复是使用 `copyinstr(9)` 将路径复制到内核空间，将其验证为内核字符串，然后用 `UIO_SYSSPACE` 传递给 VFS。
 
 ```c
 /* SAFE */
@@ -1558,37 +1558,37 @@ secdev_open_path(struct secdev_softc *sc, struct secdev_path_arg *args)
 }
 ```
 
-The corrected version copies the path into the kernel exactly once, validates it (by virtue of `copyinstr` bounding the length and guaranteeing a NUL terminator), then hands a stable kernel string to the VFS layer. The user process can change `args->path` as often as it likes; we are no longer reading from there.
+修正后的版本将路径仅一次复制到内核中，验证它（通过 `copyinstr` 限制长度并保证 NUL 终止符），然后将稳定的内核字符串交给 VFS 层。用户进程可以随意更改 `args->path`；我们不再从那里读取了。
 
 ### 共享状态与加锁
 
-For races between concurrent in-kernel contexts, the tool is a lock. FreeBSD offers several. The most common in drivers are:
+对于并发内核上下文之间的竞态，工具是锁。FreeBSD 提供了几种。驱动程序中最常见的是：
 
-`mtx_t`, a mutex, created with `mtx_init(9)`. Mutexes are fast, short, and must not be held across sleeps. Use them to protect a small critical section.
+`mtx_t`，互斥锁，用 `mtx_init(9)` 创建。互斥锁快速、简短，不得跨睡眠持有。用它们保护小的临界区。
 
-`sx_t`, a shared-exclusive lock, created with `sx_init(9)`. Shared-exclusive locks can be held across sleeps. Use them when the critical section includes something like `malloc(M_WAITOK)` or a VFS call.
+`sx_t`，共享排他锁，用 `sx_init(9)` 创建。共享排他锁可以跨睡眠持有。当临界区包含像 `malloc(M_WAITOK)` 或 VFS 调用之类的东西时使用它们。
 
-`struct rwlock`, a read-write lock, for the read-mostly case. Multiple readers can hold the lock in shared mode; an exclusive writer excludes all readers.
+`struct rwlock`，读写锁，用于读多的情况。多个读者可以以共享模式持有锁；排他写者排除所有读者。
 
-`struct mtx` paired with condition variables (`cv_init(9)`, `cv_wait(9)`, `cv_signal(9)`) for producer-consumer patterns.
+`struct mtx` 配合条件变量（`cv_init(9)`、`cv_wait(9)`、`cv_signal(9)`）用于生产者-消费者模式。
 
-The rules for safe locking are simple and absolute:
+安全加锁的规则简单而绝对：
 
-Define exactly what data each lock protects. Write it in a comment next to the softc field.
+精确定义每个锁保护什么数据。在 softc 字段旁边的注释中写下来。
 
-Acquire the lock before reading or writing the protected data. Release it afterwards.
+在读取或写入受保护数据之前获取锁。之后释放它。
 
-Do not hold locks longer than necessary. Long critical sections hurt performance and increase deadlock risk.
+不要持有锁超过必要的时间。长临界区损害性能并增加死锁风险。
 
-Acquire multiple locks in a consistent order across all code paths. Inconsistent ordering leads to deadlock.
+在所有代码路径上以一致的顺序获取多个锁。不一致的顺序导致死锁。
 
-Do not sleep while holding a mutex. Convert to an sx lock or drop the mutex first.
+持有互斥锁时不要睡眠。转换为 sx 锁或先释放互斥锁。
 
-Do not call into user space (`copyin`, `copyout`) while holding a mutex. Copy first, then lock. Release, then copy back.
+持有互斥锁时不要调用用户空间（`copyin`、`copyout`）。先复制，然后加锁。释放，然后复制回去。
 
 ### 深入了解：修复有竞态的驱动程序
 
-Consider the following minimal handler:
+考虑以下最小处理程序：
 
 ```c
 /* UNSAFE: races on sc_open */
@@ -1613,7 +1613,7 @@ secdev_close(struct cdev *dev, int fflags, int devtype, struct thread *td)
 }
 ```
 
-The intent is that only one process can have the device open at a time. The bug is that `sc_open` is checked and set without a lock. Two concurrent `open(2)` calls can both read `sc_open == false`, both decide they are the first, and both set it to `true`. Both succeed. Now two processes share a device that was meant to be exclusive. This is a real-world bug class that has affected real drivers. Fix:
+意图是同一时间只有一个进程能打开设备。漏洞是 `sc_open` 在没有锁的情况下被检查和设置。两个并发的 `open(2)` 调用都可以读到 `sc_open == false`，都认为自己是第一个，都将其设为 `true`。两个都成功了。现在两个进程共享了一个设计为独占的设备。这是一个影响过真实驱动程序的真实漏洞类别。修复：
 
 ```c
 /* SAFE */
@@ -1644,23 +1644,23 @@ secdev_close(struct cdev *dev, int fflags, int devtype, struct thread *td)
 }
 ```
 
-Now the read and the write happen inside a single critical section. Only one caller at a time can be inside that section, so the check-then-set sequence is atomic from the perspective of any other caller.
+现在读取和写入发生在单个临界区内。同一时间只有一个调用者可以在该临界区内，所以检查-然后-设置序列从任何其他调用者的角度来看是原子的。
 
 ### 分离时的生命周期竞态
 
-The hardest races in drivers are lifetime races around `detach`. The device goes away, but a user thread is still inside your ioctl handler, or an interrupt is in flight, or a callout is pending. If `detach` frees the softc while one of these references it, you have a use-after-free.
+驱动程序中最难的竞态是 `detach` 周围的生命周期竞态。设备消失了，但用户线程仍在你的 ioctl 处理程序中，或者中断正在传输中，或者 callout 正在等待。如果 `detach` 在其中一个引用了 softc 时释放了它，你就会有释放后使用。
 
-FreeBSD gives you tools to handle this:
+FreeBSD 为你提供了处理这个的工具：
 
-`callout_drain(9)` waits for any scheduled callout to finish before returning. Call it in `detach` before freeing anything the callout touches.
+`callout_drain(9)` 在返回之前等待任何已调度的 callout 完成。在 `detach` 中释放 callout 触及的任何东西之前调用它。
 
-`taskqueue_drain(9)` and `taskqueue_drain_all(9)` wait for pending tasks to complete.
+`taskqueue_drain(9)` 和 `taskqueue_drain_all(9)` 等待待处理的任务完成。
 
-`destroy_dev(9)` marks a character device as gone and waits for all in-flight threads to leave the device's d_* methods before returning. After `destroy_dev`, no new threads can enter and no old threads remain.
+`destroy_dev(9)` 将字符设备标记为已消失并等待所有正在传输中的线程在返回之前离开设备的 d_* 方法。在 `destroy_dev` 之后，没有新线程可以进入，也没有旧线程留下。
 
-`bus_teardown_intr(9)` removes an interrupt handler and waits for any in-flight instance of that handler to complete.
+`bus_teardown_intr(9)` 移除中断处理程序并等待该处理程序的任何正在传输的实例完成。
 
-A correct `detach` function in a driver that has all of these resources looks roughly like:
+具有所有这些资源的驱动程序中正确的 `detach` 函数大致如下：
 
 ```c
 static int
@@ -1689,45 +1689,45 @@ secdev_detach(device_t dev)
 }
 ```
 
-The order matters. We first stop accepting new work, then drain all in-flight work, then free the resources that the in-flight work was using. If we freed resources first and drained second, a callout still running could touch freed memory. That is a classic detach-time use-after-free, and it is a security bug, not just a crash.
+顺序很重要。我们首先停止接受新工作，然后排干所有正在传输的工作，然后释放正在传输的工作正在使用的资源。如果我们先释放资源再排干，仍在运行的 callout 可能触及已释放的内存。那是经典的分离时释放后使用，它是安全漏洞，不仅仅是崩溃。
 
 ### 原子操作与无锁代码
 
-FreeBSD provides atomic operations (`atomic_add_int`, `atomic_cmpset_int`, and so on) in `/usr/src/sys/sys/atomic_common.h` and architecture-specific headers. Atomics are useful for counters, reference counts, and simple flags. They are not a substitute for locks when multiple related fields must change together.
+FreeBSD 提供原子操作（`atomic_add_int`、`atomic_cmpset_int` 等），位于 `/usr/src/sys/sys/atomic_common.h` 和特定架构的头文件中。原子操作对计数器、引用计数和简单标志很有用。当多个相关字段必须一起更改时，它们不能替代锁。
 
-A common beginner mistake is to say "I will use an atomic to avoid a lock". Sometimes this is correct. Often it leads to a subtly broken data structure because the atomic operation only makes one field safe, while the code really needed two fields updated together.
+初学者常见的错误是说"我将使用原子操作来避免锁"。有时这是正确的。经常这会导致微妙损坏的数据结构，因为原子操作只使一个字段安全，而代码实际需要两个字段一起更新。
 
-The safe rule is: if you can express the invariant with a single atomic read or write, an atomic may be appropriate. If the invariant spans multiple fields or a compound condition, use a lock.
+安全的规则是：如果你能用单次原子读或写表达不变量，原子操作可能是合适的。如果不变量跨越多个字段或复合条件，使用锁。
 
 ### 引用计数作为生命周期工具
 
-When an object can be referenced from multiple contexts, a refcount helps manage lifetime. `refcount_init`, `refcount_acquire`, and `refcount_release` (declared in `/usr/src/sys/sys/refcount.h`) give you a simple atomic refcount. The last release returns true, at which point the caller is responsible for freeing the object.
+当对象可以被多个上下文引用时，引用计数有助于管理生命周期。`refcount_init`、`refcount_acquire` 和 `refcount_release`（在 `/usr/src/sys/sys/refcount.h` 中声明）为你提供简单的原子引用计数。最后一次释放返回 true，此时调用者负责释放对象。
 
-Refcounts solve the classic problem where context A and context B both hold a pointer to an object. Either can finish with it first. The one that finishes last frees it. Neither needs to know whether the other is done, because the refcount tracks that for them.
+引用计数解决了上下文 A 和上下文 B 都持有指向对象的指针的经典问题。任何一个都可能先完成。最后完成的那个释放它。两者都不需要知道另一个是否完成，因为引用计数为它们跟踪。
 
-A driver that uses a refcount on its softc, or on per-open state, can release that state safely even under concurrent access. The cost is some care at every entry and exit point to balance acquires and releases.
+在其 softc 或每次打开状态上使用引用计数的驱动程序可以安全地释放该状态，即使在并发访问下。代价是在每个入口和出口点需要一些注意来平衡获取和释放。
 
 ### 排序与内存屏障
 
-Modern CPUs reorder memory accesses. A write in your code may become visible to other CPUs in a different order than it was issued. This is usually invisible because locks on FreeBSD include the necessary barriers. When writing lock-free code, you may need explicit barriers (`atomic_thread_fence_acq`, `atomic_thread_fence_rel`, and variants). For almost all driver code, using a lock removes the need to think about barriers. That is another reason to prefer locks over hand-rolled lock-free constructs when you are still learning.
+现代 CPU 重排序内存访问。你代码中的写入可能以与发出时不同的顺序对其他 CPU 可见。这通常是不可见的，因为 FreeBSD 上的锁包含必要的屏障。在编写无锁代码时，你可能需要显式屏障（`atomic_thread_fence_acq`、`atomic_thread_fence_rel` 及其变体）。对于几乎所有驱动程序代码，使用锁消除了考虑屏障的需要。这是在你仍在学习时优先使用锁而不是手工制作的无锁构造的另一个原因。
 
 ### 信号与睡眠安全
 
-If your driver sleeps waiting for an event, using `msleep(9)`, `cv_wait(9)`, or `sx_sleep(9)`, use the interruptible variant (`msleep(..., PCATCH)`) when the wait is initiated by user space. Otherwise a stuck device can hold a process in an uninterruptible state forever, and a sufficiently patient attacker can use that to exhaust process slots. The interruptible wait lets the process be signalled.
+如果你的驱动程序睡眠等待事件，使用 `msleep(9)`、`cv_wait(9)` 或 `sx_sleep(9)`，当等待由用户空间发起时使用可中断变体（`msleep(..., PCATCH)`）。否则，卡住的设备可能将进程永远保持在中断不可及的状态，而足够耐心的攻击者可以利用它来耗尽进程槽位。可中断等待让进程可以被信号中断。
 
-Always check the return value of a sleep. If it returns a non-zero value, the sleep was interrupted (either by a signal or by another condition), and the driver should typically unwind and return to user space. Don't assume the condition is true just because the sleep returned.
+始终检查睡眠的返回值。如果它返回非零值，睡眠被中断了（要么被信号要么被另一个条件），驱动程序通常应该展开并返回用户空间。不要仅仅因为睡眠返回了就假设条件为真。
 
 ### 速率限制与资源耗尽
 
-A final race-related security concern is resource exhaustion. If an attacker can call your ioctl a million times per second, and each call allocates a kilobyte of kernel memory that is not freed until close, they can drive the system out of memory. This is a denial of service attack, and a careful driver defends against it.
+最后一个与竞态相关的安全问题是资源耗尽。如果攻击者可以每秒调用你的 ioctl 一百万次，每次调用分配一千字节的内核内存直到关闭才释放，他们可以将系统驱动到内存耗尽。这是拒绝服务攻击，仔细的驱动程序应该防御它。
 
-The defenses are: cap per-open resource use, cap global resource use, rate-limit expensive operations. FreeBSD provides `eventratecheck(9)` and `ppsratecheck(9)` in `/usr/src/sys/sys/time.h` for rate limiting, and you can build your own counters where needed. The principle is that the cost to call your driver should not be wildly asymmetric: if a single call allocates megabytes of state, either the caller needs a privilege check or the driver needs a hard cap.
+防御措施是：限制每次打开的资源使用、限制全局资源使用、对昂贵操作进行速率限制。FreeBSD 在 `/usr/src/sys/sys/time.h` 中提供 `eventratecheck(9)` 和 `ppsratecheck(9)` 用于速率限制，你可以在需要时构建自己的计数器。原则是调用你的驱动程序的成本不应严重不对称：如果单次调用分配了 MB 级别的状态，要么调用者需要权限检查，要么驱动程序需要硬性上限。
 
 ### 基于时代的回收：无锁读取器惯用法
 
-For read-mostly data structures where readers must never block and writers are rare, FreeBSD provides an epoch-based reclamation framework in `/usr/src/sys/sys/epoch.h`. Readers enter an epoch, access the shared data without taking a lock, and exit the epoch. Writers update the data (usually by replacing a pointer) and then wait for all readers currently in an epoch to exit before freeing the old data.
+对于读多写少、读者必须永远不阻塞、写者很少的数据结构，FreeBSD 在 `/usr/src/sys/sys/epoch.h` 中提供了基于时代的回收框架。读者进入一个时代，在不获取锁的情况下访问共享数据，然后退出时代。写者更新数据（通常通过替换指针），然后等待当前在时代中的所有读者退出后再释放旧数据。
 
-The idiom is useful for driver code that has frequent reads on a hot path and wants to avoid locking overhead there. For example, a network driver that looks up a rule from a routing-table-like structure on every packet may want readers to run lock-free.
+这个惯用法对于在频繁路径上有大量读取并希望避免那里加锁开销的驱动程序代码很有用。例如，一个在每个数据包上从类似路由表的结构中查找规则的网络驱动程序可能希望读者无锁运行。
 
 ```c
 epoch_enter(secdev_epoch);
@@ -1737,7 +1737,7 @@ do_stuff(rule);
 epoch_exit(secdev_epoch);
 ```
 
-A writer replacing the rule set:
+替换规则集的写者：
 
 ```c
 new_rules = build_new_rules();
@@ -1747,60 +1747,60 @@ epoch_wait(secdev_epoch);
 free(old_rules, M_SECDEV);
 ```
 
-`epoch_wait` blocks until all readers that entered before the store have exited. After it returns, no reader can still be using `old_rules`, so it is safe to free.
+`epoch_wait` 阻塞直到所有在存储之前进入的读者都已退出。在它返回后，没有读者仍然在使用 `old_rules`，所以释放是安全的。
 
-The security considerations with epochs are subtle:
+时代的安全考虑是微妙的：
 
-A reader inside an epoch may hold a pointer to something that is about to be replaced. The reader must finish using the pointer before exiting the epoch; any use after the exit is a use-after-free.
+时代内的读者可能持有指向即将被替换的东西的指针。读者必须在退出时代之前完成使用该指针；退出后的任何使用都是释放后使用。
 
-A reader inside an epoch cannot sleep. The epoch is an asymmetric lock: writers wait on readers, so a reader that sleeps can starve writers indefinitely.
+时代内的读者不能睡眠。时代是一个不对称锁：写者等待读者，所以睡眠的读者可能无限期地饿死写者。
 
-The writer must ensure that the replacement operation is atomic from a reader's perspective. For a single pointer, an atomic store does the job. For more complex updates, two epochs or a read-copy-update sequence may be needed.
+写者必须确保替换操作从读者的角度来看是原子的。对于单个指针，原子存储可以完成工作。对于更复杂的更新，可能需要两个时代或读-复制-更新序列。
 
-Used correctly, epochs give very high performance on read-heavy workloads. Used incorrectly (a reader that sleeps, or a writer that fails to wait), they produce races that are hard to reproduce and hard to diagnose. Beginners should prefer locks until the performance profile justifies the complexity of epoch-based code.
+正确使用时，时代在读密集工作负载上提供非常高的性能。错误使用时（睡眠的读者，或未等待的写者），它们产生难以重现和难以诊断的竞态。初学者应该优先使用锁，直到性能分析证明基于时代的代码的复杂性是合理的。
 
 ### 第5节总结
 
 竞态和 TOCTOU 漏洞是基于时间的漏洞。它们发生在两个上下文在没有协调的情况下触及共享数据时，或者驱动程序在两个不同时间检查条件并对其采取行动时。防止它们的工具很简单：将用户数据复制到内核一次并从副本工作；在每次访问共享可变状态时使用锁；定义每个锁保护什么并在完整的检查-行动序列中持有它；在释放异步工作触及的结构之前排空异步工作；使用引用计数进行多上下文生命周期管理。
 
-None of this is new to concurrency programming. What is new is the mindset: a race in a driver is not merely a correctness problem. It is a security problem, because an attacker can often arrange the timing they need to exploit it. The next section steps back from timing and looks at a different kind of defense: privilege checks, credentials, and access control.
+这些都不是并发编程的新内容。新的是思维方式：驱动程序中的竞态不仅仅是正确性问题。它是安全问题，因为攻击者通常可以安排他们利用竞态所需的时序。下一节从时序转向不同类型的防御：权限检查、凭据和访问控制。
 
 ## 第6节：访问控制与权限强制执行
 
 并非驱动程序暴露的每个操作都应该对每个用户可用。读取温度传感器对每个人都可能没问题。重新编程设备的固件应该需要权限。向存储控制器写入原始字节可能需要更多权限。本节是关于 FreeBSD 驱动程序如何使用内核的凭据和权限机制来决定调用者是否被允许执行其请求的操作。
 
-The tools are `struct ucred`, `priv_check(9)` and `priv_check_cred(9)`, jail-aware checks, securelevel checks, and the broader MAC and Capsicum frameworks.
+工具是 `struct ucred`、`priv_check(9)` 和 `priv_check_cred(9)`、jail 感知检查、安全级别检查以及更广泛的 MAC 和 Capsicum 框架。
 
 ### 调用者的凭据：struct ucred
 
-Every thread running in the FreeBSD kernel carries a credential, a pointer to a `struct ucred`. The credential records who the thread is running as, which jail they are confined to, which groups they belong to, and other security attributes. From inside a driver, the credential is almost always reached via `td->td_ucred`, where `td` is the `struct thread *` passed to your entry point.
+在 FreeBSD 内核中运行的每个线程都携带一个凭据，即指向 `struct ucred` 的指针。凭据记录线程以谁的身份运行、被限制在哪个 jail 中、属于哪些组以及其他安全属性。在驱动程序内部，凭据几乎总是通过 `td->td_ucred` 访问，其中 `td` 是传递给你的入口点的 `struct thread *`。
 
-The structure is declared in `/usr/src/sys/sys/ucred.h`. The fields most relevant to drivers are:
+该结构在 `/usr/src/sys/sys/ucred.h` 中声明。与驱动程序最相关的字段是：
 
-`cr_uid`, the effective user ID. Usually what you check to answer "is this root".
+`cr_uid`，有效用户 ID。通常用于检查"这是否是 root"。
 
-`cr_ruid`, the real user ID.
+`cr_ruid`，真实用户 ID。
 
-`cr_gid`, the effective group ID.
+`cr_gid`，有效组 ID。
 
-`cr_prison`, a pointer to the jail the process is in. All processes have one. Unjailed processes belong to `prison0`.
+`cr_prison`，指向进程所在 jail 的指针。所有进程都有一个。未被 jail 的进程属于 `prison0`。
 
-`cr_flags`, a small set of flags including `CRED_FLAG_CAPMODE`, which indicates capability mode (Capsicum).
+`cr_flags`，一小部分标志，包括 `CRED_FLAG_CAPMODE`，表示能力模式（Capsicum）。
 
-Do not check `cr_uid == 0` as your privilege gate. That is a common mistake and it is almost always wrong. The correct gate is `priv_check(9)`, which handles jails, securelevel, and MAC policies correctly. Checking `cr_uid` manually bypasses all of that and gives root inside a jail the same power as root on the host, which is not what jails are for.
+不要将 `cr_uid == 0` 作为你的权限门控。这是一个常见错误，几乎总是错的。正确的门控是 `priv_check(9)`，它正确处理 jail、安全级别和 MAC 策略。手动检查 `cr_uid` 绕过了所有这些，并给 jail 内的 root 与主机上 root 相同的权力，这不是 jail 的用途。
 
 ### priv_check 和 priv_check_cred
 
-The canonical primitive for "may the caller do this privileged thing" is `priv_check(9)`. Its prototype, from `/usr/src/sys/sys/priv.h`:
+"调用者是否可以做这件特权事情"的标准原语是 `priv_check(9)`。它的原型，来自 `/usr/src/sys/sys/priv.h`：
 
 ```c
 int priv_check(struct thread *td, int priv);
 int priv_check_cred(struct ucred *cred, int priv);
 ```
 
-`priv_check` operates on the current thread. `priv_check_cred` operates on an arbitrary credential; you use it when the credential to check is not the running thread's, for example when validating an operation on behalf of a file that was opened earlier.
+`priv_check` 操作当前线程。`priv_check_cred` 操作任意凭据；当要检查的凭据不是运行线程的凭据时使用它，例如当验证代表之前打开的文件的操作时。
 
-Both return 0 if the privilege is granted and an errno (typically `EPERM`) if not. The driver's pattern is almost always:
+两者在权限被授予时返回 0，在未授予时返回一个 errno（通常是 `EPERM`）。驱动程序的模式几乎总是：
 
 ```c
 error = priv_check(td, PRIV_DRIVER);
@@ -1808,25 +1808,25 @@ if (error != 0)
     return (error);
 ```
 
-The `priv` argument selects one of several dozen named privileges. The full list lives in `/usr/src/sys/sys/priv.h` and covers areas like filesystem, networking, virtualization, and drivers. For most device drivers, the relevant names are:
+`priv` 参数选择几十个命名权限之一。完整列表在 `/usr/src/sys/sys/priv.h` 中，涵盖文件系统、网络、虚拟化和驱动程序等领域。对于大多数设备驱动程序，相关的名称是：
 
-`PRIV_DRIVER`, the generic driver privilege. Grants access to operations restricted to administrators.
+`PRIV_DRIVER`，通用驱动程序权限。授予对限制为管理员的操作的访问。
 
-`PRIV_IO`, raw I/O to hardware. More restrictive than `PRIV_DRIVER`, appropriate for operations that bypass the driver's usual abstractions and talk directly to hardware.
+`PRIV_IO`，对硬件的原始 I/O。比 `PRIV_DRIVER` 更严格，适合绕过驱动程序通常抽象并直接与硬件通信的操作。
 
-`PRIV_KLD_LOAD`, used by the module loader. You will not typically use this from a driver.
+`PRIV_KLD_LOAD`，由模块加载器使用。你通常不会从驱动程序中使用它。
 
-`PRIV_NET_*`, used by network-related operations.
+`PRIV_NET_*`，由网络相关操作使用。
 
-Several dozen more. Read the list in `priv.h` and pick the most specific match for the operation being gated. `PRIV_DRIVER` is a reasonable default when nothing more specific fits.
+还有几十个。阅读 `priv.h` 中的列表并为被门控的操作选择最具体的匹配。当没有更具体的匹配时，`PRIV_DRIVER` 是合理的默认选择。
 
-A real-world example from the kernel: in `/usr/src/sys/dev/mmc/mmcsd.c`, the driver checks `priv_check(td, PRIV_DRIVER)` before allowing certain ioctls that would let a user reprogram the storage controller. In `/usr/src/sys/dev/syscons/syscons.c`, the console driver checks `priv_check(td, PRIV_IO)` before allowing operations that manipulate the hardware directly, since those bypass the normal tty abstraction.
+内核中的一个真实例子：在 `/usr/src/sys/dev/mmc/mmcsd.c` 中，驱动程序在允许某些可能让用户重新编程存储控制器的 ioctl 之前检查 `priv_check(td, PRIV_DRIVER)`。在 `/usr/src/sys/dev/syscons/syscons.c` 中，控制台驱动程序在允许直接操作硬件的操作之前检查 `priv_check(td, PRIV_IO)`，因为那些操作绕过了正常的 tty 抽象。
 
 ### Jail 感知
 
-FreeBSD jails (jail(8) and jail(9)) partition the system into compartments. Processes inside a jail share the host's kernel but have a restricted view of the system: their own hostname, their own network visibility, their own filesystem root, and reduced privileges. Inside a jail, `priv_check` refuses many privileges that would otherwise be granted to root. This is one of the main reasons to use `priv_check` instead of checking `cr_uid == 0`.
+FreeBSD jail（jail(8) 和 jail(9)）将系统划分为隔离区。jail 内的进程共享主机的内核，但拥有受限的系统视图：自己的主机名、自己的网络可见性、自己的文件系统根目录，以及减少的权限。在 jail 内，`priv_check` 拒绝许多否则会授予 root 的权限。这是使用 `priv_check` 而不是检查 `cr_uid == 0` 的主要原因之一。
 
-Some operations, however, make no sense inside a jail at all. Reprogramming device firmware, for example, is a host operation. A jailed root user should never be able to do it. For these, add an explicit jail check:
+然而，有些操作在 jail 内根本没意义。例如，重新编程设备固件是主机操作。被 jail 的 root 用户永远不应该能够做这件事。对于这些，添加显式的 jail 检查：
 
 ```c
 if (jailed(td->td_ucred))
@@ -1836,24 +1836,24 @@ if (error != 0)
     return (error);
 ```
 
-The `jailed()` macro, defined in `/usr/src/sys/sys/jail.h`, returns true if the credential's prison is anything other than `prison0`. For operations that should never be performed from within a jail, check this first.
+`jailed()` 宏定义在 `/usr/src/sys/sys/jail.h` 中，当凭据的 prison 是 `prison0` 以外的任何东西时返回 true。对于永远不应从 jail 内执行的操作，首先检查这个。
 
-For operations that should be allowed inside a jail but with restrictions, use the jail's own fields. `cred->cr_prison->pr_flags` carries per-jail flags; the jail framework also has helpers for checking whether certain capabilities are allowed in the jail. In most driver work you will not go beyond the simple `jailed()` check.
+对于应该被允许在 jail 内但有限制的操作，使用 jail 自身的字段。`cred->cr_prison->pr_flags` 携带每 jail 标志；jail 框架还有用于检查 jail 中是否允许某些能力的辅助函数。在大多数驱动程序工作中，你不会超出简单的 `jailed()` 检查。
 
 ### 安全级别
 
-FreeBSD supports a systemwide setting called securelevel. At securelevel 0, the system behaves normally. At higher securelevels, certain operations are restricted even for root: raw disk writes may be disabled, the system time cannot be set backwards, kernel modules cannot be unloaded, and so on. The rationale is that on a well-secured server, raising the securelevel at boot means an attacker who later gains root cannot disable logging, install a rootkit module, or rewrite core system files.
+FreeBSD 支持一个名为安全级别的系统级设置。在安全级别 0，系统正常运行。在更高的安全级别，某些操作即使对 root 也被限制：原始磁盘写入可能被禁用，系统时间不能向后设置，内核模块不能卸载等等。理由是，在一个安全性良好的服务器上，在引导时提高安全级别意味着后来获得 root 权限的攻击者无法禁用日志、安装 rootkit 模块或重写核心系统文件。
 
-For drivers, the relevant helpers are declared in `/usr/src/sys/sys/priv.h`:
+对于驱动程序，相关的辅助函数在 `/usr/src/sys/sys/priv.h` 中声明：
 
 ```c
 int securelevel_gt(struct ucred *cr, int level);
 int securelevel_ge(struct ucred *cr, int level);
 ```
 
-Their return values are counterintuitive and worth studying carefully. They return 0 when the securelevel is **not** above or at the threshold (that is, the operation is allowed), and `EPERM` when the securelevel **is** above or at the threshold (the operation should be denied). In other words, the return value is ready to be used directly as an error code.
+它们的返回值是反直觉的，值得仔细研究。当安全级别**未**超过或达到阈值时（即操作被允许），它们返回 0；当安全级别**已**超过或达到阈值时（操作应被拒绝），返回 `EPERM`。换句话说，返回值可以直接用作错误代码。
 
-The usage pattern for a driver that should refuse to modify hardware at securelevel 1 or higher is:
+对于应在安全级别 1 或更高时拒绝修改硬件的驱动程序，使用模式是：
 
 ```c
 error = securelevel_gt(td->td_ucred, 0);
@@ -1861,13 +1861,13 @@ if (error != 0)
     return (error);
 ```
 
-Read carefully: this says "return an error if the securelevel is greater than 0". When securelevel is 0 (normal), `securelevel_gt(cred, 0)` returns 0 and the check passes. When securelevel is 1 or higher, it returns `EPERM` and the operation is refused.
+仔细阅读：这说的是"如果安全级别大于 0 则返回错误"。当安全级别为 0（正常）时，`securelevel_gt(cred, 0)` 返回 0，检查通过。当安全级别为 1 或更高时，它返回 `EPERM`，操作被拒绝。
 
-Most drivers do not need securelevel checks. They make sense for operations that are potentially system-destabilizing: reprogramming firmware, writing to raw disk sectors, lowering the system clock, and so on.
+大多数驱动程序不需要安全级别检查。它们适用于可能破坏系统稳定性的操作：重新编程固件、写入原始磁盘扇区、降低系统时钟等。
 
 ### 分层检查
 
-A driver that wants to be defense-in-depth can layer these checks:
+想要纵深防御的驱动程序可以分层这些检查：
 
 ```c
 static int
@@ -1894,21 +1894,21 @@ secdev_reset_hardware(struct secdev_softc *sc, struct thread *td)
 }
 ```
 
-Each check answers a different question. `jailed()` asks whether we are in the right security domain. `securelevel_gt` asks whether the system administrator has told the kernel to refuse this kind of operation. `priv_check` asks whether this particular thread has the appropriate privilege.
+每个检查回答不同的问题。`jailed()` 询问我们是否在正确的安全域中。`securelevel_gt` 询问系统管理员是否告诉内核拒绝此类操作。`priv_check` 询问这个特定线程是否有适当的权限。
 
-In many drivers, only the `priv_check` is strictly necessary, because it handles jails and securelevel through the MAC framework and the privilege definitions themselves. The explicit `jailed()` and `securelevel_gt` calls are appropriate for operations with known host-wide consequences. When in doubt, start with `priv_check(td, PRIV_DRIVER)` and add more layers only when you can explain what each additional check buys.
+在许多驱动程序中，只有 `priv_check` 是严格必需的，因为它通过 MAC 框架和权限定义本身处理 jail 和安全级别。显式的 `jailed()` 和 `securelevel_gt` 调用适合具有已知主机范围后果的操作。有疑问时，从 `priv_check(td, PRIV_DRIVER)` 开始，只有当你能解释每个额外检查带来什么好处时才添加更多层。
 
 ### Open、Ioctl 和其他路径上的凭据
 
-When designing privilege checks, think about where in the driver's lifecycle they live. There are two main places:
+在设计权限检查时，考虑它们在驱动程序生命周期中的位置。有两个主要位置：
 
-At open time. If only privileged users should be able to open the device, check privileges in `d_open`. This is simplest and gives per-open enforcement: once a user has opened the device, they are free to do what that device allows. This is the model used, for example, by `/dev/mem`, which is openable only with appropriate privilege.
+在打开时。如果只有特权用户应该能够打开设备，在 `d_open` 中检查权限。这最简单并提供每次打开的强制执行：一旦用户打开了设备，他们就可以自由地做该设备允许的任何事情。这是 `/dev/mem` 使用的模型，只有具有适当权限的用户才能打开它。
 
-At operation time. If the device supports multiple operations with different privilege requirements, check each operation independently. A storage controller might allow reading device status to any user, reading SMART data to the owner of the device file, and triggering firmware update only to users with `PRIV_DRIVER`. Each operation has its own gate.
+在操作时。如果设备支持具有不同权限要求的多个操作，独立检查每个操作。存储控制器可能允许任何用户读取设备状态，允许设备文件所有者读取 SMART 数据，只允许具有 `PRIV_DRIVER` 的用户触发固件更新。每个操作有自己的门控。
 
-A driver can combine both: a privilege check on open to keep unprivileged users out entirely, and additional checks on specific ioctls for operations that need more.
+驱动程序可以结合两者：打开时进行权限检查以完全阻止非特权用户，以及对需要更多权限的特定 ioctl 进行额外检查。
 
-An open-time check is easy to implement:
+打开时检查很容易实现：
 
 ```c
 static int
@@ -1925,13 +1925,13 @@ secdev_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 }
 ```
 
-An ioctl-time check follows the same pattern; the `struct thread *td` argument is available in every entry point.
+ioctl 时检查遵循相同的模式；`struct thread *td` 参数在每个入口点都可用。
 
 ### 设备文件权限
 
-Independent of in-driver privilege checks, FreeBSD also applies the usual UNIX permission model to device files themselves. When your driver calls `make_dev_s` or `make_dev_credf` to create a device node, you choose an owner, group, and mode. Those apply at the filesystem level: a user who fails the permission check on the device node never reaches your `d_open`.
+独立于驱动程序内部权限检查，FreeBSD 还对设备文件本身应用通常的 UNIX 权限模型。当你的驱动程序调用 `make_dev_s` 或 `make_dev_credf` 创建设备节点时，你选择所有者、组和模式。这些在文件系统级别应用：未通过设备节点权限检查的用户永远不会到达你的 `d_open`。
 
-The `make_dev_args` structure, declared in `/usr/src/sys/sys/conf.h`, includes `mda_uid`, `mda_gid`, and `mda_mode` fields. The pattern is:
+`make_dev_args` 结构在 `/usr/src/sys/sys/conf.h` 中声明，包含 `mda_uid`、`mda_gid` 和 `mda_mode` 字段。模式是：
 
 ```c
 struct make_dev_args args;
@@ -1945,66 +1945,66 @@ args.mda_si_drv1 = sc;
 error = make_dev_s(&args, &sc->sc_cdev, "secdev");
 ```
 
-`UID_ROOT` and `GID_OPERATOR` are conventional symbolic names. The mode `0640` means owner can read and write, group can read, others have no access. Choose these thoughtfully. A device that could expose sensitive data or cause hardware damage should not be world-readable or world-writable.
+`UID_ROOT` 和 `GID_OPERATOR` 是传统的符号名称。模式 `0640` 意味着所有者可读写，组可读，其他人无访问权限。谨慎选择这些。可能暴露敏感数据或造成硬件损坏的设备不应该是全局可读或全局可写的。
 
-The usual pattern for a privileged device is mode `0600` (root-only) or `0660` (root and a specific group, often `operator` or `wheel`). Mode `0640` is common for devices readable by a trusted group for monitoring purposes. Modes like `0666` (world-writable) are almost never appropriate, even for simple pseudo-devices, unless the device really does nothing that should be restricted.
+特权设备的常见模式是 `0600`（仅 root）或 `0660`（root 和特定组，通常是 `operator` 或 `wheel`）。模式 `0640` 对于受信任组出于监控目的可读的设备很常见。像 `0666`（全局可写）的模式几乎永远不合适，即使是简单的伪设备，除非该设备确实没有需要限制的功能。
 
 ### Devfs 规则
 
-Even if your driver creates the device node with a conservative mode, the system administrator can change that through devfs rules. A devfs rule can relax or restrict permissions based on device name, jail, and other criteria. Your driver should not assume the mode it set at creation is the mode the device will have at runtime; it should continue to apply its in-kernel checks regardless. The filesystem mode and the in-kernel `priv_check` defend different attackers; keep both.
+即使你的驱动程序以保守模式创建设备节点，系统管理员也可以通过 devfs 规则更改它。devfs 规则可以基于设备名称、jail 和其他标准放宽或限制权限。你的驱动程序不应假设创建时设置的模式就是运行时的模式；它应该继续应用其内核内检查。文件系统模式和内核内 `priv_check` 防御不同的攻击者；保持两者。
 
 ### MAC 框架
 
-The FreeBSD Mandatory Access Control framework, declared in `/usr/src/sys/security/mac/`, lets policy modules hook into the kernel and make access decisions based on richer labels than UNIX permissions. A MAC policy can, for example, restrict which users can access which devices even if UNIX permissions allow it, or log every use of a sensitive operation.
+FreeBSD 强制访问控制框架在 `/usr/src/sys/security/mac/` 中声明，它让策略模块挂钩到内核中并基于比 UNIX 权限更丰富的标签做出访问决策。MAC 策略可以，例如，限制哪些用户可以访问哪些设备即使 UNIX 权限允许，或记录每次敏感操作的使用。
 
-For driver authors, the point is this: `priv_check` already consults the MAC framework. When you use `priv_check`, you are opting into whatever MAC policies the administrator has configured. If you bypass `priv_check` and roll your own privilege check using `cr_uid`, you bypass MAC as well. That is one more reason to always use `priv_check`.
+对于驱动程序作者，要点是：`priv_check` 已经咨询了 MAC 框架。当你使用 `priv_check` 时，你选择加入了管理员配置的任何 MAC 策略。如果你绕过 `priv_check` 并使用 `cr_uid` 自行检查权限，你也绕过了 MAC。这是始终使用 `priv_check` 的又一个原因。
 
-Writing your own MAC policy module is beyond the scope of this chapter; the MAC framework is a substantial subject and has its own documentation. The key takeaway is simply that MAC exists, `priv_check` honors it, and you should not fight it.
+编写你自己的 MAC 策略模块超出了本章的范围；MAC 框架是一个相当大的主题，有自己的文档。关键的结论只是 MAC 存在，`priv_check` 遵守它，你不应该与之对抗。
 
-**A brief note on MAC policies shipped with FreeBSD.** The base system includes several MAC policies as loadable modules: `mac_bsdextended(4)` for file-system rule lists, `mac_portacl(4)` for network-port access control, `mac_biba(4)` for Biba integrity policy, `mac_mls(4)` for Multi-Level Security labels, and `mac_partition(4)` for partitioning processes into isolated groups. None of these need to be understood in detail by a driver author; the key point is that your driver, by using `priv_check`, gets their policy decisions for free. An administrator who enables `mac_bsdextended` gets additional filesystem-level restrictions; your driver does not need to know.
+**关于 FreeBSD 附带的 MAC 策略的简要说明。** 基本系统包括几个 MAC 策略作为可加载模块：用于文件系统规则列表的 `mac_bsdextended(4)`，用于网络端口访问控制的 `mac_portacl(4)`，用于 Biba 完整性策略的 `mac_biba(4)`，用于多级安全标签的 `mac_mls(4)`，以及用于将进程分区为隔离组的 `mac_partition(4)`。驱动程序作者不需要详细了解这些；关键是你使用的驱动程序通过 `priv_check` 免费获得它们的策略决策。启用 `mac_bsdextended` 的管理员获得额外的文件系统级限制；你的驱动程序不需要知道。
 
-**MAC and the device node.** When you create a device with `make_dev_s`, the MAC framework may assign a label to the device node. Policies consult that label when access is attempted. A driver does not interact with labels directly; the framework handles it. But understanding that a label exists explains why, on a MAC-enabled system, access to your device may be refused even when UNIX permissions allow it. That is not a bug; it is MAC doing its job.
+**MAC 与设备节点。** 当你用 `make_dev_s` 创建设备时，MAC 框架可能为设备节点分配一个标签。当尝试访问时，策略咨询该标签。驱动程序不直接与标签交互；框架处理它。但理解标签存在解释了为什么在启用 MAC 的系统上，即使 UNIX 权限允许，对你的设备的访问也可能被拒绝。那不是漏洞；那是 MAC 在做它的工作。
 
 ### Capsicum 与能力模式
 
-Capsicum, declared in `/usr/src/sys/sys/capsicum.h`, is a capability system bolted onto FreeBSD. A process in capability mode has lost access to most global namespaces (no new file opens, no network with side effects, no arbitrary ioctl, and so on). It can only operate on file descriptors it already holds, and those file descriptors may themselves have limited rights (read only, write only, certain ioctls only, and so on).
+Capsicum 在 `/usr/src/sys/sys/capsicum.h` 中声明，是一个附加到 FreeBSD 上的能力系统。处于能力模式的进程已经失去了对大多数全局命名空间的访问（没有新文件打开，没有带副作用的网络，没有任意 ioctl 等等）。它只能操作它已经持有的文件描述符，而这些文件描述符本身可能具有有限的权利（只读、只写、仅某些 ioctl 等等）。
 
-Capsicum was introduced to FreeBSD through the work of Robert Watson and collaborators. It sits alongside the traditional UNIX permission model and adds a second, more granular layer. Where UNIX permissions ask "can this user access this resource by name", Capsicum asks "does this process have a capability for this specific object". The two layers work together: the user must have UNIX permission to open the file in the first place, but once the file descriptor exists, Capsicum can further restrict what the holder of the descriptor can do with it.
+Capsicum 通过 Robert Watson 及其合作者的工作引入到 FreeBSD。它与传统的 UNIX 权限模型并排，添加了第二个更细粒度的层。UNIX 权限问的是"这个用户能否按名称访问这个资源"，Capsicum 问的是"这个进程是否拥有这个特定对象的能力"。两层协同工作：用户首先必须有 UNIX 权限才能打开文件，但一旦文件描述符存在，Capsicum 可以进一步限制描述符持有者可以用它做什么。
 
-For a driver, the main Capsicum concern is: some of your ioctls may be inappropriate for a process in capability mode. The helper `IN_CAPABILITY_MODE(td)`, defined in `capsicum.h`, tells you whether the calling thread is in capability mode. A driver can check it and refuse operations that are unsafe:
+对于驱动程序，主要的 Capsicum 关注点是：你的一些 ioctl 可能不适合处于能力模式的进程。辅助函数 `IN_CAPABILITY_MODE(td)` 定义在 `capsicum.h` 中，告诉你调用线程是否处于能力模式。驱动程序可以检查它并拒绝不安全的操作：
 
 ```c
 if (IN_CAPABILITY_MODE(td))
     return (ECAPMODE);
 ```
 
-This is appropriate for operations with global side effects that a capability-mode process should not have access to. Examples might be an ioctl that reconfigures the global driver state, an ioctl that affects other processes or other file descriptors, or an ioctl that performs an operation that requires querying the global filesystem namespace. If your driver's ioctl needs to touch something that is not already named by the file descriptor it was called on, a capability-mode check is appropriate.
+这适合具有全局副作用的、能力模式进程不应访问的操作。例如可能重新配置全局驱动程序状态的 ioctl、影响其他进程或其他文件描述符的 ioctl，或执行需要查询全局文件系统命名空间的操作的 ioctl。如果你的驱动程序的 ioctl 需要触及不是已经由调用它的文件描述符命名的东西，能力模式检查是合适的。
 
-For most driver operations, however, the Capsicum story is simpler: the process that holds the file descriptor was granted the rights it needed when the descriptor was given to it. The driver does not need to re-check those rights; the file-descriptor layer already did. Just make sure your driver supports the normal cap-rights flow (it almost certainly does by default) and consider which individual ioctls should be marked with `CAP_IOCTL_*` rights at the VFS layer.
+然而，对于大多数驱动程序操作，Capsicum 的故事更简单：持有文件描述符的进程在描述符被交给它时就被授予了它需要的权利。驱动程序不需要重新检查这些权利；文件描述符层已经做了。只需确保你的驱动程序支持正常的 cap-rights 流程（它几乎肯定默认就支持）并考虑哪些单独的 ioctl 应该在 VFS 层用 `CAP_IOCTL_*` 权限标记。
 
-**Cap rights at ioctl granularity.** FreeBSD allows a file descriptor to be restricted to a specific subset of ioctls via `cap_ioctls_limit(2)`. For example, a process can hold a file descriptor that allows `FIOASYNC` and `FIONBIO` but no other ioctls. The restriction is enforced by the VFS layer, not by your driver, but the set of ioctls you expose is what defines what can be selected for restriction. A driver that implements only meaningful, well-documented ioctls makes it easier for consumers to apply sensible cap-ioctl restrictions.
+**ioctl 粒度上的能力权限。** FreeBSD 允许通过 `cap_ioctls_limit(2)` 将文件描述符限制为特定子集的 ioctl。例如，一个进程可以持有一个允许 `FIOASYNC` 和 `FIONBIO` 但不允许其他 ioctl 的文件描述符。该限制由 VFS 层强制执行，而不是你的驱动程序，但你暴露的 ioctl 集合定义了哪些可以被选择进行限制。只实现有意义的、文档齐全的 ioctl 的驱动程序使使用者更容易应用合理的能力-ioctl 限制。
 
-**Examining Capsicum usage in the tree.** For real-world examples of Capsicum-aware code, look at `/usr/src/sys/net/if_tuntap.c` alongside the core capability files under `/usr/src/sys/kern/sys_capability.c`. Most individual drivers rely on the VFS layer to enforce `caprights`, and only add an explicit `IN_CAPABILITY_MODE(td)` check on the handful of operations with global side effects. The pattern is consistent: preserve the normal behavior, add an `IN_CAPABILITY_MODE` check where operations would be unsafe, and document which ioctls are sandbox-safe.
+**检查树中的 Capsicum 使用情况。** 有关 Capsicum 感知代码的真实世界示例，请查看 `/usr/src/sys/net/if_tuntap.c` 以及 `/usr/src/sys/kern/sys_capability.c` 下的核心能力文件。大多数单个驱动程序依赖 VFS 层来强制执行 `caprights`，只在少数具有全局副作用的操作上添加显式的 `IN_CAPABILITY_MODE(td)` 检查。模式是一致的：保留正常行为，在操作不安全的添加 `IN_CAPABILITY_MODE` 检查，并记录哪些 ioctl 是沙箱安全的。
 
 ### 带安全标志的 Sysctl
 
-Many drivers expose tunables and statistics through sysctls. A sysctl that exposes sensitive information, or that can be set to change driver behaviour, should use appropriate flags. From `/usr/src/sys/sys/sysctl.h`:
+许多驱动程序通过 sysctl 暴露可调参数和统计信息。暴露敏感信息或可以设置来改变驱动程序行为的 sysctl 应该使用适当的标志。来自 `/usr/src/sys/sys/sysctl.h`：
 
-`CTLFLAG_SECURE` (value `0x08000000`) asks the sysctl framework to consult `priv_check(PRIV_SYSCTL_SECURE)` before allowing the operation. It is useful for sysctls that should not be changed at elevated securelevel.
+`CTLFLAG_SECURE` (值为 `0x08000000`) 让 sysctl 框架在允许操作前咨询 `priv_check(PRIV_SYSCTL_SECURE)`。这对于不应在升高的安全级别下更改的 sysctl 很有用。
 
-`CTLFLAG_PRISON` allows the sysctl to be visible and writable from inside a jail (rarely wanted for drivers).
+`CTLFLAG_PRISON` 允许 sysctl 在 jail 内部可见和可写（驱动程序很少需要）。
 
-`CTLFLAG_CAPRD` and `CTLFLAG_CAPWR` allow the sysctl to be read or written from capability mode. By default, sysctls are inaccessible in capability mode.
+`CTLFLAG_CAPRD` 和 `CTLFLAG_CAPWR` 允许 sysctl 从能力模式读取或写入。默认情况下，sysctl 在能力模式下是不可访问的。
 
-`CTLFLAG_TUN` makes the sysctl settable as a loader tunable (from `/boot/loader.conf`).
+`CTLFLAG_TUN` 使 sysctl 可作为加载器可调参数设置（从 `/boot/loader.conf`）。
 
-`CTLFLAG_RD` vs `CTLFLAG_RW` determines read-only vs read-write access; prefer `CTLFLAG_RD` for anything that exposes state, and be deliberate about what you make writable.
+`CTLFLAG_RD` 与 `CTLFLAG_RW` 决定只读与读写访问；对于任何暴露状态的 sysctl 优先使用 `CTLFLAG_RD`，并审慎决定哪些是可写的。
 
-A sysctl that exposes a driver-internal buffer for debugging should typically be `CTLFLAG_RD | CTLFLAG_SECURE` at minimum, and possibly not exist at all in production builds.
+暴露驱动程序内部缓冲区用于调试的 sysctl 通常至少应为 `CTLFLAG_RD | CTLFLAG_SECURE`，可能根本不应存在于生产构建中。
 
 ### 完整的权限门控 Ioctl
 
-Putting the pieces together, here is what a privilege-gated ioctl looks like, end to end:
+将各部分组合在一起，这里是一个端到端的权限门控 ioctl 的样子：
 
 ```c
 static int
@@ -2044,15 +2044,15 @@ secdev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 }
 ```
 
-Different commands get different gates. The status command is unprivileged, since it just reads state. The reset command is the danger case, and it goes through the full layered check.
+不同的命令有不同的门控。状态命令是非特权的，因为它只是读取状态。重置命令是危险情况，它经过完整的分层检查。
 
 ### 第6节总结
 
 FreeBSD 驱动程序中的访问控制是几个层之间的协作。设备节点上的文件系统权限决定谁可以打开它。`priv_check(9)` 函数族决定线程是否可以执行给定的特权操作。Jail 检查决定操作在调用者的安全域中是否有意义。安全级别检查决定系统管理员是否完全允许此类操作。MAC 框架让策略模块在上面添加自己的意见。Capsicum 权限限制受能力限制的进程可以做什么。
 
-The correct use of these tools comes down to a short list of rules: check the caller's credentials at the right points, prefer `priv_check` over ad-hoc UID checks, add `jailed()` and `securelevel_gt` when the operation has host-wide consequences, pick the most specific `PRIV_*` constant that fits the operation, and set conservative device-file modes in `make_dev_s`.
+正确使用这些工具归结为一个简短的规则列表：在正确的点检查调用者的凭据，优先使用 `priv_check` 而不是临时的 UID 检查，当操作具有主机范围的后果时添加 `jailed()` 和 `securelevel_gt`，选择适合操作的最具体的 `PRIV_*` 常量，并在 `make_dev_s` 中设置保守的设备文件模式。
 
-The next section looks at a different kind of leak: not a privilege escape, but an information escape. Even operations that are properly gated can inadvertently reveal kernel memory contents if they are not written carefully.
+下一节看不同类型的泄露：不是权限逃逸，而是信息逃逸。即使正确门控的操作也可能在不小心编写的情况下无意中揭示内核内存内容。
 
 ## 第7节：防止信息泄露
 
@@ -2062,21 +2062,21 @@ The next section looks at a different kind of leak: not a privilege escape, but 
 
 ### 信息泄露是如何发生的
 
-There are three main ways a driver leaks information:
+驱动程序以三种主要方式泄露信息：
 
-**Uninitialized structure fields copied to user space.** A structure has N defined fields plus padding and alignment slots. The code fills in the N fields and calls `copyout`. The padding goes along for the ride, carrying whatever uninitialized stack memory happened to be there.
+**未初始化的结构字段被复制到用户空间。** 一个结构有 N 个定义的字段加上填充和对齐槽。代码填充了 N 个字段并调用 `copyout`。填充顺带被传递出去，携带了碰巧在那里的任何未初始化栈内存。
 
-**Partially initialized buffers.** The driver allocates a buffer, fills in some of it, and copies the whole buffer to user space. The uninitialized tail carries heap contents.
+**部分初始化的缓冲区。** 驱动程序分配一个缓冲区，填充其中一部分，然后将整个缓冲区复制到用户空间。未初始化的尾部携带堆内容。
 
-**Oversized replies.** The driver is asked for `N` bytes, but returns a buffer of size `M > N`. The extra `M - N` bytes contain whatever was in the tail of the source buffer.
+**过大的回复。** 驱动程序被请求 `N` 字节，但返回大小为 `M > N` 的缓冲区。额外的 `M - N` 字节包含源缓冲区尾部中的任何内容。
 
-**Reading beyond a NUL.** For string data, the driver copies a buffer up to its allocated size instead of up to the NUL terminator. The bytes after the NUL can carry any data that happened to be in that buffer earlier.
+**读取超过 NUL。** 对于字符串数据，驱动程序复制到其分配大小而不是到 NUL 终止符。NUL 之后的字节可能携带该缓冲区中早期存在的任何数据。
 
-Each of these is easy to create by accident and easy to prevent once you know the pattern.
+这些中的每一个都很容易意外创建，一旦你知道模式也很容易预防。
 
 ### 填充问题
 
-Consider this structure:
+考虑这个结构：
 
 ```c
 struct secdev_info {
@@ -2087,9 +2087,9 @@ struct secdev_info {
 };
 ```
 
-On a 64-bit system, the compiler inserts padding to align `flags` to 8 bytes. Between `version` (4 bytes) and `flags` (8 bytes), there are 4 bytes of padding. After `id` (2 bytes) and before `name` (1-byte alignment), there are 6 more bytes of padding at the end if the structure is sized up to a multiple of 8.
+在 64 位系统上，编译器插入填充以将 `flags` 对齐到 8 字节。在 `version`（4 字节）和 `flags`（8 字节）之间，有 4 字节的填充。在 `id`（2 字节）和 `name`（1 字节对齐）之后，如果结构大小上调到 8 的倍数，还有 6 字节的填充。
 
-If your code does:
+如果你的代码这样做：
 
 ```c
 struct secdev_info info;
@@ -2102,9 +2102,9 @@ strncpy(info.name, "secdev0", sizeof(info.name));
 error = copyout(&info, args->buf, sizeof(info));
 ```
 
-then the padding bytes, which you never set, go out to user space. They contain whatever stack memory happened to be at those positions when the function was entered. That is an information leak.
+那么你从未设置的填充字节就会传到用户空间。它们包含函数进入时那些位置碰巧保存的任何栈内存。这就是信息泄露。
 
-The fix is universal and cheap: zero the structure first.
+修复是通用的且便宜的：先将结构清零。
 
 ```c
 struct secdev_info info;
@@ -2118,9 +2118,9 @@ strncpy(info.name, "secdev0", sizeof(info.name));
 error = copyout(&info, args->buf, sizeof(info));
 ```
 
-Now the padding is zero, as is any field you forgot to set. The cost is one call to `bzero`; the benefit is that your driver cannot leak kernel memory through this structure, no matter what fields are added later. Always zero structures before copyout.
+现在填充是零，你忘记设置的任何字段也是零。代价是一次 `bzero` 调用；好处是你的驱动程序不能通过这个结构泄露内核内存，无论以后添加或删除什么字段。总是在 copyout 之前清零结构。
 
-An equivalent pattern using designated initializers works when you are declaring and initializing in one step:
+使用指定初始化器的等效模式适用于你在一步中声明和初始化的情况：
 
 ```c
 struct secdev_info info = { 0 };  /* or { } in some standards */
@@ -2128,21 +2128,21 @@ info.version = 1;
 /* ... */
 ```
 
-The `= { 0 }` zeros all bytes including padding. Combine this with setting the specific fields afterwards, and you have a clean pattern.
+`= { 0 }` 清零所有字节包括填充。将此与之后设置特定字段结合，你就有一个干净的模式。
 
 ### 堆分配情况
 
-When you allocate a buffer with `malloc(9)` and fill it before returning to user space, you have the same issue. Always use `M_ZERO` to zero-initialize, or explicitly zero the buffer before writing to it:
+当你用 `malloc(9)` 分配缓冲区并在返回用户空间之前填充它时，你有同样的问题。始终使用 `M_ZERO` 进行零初始化，或者在写入前显式清零缓冲区：
 
 ```c
 buf = malloc(size, M_SECDEV, M_WAITOK | M_ZERO);
 ```
 
-Even if you intend to fill every byte, using `M_ZERO` is cheap insurance: if a bug causes a partial fill, the unfilled bytes are zero rather than stale heap contents.
+即使你打算填充每个字节，使用 `M_ZERO` 也是便宜的保险：如果漏洞导致部分填充，未填充的字节是零而不是陈旧的堆内容。
 
 ### 过大回复
 
-A subtle form of leak happens when the driver returns more data than the user asked for. Imagine an ioctl that returns a list of items:
+一种微妙的泄露形式发生在驱动程序返回的数据比用户请求的多时。想象一个返回项目列表的 ioctl：
 
 ```c
 /* User asks for up to user_len bytes of list data. */
@@ -2152,20 +2152,20 @@ if (user_len > sc->sc_list_bytes)
 error = copyout(sc->sc_list, args->buf, sc->sc_list_bytes);  /* BUG: wrong length */
 ```
 
-The driver copies `sc_list_bytes` bytes regardless of what the user asked for. If `sc_list_bytes > user_len`, the driver writes past `args->buf`, which is a different bug (buffer overflow in user space). If the driver is writing to a local buffer first and then copying out, a similar error would write past the local buffer.
+驱动程序复制 `sc_list_bytes` 字节，不管用户请求什么。如果 `sc_list_bytes > user_len`，驱动程序写入超过 `args->buf`，这是一个不同的漏洞（用户空间中的缓冲区溢出）。如果驱动程序先写入本地缓冲区然后复制出去，类似的错误会写入超过本地缓冲区。
 
-The correct pattern is to clamp the length and use the clamped length for the copy:
+正确的模式是限制长度并使用限制后的长度进行复制：
 
 ```c
 size_t to_copy = MIN(user_len, sc->sc_list_bytes);
 error = copyout(sc->sc_list, args->buf, to_copy);
 ```
 
-Information leaks through oversized replies are common when driver code evolves: the original author wrote a paired check-and-copy; a later change altered one side but not the other. Every copyout should use the already-validated kernel-side length, and that length should be bounded by the user's buffer size.
+通过过大回复的信息泄露在驱动程序代码演进时很常见：原始作者编写了配对的检查和复制；后来的更改修改了一侧而没有修改另一侧。每次 copyout 应使用已验证的内核侧长度，该长度应由用户缓冲区大小限制。
 
 ### 字符串与 NUL 终止符
 
-Strings are a particularly rich source of information leaks because they have two different natural lengths: the length of the string (up to the NUL) and the size of the buffer it lives in. Suppose:
+字符串是信息泄露的一个特别丰富的来源，因为它们有两种不同的自然长度：字符串的长度（到 NUL 为止）和它所在缓冲区的大小。假设：
 
 ```c
 char name[32];
@@ -2177,9 +2177,9 @@ strncpy(name, "xdev", sizeof(name));     /* copies 5 bytes, NUL-padded */
 copyout(name, args->buf, sizeof(name));  /* copies all 32 bytes */
 ```
 
-The second `strncpy` overwrites the first five bytes with "xdev\0" and then pads the rest of the buffer with NULs. That happens to be safe because `strncpy` pads with NULs when the source is shorter than the destination. But if the buffer came from `malloc(9)` without `M_ZERO`, or from a stack buffer that was written to by earlier code, bytes after the NUL may contain stale data. Copying the full buffer then leaks it.
+第二个 `strncpy` 用 "xdev\0" 覆盖前五个字节，然后用 NUL 填充缓冲区的其余部分。这碰巧是安全的，因为当源短于目标时 `strncpy` 用 NUL 填充。但如果缓冲区来自没有 `M_ZERO` 的 `malloc(9)`，或来自被早期代码写入的栈缓冲区，NUL 之后的字节可能包含陈旧数据。复制整个缓冲区就会泄露它。
 
-The safe pattern is to copy only up to the NUL, or to zero the buffer before writing:
+安全模式是只复制到 NUL，或在写入前清零缓冲区：
 
 ```c
 bzero(name, sizeof(name));
@@ -2187,21 +2187,21 @@ snprintf(name, sizeof(name), "%s", "secdev0");
 copyout(name, args->buf, strlen(name) + 1);
 ```
 
-`snprintf` guarantees NUL termination. Zeroing first ensures the bytes after the NUL are zero. The `+ 1` in the copy length includes the NUL itself.
+`snprintf` 保证 NUL 终止。先清零确保 NUL 之后的字节是零。复制长度中的 `+ 1` 包括 NUL 本身。
 
-Alternatively, copy only the string and let user space deal with its own padding:
+或者，只复制字符串，让用户空间处理自己的填充：
 
 ```c
 copyout(name, args->buf, strlen(name) + 1);
 ```
 
-The cleanest pattern is to zero first and copy exactly the valid length.
+最干净的模式是先清零然后精确复制有效长度。
 
 ### 敏感数据：释放前显式清零
 
-When a driver allocates memory to hold sensitive data (cryptographic keys, user credentials, proprietary secrets), the memory should be zeroed explicitly before being freed. Otherwise the freed memory returns to the kernel allocator's free pool with the data still visible, and subsequent allocations from that pool may expose it.
+当驱动程序分配内存来保存敏感数据（加密密钥、用户凭据、专有秘密）时，内存应在释放前显式清零。否则释放的内存带着数据仍然可见返回到内核分配器的空闲池，后续从该池的分配可能暴露它。
 
-FreeBSD provides `explicit_bzero(9)`, declared in `/usr/src/sys/sys/systm.h`, which zeroes memory in a way that the compiler cannot optimize away:
+FreeBSD 提供 `explicit_bzero(9)`，在 `/usr/src/sys/sys/systm.h` 中声明，以编译器无法优化的方式清零内存：
 
 ```c
 explicit_bzero(sc->sc_secret, sc->sc_secret_len);
@@ -2209,113 +2209,113 @@ free(sc->sc_secret, M_SECDEV);
 sc->sc_secret = NULL;
 ```
 
-Ordinary `bzero` can be eliminated by the compiler if the data is not read after being zeroed, which is exactly the situation before a free. `explicit_bzero` is guaranteed to perform the zeroing. Use it whenever sensitive data is about to be freed or go out of scope.
+普通的 `bzero` 在数据清零后不被读取时可能被编译器消除，这恰好是释放前的情况。`explicit_bzero` 保证执行清零。每当敏感数据即将被释放或超出作用域时使用它。
 
-There is also `zfree(9)`, declared in `/usr/src/sys/sys/malloc.h`, which zeroes and frees in one call:
+还有 `zfree(9)`，在 `/usr/src/sys/sys/malloc.h` 中声明，它在一个调用中清零并释放：
 
 ```c
 zfree(sc->sc_secret, M_SECDEV);
 sc->sc_secret = NULL;
 ```
 
-`zfree` knows the allocation size from the allocator metadata and zeroes that many bytes before freeing. This is usually the cleanest pattern for cryptographic material.
+`zfree` 从分配器元数据知道分配大小并在释放前清零那么多字节。这通常是加密材料最干净的模式。
 
-For UMA zones, the equivalent is that the zone itself can be asked to zero on free, or you can `explicit_bzero` the object before calling `uma_zfree`. For stack buffers with sensitive content, `explicit_bzero` at the end of the function is the right tool.
+对于 UMA 区域，等效做法是要求区域本身在释放时清零，或者你可以在调用 `uma_zfree` 前对对象使用 `explicit_bzero`。对于有敏感内容的栈缓冲区，函数末尾的 `explicit_bzero` 是正确的工具。
 
 ### 永远不要泄露内核指针
 
-One specific form of information leak is returning a kernel pointer to user space. The kernel address of a softc, or of an internal buffer, is useful information to an attacker trying to exploit another bug. `printf("%p")` in log messages can also leak addresses. The general rule: do not put kernel addresses in user-visible output.
+信息泄露的一种具体形式是将内核指针返回到用户空间。softc 或内部缓冲区的内核地址对试图利用另一个漏洞的攻击者来说是有用的信息。日志消息中的 `printf("%p")` 也可能泄露地址。一般规则：不要将内核地址放入用户可见的输出中。
 
-For sysctls and ioctls, the simplest rule is that no field in a user-facing structure should be a raw kernel pointer. If the driver wants to expose an identifier for a kernel object, use a small integer ID (an index into a table, for example), not the address of the object. Convert from one to the other inside the driver, never expose the raw pointer.
+对于 sysctl 和 ioctl，最简单的规则是面向用户结构中不应有任何字段是原始内核指针。如果驱动程序想要暴露内核对象的标识符，使用小的整数 ID（例如到表中的索引），而不是对象的地址。在驱动程序内部从一种转换为另一种，永远不暴露原始指针。
 
-FreeBSD's `printf(9)` supports the `%p` format, which does print a pointer, but log messages in production drivers should avoid `%p` for anything where the pointer could aid exploitation. For debugging, `%p` is fine during development; before shipping the driver, audit `printf` and `log` calls to ensure no `%p` remains in paths accessible from user space.
+FreeBSD 的 `printf(9)` 支持 `%p` 格式，它确实打印指针，但生产驱动程序中的日志消息应避免对指针可能有助于利用的任何东西使用 `%p`。对于调试，在开发期间 `%p` 没问题；在发布驱动程序之前，审计 `printf` 和 `log` 调用以确保从用户空间可达的路径中没有 `%p` 残留。
 
 ### Sysctl 输出
 
-Sysctls that expose structures have the same rules as ioctls. Zero the structure before filling it, clamp the output length to the caller's buffer, and avoid pointer leaks. The `sysctl_handle_opaque` helper is often used for raw structures; make sure the structure is fully initialized before the handle returns.
+暴露结构的 sysctl 有与 ioctl 相同的规则。在填充前清零结构，将输出长度限制在调用者缓冲区大小内，避免指针泄露。`sysctl_handle_opaque` 辅助函数通常用于原始结构；确保结构在句柄返回前完全初始化。
 
-A safer pattern is to expose each field as its own sysctl, using `sysctl_handle_int`, `sysctl_handle_string`, and so on. This avoids the padding problem entirely because each value is copied out as a primitive. It is also more ergonomic for users: `sysctl secdev.stats.packets` is more useful than an opaque blob they have to decode.
+更安全的模式是将每个字段作为自己的 sysctl 暴露，使用 `sysctl_handle_int`、`sysctl_handle_string` 等。这完全避免了填充问题，因为每个值作为原语被复制出去。这对用户也更友好：`sysctl secdev.stats.packets` 比不透明的他们需要解码的块更有用。
 
 ### copyout 错误
 
-`copyout` can fail. If the user buffer becomes unmapped between the validation and the copy, `copyout` returns `EFAULT`. Your driver must handle this cleanly: typically, return the error to the user, and make sure any partial success is rolled back.
+`copyout` 可能失败。如果用户缓冲区在验证和复制之间变得未映射，`copyout` 返回 `EFAULT`。你的驱动程序必须干净地处理它：通常，将错误返回给用户，并确保任何部分成功被回滚。
 
-A sequence like "allocate state, fill output buffer, copyout, commit state" is safer than "commit state, copyout". If the copyout fails in the second pattern, the state is committed but the user never learned what happened. If it fails in the first pattern, nothing was committed, and the user gets a clean error.
+像"分配状态、填充输出缓冲区、copyout、提交状态"这样的序列比"提交状态、copyout"更安全。如果 copyout 在第二种模式中失败，状态已提交但用户永远不知道发生了什么。如果它在第一种模式中失败，没有东西被提交，用户得到一个干净的错误。
 
 ### 故意披露
 
-Some sysctls and ioctls are explicitly designed to reveal information that would otherwise be private. These need an especially careful threat model. Ask: who is allowed to call this? What do they learn? Could a less-trusted attacker who obtains that information use it for something worse? A dmesg-style sysctl that exposes recent kernel messages is fine, but only because it has been scoped and filtered; exposing raw kernel log buffers without scoping is very different.
+有些 sysctl 和 ioctl 是显式设计来揭示否则为私有的信息的。这些需要特别仔细的威胁模型。问：谁被允许调用这个？他们会了解到什么？获得该信息的较低信任攻击者能否用它做更坏的事情？暴露最近内核消息的 dmesg 风格 sysctl 是可以的，但仅仅因为它已经被限定和过滤；在没有限定的情况下暴露原始内核日志缓冲区是非常不同的。
 
-When in doubt, a sysctl that reveals sensitive data should be gated with `CTLFLAG_SECURE`, restricted to privileged users, and exposed only through paths that users must explicitly opt into. Default to less disclosure rather than more.
+有疑问时，揭示敏感数据的 sysctl 应该用 `CTLFLAG_SECURE` 门控，限制为特权用户，并仅通过用户必须明确选择加入的路径暴露。默认选择更少的披露而不是更多。
 
 ### 内核指针哈希
 
-Sometimes a driver legitimately needs to expose something that identifies a kernel object, for debugging or for correlating events. The raw pointer address is the wrong answer for the reasons discussed. A better answer is a hashed or masked representation that identifies the object without revealing its address.
+有时驱动程序确实需要暴露标识内核对象的东西，用于调试或关联事件。原始指针地址由于讨论过的原因不是正确答案。更好的答案是使用散列或掩码表示来标识对象而不暴露其地址。
 
-FreeBSD provides `%p` in `printf(9)`, which prints a pointer. It also provides a related mechanism where pointers can be "obfuscated" in user-visible output using a per-boot secret, so that two pointers in the same output are consistently distinguishable but their absolute values are not leaked. The support for this varies across subsystems; when designing your own output, consider whether a dense integer ID (an index into a table) is sufficient. Often it is.
+FreeBSD 在 `printf(9)` 中提供 `%p`，它打印指针。它还提供了一种相关机制，其中指针可以在用户可见输出中使用每次引导的秘密进行"混淆"，以便同一输出中的两个指针始终可区分但不泄露其绝对值。这方面的支持因子系统而异；在设计自己的输出时，考虑密集整数 ID（到表中的索引）是否足够。通常它就够了。
 
-For logs, `%p` is fine during development when logs are private. Before shipping, replace any `%p` in paths reachable from user space with either a debug-only guard (so the format is present only in debug builds) or with a non-pointer identifier.
+对于日志，当日志是私有的时，在开发期间 `%p` 没问题。发布前，将用户空间可达路径中的任何 `%p` 替换为仅调试的保护（使格式仅存在于调试构建中）或非指针标识符。
 
 ### 第7节总结
 
-Information leaks are the quieter cousin of buffer overflows: they do not crash, they do not corrupt, they merely send data to user space that should have stayed in the kernel. The tools to prevent them are simple and cheap. Zero structures before filling them. Use `M_ZERO` on heap allocations that will be copied to user space. Clamp copy lengths to the smaller of the caller's buffer and the kernel's source buffer. Use `explicit_bzero` or `zfree` for sensitive data before freeing. Keep kernel pointers out of user-visible output. Bound strings to their actual length, not their buffer size.
+信息泄露是缓冲区溢出的更安静的表亲：它们不崩溃，不损坏，它们只是将本应留在内核中的数据发送到用户空间。防止它们的工具简单且便宜。在填充前清零结构。在将被复制到用户空间的堆分配上使用 `M_ZERO`。将复制长度限制在调用者缓冲区和内核源缓冲区中较小的一个。在释放前对敏感数据使用 `explicit_bzero` 或 `zfree`。将内核指针排除在用户可见输出之外。将字符串限制到其实际长度，而不是其缓冲区大小。
 
-A driver that applies these habits consistently will not leak information through its interfaces. The next section moves to the debugging and diagnostics side: how to log without leaking, how to debug without leaving production-hostile code behind, and how to keep the operator informed without handing an attacker a map.
+一致应用这些习惯的驱动程序不会通过其接口泄露信息。下一节转向调试和诊断方面：如何在不泄露的情况下记录日志，如何在不留下对生产环境有害的代码的情况下调试，以及如何在不给攻击者地图的情况下通知运维人员。
 
 ## 第8节：安全的日志记录与调试
 
 每个驱动程序都会记录日志。`printf(9)` 和 `log(9)` 是驱动程序作者首先使用的工具之一，这是有充分理由的：一个放置得当的日志消息将神秘的失败转化为可读的叙述。但日志不是免费的。它们消耗磁盘空间，可能被淹没，并且可能泄露敏感数据。安全意识的驱动程序将日志记录视为一等设计关注，而不是调试的事后想法。
 
-This section is about writing log messages that help operators without hurting security.
+本节是关于编写帮助运维人员而不损害安全的日志消息。
 
 ### 日志记录原语
 
-FreeBSD drivers have two main ways to emit messages.
+FreeBSD 驱动程序有两种主要的消息发送方式。
 
-`printf(9)`, the same name as the C library function but with kernel-specific semantics, writes to the kernel message buffer and, if the console is active, to the console. It is unconditional: every `printf` call results in a message.
+`printf(9)`，与 C 库函数同名但具有内核特定语义，写入内核消息缓冲区，如果控制台活动的话还写入控制台。它是无条件的：每次 `printf` 调用都产生一条消息。
 
-`log(9)`, declared in `/usr/src/sys/sys/syslog.h`, writes to the kernel log ring with a syslog-compatible priority. Messages go to the in-kernel log buffer (readable by `dmesg(8)`) and, via `syslogd(8)`, to the configured log destinations. The priority is the familiar syslog scale: `LOG_EMERG`, `LOG_ALERT`, `LOG_CRIT`, `LOG_ERR`, `LOG_WARNING`, `LOG_NOTICE`, `LOG_INFO`, `LOG_DEBUG`.
+`log(9)`，在 `/usr/src/sys/sys/syslog.h` 中声明，以 syslog 兼容的优先级写入内核日志环。消息发送到内核内日志缓冲区（可通过 `dmesg(8)` 读取），并通过 `syslogd(8)` 发送到配置的日志目标。优先级是熟悉的 syslog 刻度：`LOG_EMERG`、`LOG_ALERT`、`LOG_CRIT`、`LOG_ERR`、`LOG_WARNING`、`LOG_NOTICE`、`LOG_INFO`、`LOG_DEBUG`。
 
-Use `log(9)` when you want the message to be filtered or routed by syslog. Use `printf(9)` when you want unconditional emission, typically for very important events or for output that should always appear on the console.
+当你希望消息被 syslog 过滤或路由时使用 `log(9)`。当你希望无条件发送时使用 `printf(9)`，通常用于非常重要的事件或应该始终出现在控制台上的输出。
 
-`device_printf(9)` is a small wrapper over `printf` that prefixes the message with the device name (`secdev0: ...`). Prefer it inside driver code so messages are easy to attribute.
+`device_printf(9)` 是 `printf` 的小型封装，在消息前加上设备名称（`secdev0: ...`）。在驱动程序代码中优先使用它，这样消息容易归属。
 
 ### 该记录什么和不该记录什么
 
-A security-aware driver logs:
+安全意识的驱动程序记录：
 
-**State transitions that matter.** Attach, detach, reset, firmware update, link up, link down. These let an operator correlate driver behaviour with system events.
+**重要的状态转换。** 附着、分离、重置、固件更新、链路启动、链路断开。这些让运维人员可以将驱动程序行为与系统事件关联。
 
-**Errors from the hardware or from user requests.** A bad ioctl argument, a DMA error, a timeout, a CRC mismatch. These let the operator diagnose problems.
+**来自硬件或用户请求的错误。** 错误的 ioctl 参数、DMA 错误、超时、CRC 不匹配。这些让运维人员诊断问题。
 
-**Rate-limited summaries of anomalous events.** If a malformed ioctl is received a million times per second, log the first, summarize the rest.
+**异常事件的速率限制摘要。** 如果每秒收到一百万个格式错误的 ioctl，记录第一个，总结其余的。
 
-A security-aware driver does not log:
+安全意识的驱动程序不记录：
 
-**User data.** The contents of buffers the user passed in. You never know what is in them.
+**用户数据。** 用户传入的缓冲区内容。你永远不知道里面是什么。
 
-**Cryptographic material.** Keys, IVs, plaintext, ciphertext. Ever.
+**加密材料。** 密钥、IV、明文、密文。永远不。
 
-**Sensitive hardware state.** On a security device, some register contents are themselves secrets.
+**敏感硬件状态。** 在安全设备上，某些寄存器内容本身就是秘密。
 
-**Kernel addresses.** `%p` is fine in early development; it has no place in production logs.
+**内核地址。** `%p` 在早期开发中没问题；它不属于生产日志。
 
-**Details of authentication failures.** A log message that says "user jane failed check X because register was 0x5d" tells an attacker what check to defeat. A log that says "authentication failed" tells the operator there was a failure without tutoring the attacker.
+**认证失败的详细信息。** 一条说"用户 jane 因为寄存器为 0x5d 而未通过检查 X"的日志消息告诉攻击者要击败什么检查。一条说"认证失败"的日志告诉运维人员有失败发生而不会指导攻击者。
 
-Think about who reads the logs. On a multi-tenant server, other users may have log-reading privileges. On a shipped appliance, the log may be exported for remote support. Treat log messages as information that could end up on any surface the system touches.
+想想谁阅读日志。在多租户服务器上，其他用户可能有日志阅读权限。在出厂设备上，日志可能被导出用于远程支持。将日志消息视为可能最终出现在系统接触的任何表面上的信息。
 
 ### 速率限制
 
-A noisy driver is a security problem. If an attacker can trigger a log message, they can trigger a million of them. Log flooding consumes disk space, slows the system, and buries legitimate messages. FreeBSD provides `eventratecheck(9)` and `ppsratecheck(9)` in `/usr/src/sys/sys/time.h`:
+嘈杂的驱动程序是安全问题。如果攻击者能触发一条日志消息，他们就能触发一百万条。日志泛洪消耗磁盘空间，减慢系统速度，淹没合法消息。FreeBSD 在 `/usr/src/sys/sys/time.h` 中提供 `eventratecheck(9)` 和 `ppsratecheck(9)`：
 
 ```c
 int eventratecheck(struct timeval *lasttime, int *cur_pps, int max_pps);
 int ppsratecheck(struct timeval *lasttime, int *cur_pps, int max_pps);
 ```
 
-Both return 1 if the event is allowed through and 0 if it has been rate-limited. `lasttime` and `cur_pps` are per-call state you keep in your softc. `max_pps` is the limit in events per second.
+两者在事件被允许通过时返回 1，被速率限制时返回 0。`lasttime` 和 `cur_pps` 是你保存在 softc 中的每次调用状态。`max_pps` 是每秒事件数的限制。
 
-Pattern:
+模式：
 
 ```c
 static struct timeval secdev_last_log;
@@ -2327,35 +2327,35 @@ if (ppsratecheck(&secdev_last_log, &secdev_cur_pps, 5)) {
 }
 ```
 
-Now, no matter how many malformed ioctls the attacker sends, the driver emits at most 5 log messages per second. That is enough for the operator to notice something is happening without drowning the system.
+现在，无论攻击者发送多少格式错误的 ioctl，驱动程序最多每秒发出 5 条日志消息。这足够让运维人员注意到正在发生的事情，而不会淹没系统。
 
-Per-event rate limiting (one `lasttime`/`cur_pps` pair per event type) is better than a single global limit, because it prevents a flood of one event type from masking other events.
+每个事件的速率限制（每个事件类型一对 `lasttime`/`cur_pps`）比单一的全局限制更好，因为它防止一种事件类型的泛洪掩盖其他事件。
 
 ### 实践中的日志级别
 
-A good rule of thumb is this:
+一个好的经验法则是：
 
-`LOG_ERR` for unexpected driver failures that require operator attention. "DMA mapping failed", "device returned CRC error", "firmware update aborted".
+`LOG_ERR` 用于需要运维人员注意的意外驱动程序失败。"DMA 映射失败"、"设备返回 CRC 错误"、"固件更新中止"。
 
-`LOG_WARNING` for unusual but not necessarily critical situations. "Received oversized buffer, truncating", "falling back to polled mode".
+`LOG_WARNING` 用于异常但不一定关键的情况。"收到超大缓冲区，正在截断"、"回退到轮询模式"。
 
-`LOG_NOTICE` for events that are normal but worth recording. "Firmware version 2.1 loaded", "device attached".
+`LOG_NOTICE` 用于正常但值得记录的事件。"固件版本 2.1 已加载"、"设备已附着"。
 
-`LOG_INFO` for high-volume status information that operators may filter.
+`LOG_INFO` 用于运维人员可能过滤的高频状态信息。
 
-`LOG_DEBUG` for debugging output. A production driver usually does not emit `LOG_DEBUG` unless the operator has enabled debug logging via a sysctl.
+`LOG_DEBUG` 用于调试输出。生产驱动程序通常不发出 `LOG_DEBUG`，除非运维人员通过 sysctl 启用了调试日志。
 
-`LOG_EMERG` and `LOG_ALERT` are reserved for system-threatening conditions and are not typically emitted by device drivers.
+`LOG_EMERG` 和 `LOG_ALERT` 保留给威胁系统的条件，设备驱动程序通常不发出。
 
-Choosing the right level matters because operators configure syslog to filter by level. A driver that logs every received packet at `LOG_ERR` makes the logs useless.
+选择正确的级别很重要，因为运维人员配置 syslog 按级别过滤。一个在 `LOG_ERR` 级别记录每个收到的数据包的驱动程序会使日志变得无用。
 
 ### 调试日志与生产环境
 
-During development, you will want verbose logging: every state transition, every entry and exit, every buffer allocation. That is fine. The question is how to turn it off in production without losing the ability to re-enable it when there is a bug to diagnose.
+在开发过程中，你会想要详细日志：每个状态转换、每次进入和退出、每次缓冲区分配。那没问题。问题是如何在生产环境中关闭它而不失去在需要诊断错误时重新启用的能力。
 
-Two patterns are common:
+两种常见的模式：
 
-**A sysctl-controlled debug level.** The driver reads a sysctl at the top of each log-worthy event and emits or suppresses the message based on the level. This allows runtime control without recompiling.
+**sysctl 控制的调试级别。** 驱动程序在每个值得记录的事件的顶部读取 sysctl，并根据级别发出或抑制消息。这允许运行时控制而无需重新编译。
 
 ```c
 static int secdev_debug = 0;
@@ -2368,64 +2368,64 @@ SYSCTL_INT(_hw_secdev, OID_AUTO, debug, CTLFLAG_RW,
 } while (0)
 ```
 
-**Compile-time control.** A driver can use `#ifdef SECDEV_DEBUG` to include or exclude debug blocks. This is faster (no runtime check) but requires a rebuild to change. Often the two are combined: `#ifdef SECDEV_DEBUG` wraps the infrastructure, and the sysctl controls verbosity within that.
+**编译时控制。** 驱动程序可以使用 `#ifdef SECDEV_DEBUG` 来包含或排除调试块。这更快（没有运行时检查）但需要重新编译才能更改。通常两者结合：`#ifdef SECDEV_DEBUG` 包装基础设施，sysctl 在其中控制详细程度。
 
-Either way, avoid `printf` calls in hot paths that are not guarded by some kind of conditional. An uncommented `printf` in an interrupt handler or a per-packet path is a performance disaster waiting to be enabled.
+无论哪种方式，避免在没有某种条件保护的频繁路径中使用 `printf` 调用。中断处理程序或每数据包路径中未注释的 `printf` 是等待被启用的性能灾难。
 
 ### 不留痕迹
 
-Before committing driver changes, grep the driver for:
+在提交驱动程序更改之前，grep 驱动程序中的：
 
-Raw `printf` calls without `device_printf` prefixes. These make log attribution harder.
+没有 `device_printf` 前缀的原始 `printf` 调用。这些使日志归属更难。
 
-`%p` format specifiers. If they appear in paths reachable from user space, replace with less sensitive formats (a sequence number, a hash, nothing).
+`%p` 格式说明符。如果它们出现在可从用户空间到达的路径中，替换为不太敏感的格式（序列号、哈希、什么都不输出）。
 
-`LOG_ERR` on user-triggerable events without rate limiting. Attackers can weaponize these.
+没有速率限制的用户可触发的 `LOG_ERR` 事件。攻击者可以将这些武器化。
 
-`TODO`, `XXX`, `FIXME`, `HACK` near security-related code. Leaving these for reviewers is fine; shipping them is not.
+安全相关代码附近的 `TODO`、`XXX`、`FIXME`、`HACK`。留给审查者是可以的；发布它们则不行。
 
-Test-only fprintf-equivalents that were supposed to be removed.
+本应被移除的测试用 fprintf 等价物。
 
 ### dmesg 与内核消息缓冲区
 
-The kernel message buffer is a fixed-size ring buffer shared by every driver and the kernel itself. On a busy system, old messages scroll out as new ones arrive. A driver that floods the buffer pushes out useful messages from other drivers.
+内核消息缓冲区是每个驱动程序和内核本身共享的固定大小环形缓冲区。在繁忙的系统上，旧消息随着新消息的到来而滚出。泛洪缓冲区的驱动程序会推出来自其他驱动程序的有用消息。
 
-`dmesg(8)` shows the current contents of the buffer. Operators rely on it. Being a good citizen in the buffer means: log important things, do not log in hot paths, rate-limit everything triggerable by users, and do not flood.
+`dmesg(8)` 显示缓冲区的当前内容。运维人员依赖它。在缓冲区中做个好公民意味着：记录重要的事情，不在频繁路径中记录，对用户可触发的所有内容进行速率限制，不要泛洪。
 
-The buffer size is tunable (`kern.msgbufsize` sysctl), but you cannot count on a particular size. Write as if every message is valuable and must compete with others for space.
+缓冲区大小是可调的（`kern.msgbufsize` sysctl），但你不能指望特定的大小。把每条消息当作有价值的、必须与其他消息竞争空间的东西来写。
 
 ### KTR 与追踪
 
-For detailed tracing without the cost of `printf`, FreeBSD provides KTR (Kernel Tracing), declared in `/usr/src/sys/sys/ktr.h`. KTR macros, when enabled, record events in a compact in-kernel ring that is separate from the message buffer. A kernel compiled with `options KTR` can be queried with `sysctl debug.ktr.buf` and with `ktrdump(8)`.
+对于不需要 `printf` 代价的详细追踪，FreeBSD 提供 KTR（内核追踪），在 `/usr/src/sys/sys/ktr.h` 中声明。KTR 宏在启用时将事件记录在与消息缓冲区分离的紧凑内核内环中。使用 `options KTR` 编译的内核可以通过 `sysctl debug.ktr.buf` 和 `ktrdump(8)` 查询。
 
-KTR events are best for per-operation tracing where a `printf` would be too heavy. They are almost free at runtime when disabled. For a security-sensitive driver, KTR gives you a way to leave tracing infrastructure in the code without paying for it in production.
+KTR 事件最适合每次操作的追踪，在这种场景下 `printf` 会太重。禁用时它们在运行时几乎免费。对于安全敏感的驱动程序，KTR 给你一种在代码中保留追踪基础设施而不在生产环境中付出代价的方式。
 
-Other tracing frameworks (dtrace(1) via SDT probes) are worth learning for deep inspection. They are out of scope for this chapter, but know that they exist.
+其他追踪框架（通过 SDT 探针的 dtrace(1)）值得学习用于深度检查。它们超出了本章的范围，但知道它们存在。
 
 ### 记录特权操作
 
-A specific case worth calling out: when your driver successfully performs a privileged operation, log it. This creates an audit trail. If a firmware update happens, log who triggered it. If a hardware reset is issued, log it. If a device is reconfigured, log the change.
+一个值得强调的具体情况：当你的驱动程序成功执行了特权操作时，记录它。这创建了审计追踪。如果发生了固件更新，记录谁触发了它。如果发出了硬件重置，记录它。如果设备被重新配置，记录更改。
 
 ```c
 log(LOG_NOTICE, "secdev: firmware update initiated by uid %u (euid %u)\n",
     td->td_ucred->cr_ruid, td->td_ucred->cr_uid);
 ```
 
-The operator can later see who did what. If there is ever a security incident, this log is the first evidence. Make it accurate and make it hard to forge.
+运维人员以后可以看到谁做了什么。如果曾经发生安全事故，这条日志就是第一份证据。让它准确且难以伪造。
 
-Do not over-log legitimate privileged use; a firmware update triggered by `freebsd-update` once a month is one message, not a thousand. But the single message should carry enough detail to reconstruct what happened: who, when, what, with what arguments.
+不要过度记录合法的特权使用；由 `freebsd-update` 每月触发一次的固件更新是一条消息，而不是一千条。但那条单一消息应该携带足够的细节来重建发生了什么：谁、何时、什么、带什么参数。
 
 ### audit(4) 框架
 
-For deeper audit trails than `log(9)` provides, FreeBSD includes an audit subsystem (`audit(4)`) based on the BSM (Basic Security Module) audit format originally from Solaris. When enabled via `auditd(8)`, the kernel emits structured audit records for many security-relevant events: logins, privilege changes, file access, and, increasingly, driver-specific events when drivers instrument themselves.
+对于比 `log(9)` 提供的更深层审计追踪，FreeBSD 包含一个基于最初来自 Solaris 的 BSM（基本安全模块）审计格式的审计子系统（`audit(4)`）。通过 `auditd(8)` 启用时，内核为许多安全相关事件发出结构化审计记录：登录、权限更改、文件访问，以及越来越多的驱动程序特定事件（当驱动程序自行接入时）。
 
-A driver that handles highly sensitive operations can emit custom audit records using `AUDIT_KERNEL_*` macros declared in `/usr/src/sys/security/audit/audit.h`. This is more involved than a `log(9)` call, but it produces records that fit into the operator's existing audit workflow, are structured (machine-readable), and can be forwarded to remote audit collectors for compliance.
+处理高度敏感操作的驱动程序可以使用在 `/usr/src/sys/security/audit/audit.h` 中声明的 `AUDIT_KERNEL_*` 宏发出自定义审计记录。这比 `log(9)` 调用更复杂，但它产生适合运维人员现有审计工作流程的记录，是结构化的（机器可读），可以转发到远程审计收集器以满足合规要求。
 
-For most drivers, `log(9)` with `LOG_NOTICE` and a clear message is enough. For drivers that must meet specific compliance requirements (government, financial, medical), consider investing in audit integration. The infrastructure is already in the kernel; you just need to call into it.
+对于大多数驱动程序，带有 `LOG_NOTICE` 和清晰消息的 `log(9)` 就够了。对于必须满足特定合规要求（政府、金融、医疗）的驱动程序，考虑投资审计集成。基础设施已经在内核中；你只需要调用它。
 
 ### 在驱动程序中使用 dtrace
 
-Alongside logging, `dtrace(1)` lets an operator observe driver behavior without recompiling. A driver that declares Statically Defined Trace (SDT) probes through `sys/sdt.h` exposes well-defined hook points that dtrace scripts can latch onto.
+除了日志记录，`dtrace(1)` 让运维人员无需重新编译即可观察驱动程序行为。通过 `sys/sdt.h` 声明静态定义追踪 (SDT) 探针的驱动程序暴露了 dtrace 脚本可以挂钩的定义良好的钩子点。
 
 ```c
 #include <sys/sdt.h>
@@ -2442,15 +2442,15 @@ secdev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 }
 ```
 
-An operator can then write a dtrace script that fires on `secdev:::ioctl_called` and counts or logs each event. The advantage over `log(9)` is that dtrace probes have essentially no cost when disabled, and they let the operator decide what to observe rather than forcing the driver author to anticipate every useful question.
+然后运维人员可以编写一个 dtrace 脚本，在 `secdev:::ioctl_called` 上触发并计数或记录每个事件。相对于 `log(9)` 的优势是 dtrace 探针在禁用时几乎没有开销，而且它们让运维人员决定观察什么，而不是强迫驱动程序作者预测每个有用的问题。
 
-For a security-focused driver, SDT probes on entry and exit of privileged operations let security monitoring tools observe usage patterns without the driver having to log every call. This is useful for anomaly detection: a sudden spike in ioctl calls from an unexpected UID, for example, can be flagged by a dtrace-based monitor.
+对于安全聚焦的驱动程序，特权操作的入口和出口上的 SDT 探针让安全监控工具观察使用模式而无需驱动程序记录每次调用。这对于异常检测很有用：例如，来自意外 UID 的 ioctl 调用的突然激增可以被基于 dtrace 的监控器标记。
 
 ### 第8节总结
 
-Logging is how a driver talks to its operator. Like any communication, it can be clear or confused, honest or misleading, helpful or harmful. A security-aware driver logs important events with appropriate levels, avoids logging sensitive data, rate-limits anything an attacker can trigger, and uses debug infrastructure that can be turned on and off without recompilation. It prefers `device_printf(9)` for attribution, uses `log(9)` with thoughtful priorities, and never leaves `%p` or unguarded `printf` statements in production paths.
+日志记录是驱动程序与其运维人员对话的方式。像任何通信一样，它可以是清晰的或混乱的，诚实的或误导的，有帮助的或有害的。安全意识的驱动程序以适当的级别记录重要事件，避免记录敏感数据，对攻击者能触发的任何内容进行速率限制，并使用无需重新编译即可开关的调试基础设施。它优先使用 `device_printf(9)` 进行归属，使用 `log(9)` 配合深思熟虑的优先级，并且永远不在生产路径中留下 `%p` 或未保护的 `printf` 语句。
 
-The next section takes a broader view. Beyond specific techniques (bounds-checking, privilege checks, safe logging), there is a design-level question: what should a driver do by default when something goes wrong? What fail-safe behavior should it exhibit? That is the subject of secure defaults.
+下一节采取更广泛的视角。在特定技术（边界检查、权限检查、安全日志记录）之外，还有一个设计层面的问题：当出现问题时驱动程序应该默认做什么？它应该表现出什么样的故障安全行为？这就是安全默认值的主题。
 
 ## 第9节：安全默认值与故障安全设计
 
@@ -2460,7 +2460,7 @@ The next section takes a broader view. Beyond specific techniques (bounds-checki
 
 ### 故障时关闭
 
-The first and most important design decision is what happens when your code reaches a state it did not expect. Consider a switch statement:
+第一个也是最重要的设计决策是当你的代码到达一个它没有预期的状态时会发生什么。考虑一个 switch 语句：
 
 ```c
 switch (op) {
@@ -2472,9 +2472,9 @@ case OP_BAR:
 return (0);   /* fall-through: everything else succeeds! */
 ```
 
-This is a fail-open design. Any operation code that is not `OP_FOO` or `OP_BAR` succeeds silently, returning 0. That is almost never what you want. A new operation code added to the API but not handled in the driver becomes a silent no-op. An attacker who discovers this can use it to bypass checks.
+这是一个故障时开放的设计。任何不是 `OP_FOO` 或 `OP_BAR` 的操作码都会静默成功，返回 0。这几乎永远不是你想要的。添加到 API 但未在驱动程序中处理的新操作码变成静默的空操作。发现这一点的攻击者可以用它来绕过检查。
 
-The fail-closed version:
+故障时关闭的版本：
 
 ```c
 switch (op) {
@@ -2487,9 +2487,9 @@ default:
 }
 ```
 
-Unknown operations explicitly return an error. If a new operation is added to the API, the compiler or the tests will tell you the moment you handle it and forget to update the switch, because the new case is needed to silence the `EINVAL`.
+未知操作显式返回错误。如果向 API 添加了新操作，编译器或测试会在你处理了它但忘记更新 switch 的时候立即告诉你，因为需要新的 case 来消除 `EINVAL`。
 
-The same principle applies at every decision point. When a function checks a precondition:
+同样的原则适用于每个决策点。当函数检查前置条件时：
 
 ```c
 /* Fail open: if the check is inconclusive, allow the operation. */
@@ -2503,11 +2503,11 @@ if (good_condition != true)
 return (0);
 ```
 
-The second form fails closed: if the precondition cannot be proven good, the operation is refused. This is safer when `good_condition` has any chance of being false due to an error in setup, a race, or a bug.
+第二种形式故障时关闭：如果前置条件不能被证明为好，操作被拒绝。当 `good_condition` 因设置中的错误、竞态或漏洞而可能为 false 时，这更安全。
 
 ### 白名单，不要黑名单
 
-Closely related: when deciding what is allowed, whitelist the known-good rather than blacklisting the known-bad. Blacklists are always incomplete, because you cannot enumerate every bad input. Whitelists are finite by construction.
+密切相关：在决定什么被允许时，白名单已知的好的而不是黑名单已知的坏的。黑名单总是不完整的，因为你无法枚举每个坏输入。白名单按构造是有限的。
 
 ```c
 /* Bad: blacklist */
@@ -2519,111 +2519,111 @@ if (!isalnum(c) && c != '-' && c != '_')
     return (EINVAL);
 ```
 
-The blacklist missed `\t`, `\x7f`, every high-bit character, and so on. The whitelist made the allowed set explicit and refused everything else.
+黑名单遗漏了 `\t`、`\x7f`、每个高位字符等等。白名单使允许集显式并拒绝其他所有内容。
 
-This applies to input validation generally. A driver that accepts a set of configuration names should explicitly list them. A driver that accepts a set of operation codes should enumerate them. If a user sends something that is not on the list, refuse.
+这普遍适用于输入验证。接受一组配置名称的驱动程序应该显式列出它们。接受一组操作码的驱动程序应该枚举它们。如果用户发送不在列表上的东西，拒绝。
 
 ### 最小有用接口
 
-A driver exposes functionality to user space through device nodes, ioctls, sysctls, and sometimes network protocols. Every exposed entry is a potential attack surface. A secure driver exposes only what users actually need.
+驱动程序通过设备节点、ioctl、sysctl 以及有时通过网络协议向用户空间暴露功能。每个暴露的入口点都是潜在的攻击面。安全的驱动程序只暴露用户实际需要的功能。
 
-Before shipping an ioctl, ask: does anyone actually use this? If a debugging ioctl was useful during development but has no production role, remove it or compile it out behind a debug flag. If a sysctl exposes internal state that only matters for engineering, hide it behind `CTLFLAG_SECURE` and consider removing it.
+在发布 ioctl 之前，问：真的有人用这个吗？如果调试用的 ioctl 在开发期间很有用但在生产中没有作用，就删除它或在调试标志后编译掉它。如果 sysctl 暴露了仅对工程重要的内部状态，就将其隐藏在 `CTLFLAG_SECURE` 后面并考虑删除它。
 
-The cost of removing an interface now is small: a few lines of code. The cost later, when the interface has shipped and has users, is much larger. Smaller interfaces are easier to review, easier to test, and have fewer opportunities for bugs.
+现在删除接口的成本很小：几行代码。等到接口已经发布并有用户之后的成本要大得多。较小的接口更容易审查，更容易测试，并且出现 bug 的机会更少。
 
 ### 打开时的最低权限
 
-A device node can be created with restrictive or permissive modes. Start restrictive. A mode of `0600` or `0640` is almost always a better default than `0666`. If users complain that they cannot access the device, that is a conversation you want to have; you can always relax the mode, and the operator can use devfs rules to do so per-site. If users silently gain access they should not have, you will not have that conversation until something breaks.
+设备节点可以用限制性或宽松的模式创建。从限制模式开始。`0600` 或 `0640` 的模式几乎总是比 `0666` 更好的默认值。如果用户抱怨无法访问设备，那是你想要进行的对话；你总是可以放宽模式，运维人员可以使用 devfs 规则在每个站点上进行放宽。如果用户在不应获得访问权限时悄悄获得了访问权限，你不会进行那个对话，直到有东西出问题。
 
-Similarly, a driver that supports jails should default to not being accessible in jails unless there is a specific reason. The reasoning is the same: it is easier to open up later than to retrofit a closed policy onto an open one.
+同样，支持 jail 的驱动程序默认应不在 jail 中可访问，除非有特定原因。理由相同：以后开放比将封闭策略改造成开放策略更容易。
 
 ### 保守的默认值
 
-Every configurable parameter has a default. Choose conservative ones.
+每个可配置参数都有一个默认值。选择保守的值。
 
-A driver that has a configurable "allow user X to do Y" tunable should default to X = none. If an operator wants to grant access, they can change the tunable. If the default granted access, every deployment that missed the tunable would be open.
+具有可配置的"允许用户 X 做 Y"可调参数的驱动程序应默认 X = none。如果运维人员想要授予访问权限，他们可以更改可调参数。如果默认值授予了访问权限，每个错过该可调参数的部署都将处于开放状态。
 
-A driver that has a timeout should default to a short timeout. If the operation usually finishes quickly, a short default is fine. If it sometimes takes longer, the operator can bump the timeout. A long default is a denial-of-service opportunity.
+具有超时的驱动程序应默认使用短超时。如果操作通常很快完成，短默认值就可以了。如果有时需要更长的时间，运维人员可以增加超时。长默认值是拒绝服务的机会。
 
-A driver that has a buffer size limit should default to a small limit. Again, operators can raise it; attackers cannot.
+具有缓冲区大小限制的驱动程序应默认使用小的限制。同样，运维人员可以调高它；攻击者不能。
 
 ### 纵深防御
 
-No single security mechanism is perfect. A defense-in-depth driver assumes any one layer can fail and builds multiple layers.
+没有单一安全机制是完美的。纵深防御的驱动程序假设任何一层都可能失效，并构建多层防御。
 
-Example: suppose a driver accepts an ioctl that requires privilege. The layers of defense are:
+例如：假设驱动程序接受一个需要特权的 ioctl。防御的层级是：
 
-The device node mode blocks unprivileged users from opening the device at all.
+设备节点模式阻止非特权用户打开设备。
 
-A `priv_check` at open time blocks unprivileged users even if the mode is misconfigured.
+打开时的 `priv_check` 即使在模式配置错误时也能阻止非特权用户。
 
-A `priv_check` on the specific ioctl catches the case where an unprivileged user somehow reached the ioctl handler.
+特定 ioctl 上的 `priv_check` 捕获非特权用户以某种方式到达了 ioctl 处理程序的情况。
 
-A `jailed()` check on the ioctl blocks jailed users.
+ioctl 上的 `jailed()` 检查阻止被 jail 的用户。
 
-Input validation on the ioctl arguments refuses malformed requests.
+ioctl 参数的输入验证拒绝格式错误的请求。
 
-A rate-limit log records repeated malformed requests.
+速率限制的日志记录重复的格式错误请求。
 
-If all five are present, a failure in any one is contained by the others. If only one is present and it fails, the driver is compromised. Defense in depth costs a little more code and a little more CPU; it buys real resilience.
+如果全部五层都存在，任何一层的失败都被其他层控制住。如果只有一层存在而它失败了，驱动程序就被攻破。纵深防御需要多一些代码和一点 CPU；它换来的是真正的韧性。
 
 ### 超时与看门狗
 
-A driver that waits on external events should have timeouts. Hardware can fail to respond. User space can stop reading. Networks can stall. Without a timeout, a waiting driver can hold resources forever, and an attacker who controls the external event can deny service by simply not responding.
+等待外部事件的驱动程序应该有超时。硬件可能无法响应。用户空间可能停止读取。网络可能停滞。没有超时，等待的驱动程序可能永远持有资源，控制外部事件的攻击者可以通过简单的不响应来拒绝服务。
 
-`msleep(9)` accepts a timeout argument in ticks. Use it. A sleep with no timeout is rarely the right answer in driver code.
+`msleep(9)` 接受以 ticks 为单位的超时参数。使用它。没有超时的睡眠在驱动程序代码中很少是正确的答案。
 
-For longer-lived operations, a watchdog timer can detect that an operation has stalled and take recovery action: abort, retry, or reset. The `callout(9)` framework is the usual mechanism.
+对于更长时间的操作，看门狗定时器可以检测到操作已停滞并采取恢复措施：中止、重试或重置。`callout(9)` 框架是常用的机制。
 
 ### 有界资源使用
 
-Every resource a driver can allocate on behalf of a caller should have a cap. Buffer sizes have maximum values. Per-open resource counts have maximum values. Global resource counts have maximum values. When a cap is hit, the driver returns an error, not an attempt at "best effort".
+驱动程序代表调用者可以分配的每个资源都应该有一个上限。缓冲区大小有最大值。每次打开的资源计数有最大值。全局资源计数有最大值。当达到上限时，驱动程序返回错误，而不是尝试"尽力而为"。
 
-Without caps, a misbehaving or hostile process can exhaust resources. The exhaustion might be memory, file-descriptor-like state, interrupt-worthy events, or simply CPU time. Caps ensure that no single caller can dominate.
+没有上限，行为不良或恶意的进程可以耗尽资源。耗尽的可能是内存、类似文件描述符的状态、中断相关的事件，或者仅仅是 CPU 时间。上限确保没有单个调用者可以独占。
 
-A reasonable default structure:
+合理的默认结构：
 
 ```c
-#define SECDEV_MAX_BUFLEN     (1 << 20)   /* per buffer */
-#define SECDEV_MAX_OPEN_BUFS  16          /* per open */
-#define SECDEV_MAX_GLOBAL     256         /* driver-wide */
+#define SECDEV_MAX_BUFLEN     (1 << 20)   /* 每缓冲区 */
+#define SECDEV_MAX_OPEN_BUFS  16          /* 每次打开 */
+#define SECDEV_MAX_GLOBAL     256         /* 驱动程序全局 */
 ```
 
-Check each cap explicitly before allocating. Return `EINVAL`, `ENOMEM`, or `ENOBUFS` as appropriate when the cap is hit.
+在分配之前显式检查每个上限。达到上限时，酌情返回 `EINVAL`、`ENOMEM` 或 `ENOBUFS`。
 
 ### 安全的模块加载与卸载
 
-A driver that supports being unloaded must handle cleanup correctly. An unsafe unload is a security bug. If unload leaves a callback registered, or a mapping in place, or a DMA in flight, then re-loading the module (or unloading and resuming) can touch memory that is no longer owned by the driver. That is a use-after-free waiting to happen.
+支持卸载的驱动程序必须正确处理清理。不安全的卸载是一个安全漏洞。如果卸载在回调仍注册、映射仍存在或 DMA 仍在进行时就完成了，那么重新加载模块（或卸载后恢复）可能会触及不再属于驱动程序的内存。那是一个等待发生的释放后使用。
 
-The rule: if any part of `detach` or `unload` fails, either propagate the error (and keep the driver loaded) or drive the cleanup to completion. Partial teardown is worse than no teardown.
+规则：如果 `detach` 或 `unload` 的任何部分失败，要么传播错误（并保持驱动程序加载），要么将清理进行到底。部分拆卸比不拆卸更糟。
 
-A reasonable strategy: make the unload path paranoid. It checks every resource and tears down every one that was allocated, in reverse order of allocation. It uses the `callout_drain` and `taskqueue_drain` helpers to wait for async work. Only after every such resource is quiet does it free the softc.
+一个合理的策略：使卸载路径偏执。它检查每个资源，并按照分配的逆序拆除每个已分配的资源。它使用 `callout_drain` 和 `taskqueue_drain` 辅助函数等待异步工作。只有在每个这样的资源都安静下来之后，才释放 softc。
 
-If any step fails, return `EBUSY` from `detach` and document that the driver cannot currently be unloaded. That is better than half-freeing and crashing later.
+如果任何步骤失败，从 `detach` 返回 `EBUSY` 并记录驱动程序当前无法卸载。这比半释放然后稍后崩溃更好。
 
 ### 安全的并发入口
 
-A driver's entry points (open, close, read, write, ioctl) can be called concurrently. The driver should be written as if every entry point could be called from any context at any time. Anything else is a race waiting to fire.
+驱动程序的入口点（open、close、read、write、ioctl）可以被并发调用。驱动程序应该写得好像每个入口点都可能随时从任何上下文被调用。否则就是等待触发的竞态。
 
-The practical implication: every entry point that touches shared state acquires the softc lock first. Every operation that uses resources from the softc does so under the lock. If the operation has to sleep or do user-space work, the code drops the lock, does the work, and re-acquires carefully, checking that the state it had not changed under its feet.
+实际含义：每个触及共享状态的入口点首先获取 softc 锁。每个使用 softc 资源的操作都在锁下进行。如果操作必须睡眠或执行用户空间工作，代码会释放锁，执行工作，然后小心地重新获取，检查状态没有在它脚下改变。
 
-Concurrency is not an afterthought. It is part of the interface.
+并发不是事后考虑的事情。它是接口的一部分。
 
 ### 错误路径就是正常路径
 
-A subtle aspect of secure design is that error paths get the same care as success paths. In a driver, error paths often free resources, release locks, and restore state. A bug on an error path is just as exploitable as a bug on a success path; often more so, because error paths are less tested.
+安全设计的一个微妙方面是错误路径得到与成功路径相同的关注。在驱动程序中，错误路径通常释放资源、释放锁并恢复状态。错误路径上的 bug 与成功路径上的 bug 同样可利用；通常更容易被利用，因为错误路径测试更少。
 
-Write every error path as if it were the happy path for a user who is trying to find bugs. Every `goto cleanup` or `out:` label is a candidate for a double-free, a missed unlock, or a left-behind mapping. Walk each error path mentally and confirm that:
+将每个错误路径写得像是试图寻找 bug 的用户的快乐路径。每个 `goto cleanup` 或 `out:` 标签都是双重释放、遗漏解锁或留下映射的候选者。在脑海中走过每个错误路径并确认：
 
-Every resource allocated on the success path is freed on the error path.
+成功路径上分配的每个资源都在错误路径上释放。
 
-No resource is freed twice.
+没有资源被释放两次。
 
-Every lock held is released exactly once.
+持有的每个锁恰好被释放一次。
 
-No error path leaves partially initialized state visible to other contexts.
+没有错误路径将部分初始化的状态暴露给其他上下文。
 
-A systematic pattern helps. The "single cleanup path" idiom (one label, cleanup proceeds in reverse order of allocation) catches most such bugs by construction:
+系统性的模式有帮助。"单一清理路径"惯用法（一个标签，清理按分配的逆序进行）从结构上捕获了大多数此类 bug：
 
 ```c
 static int
@@ -2658,56 +2658,56 @@ done:
 }
 ```
 
-Each allocation is paired with a cleanup at `done`. The cleanup uses `NULL` checks so that resources freed earlier (or never allocated) do not cause double-frees. Ownership transfers set the pointer to `NULL`, which suppresses the cleanup.
+每次分配都与 `done` 处的清理配对。清理使用 `NULL` 检查，以便较早释放（或从未分配）的资源不会导致双重释放。所有权转移将指针设置为 `NULL`，从而抑制清理。
 
-Consistent use of this pattern eliminates most cleanup-path bugs. The code is longer than an early-return style, but it is dramatically safer.
+一致使用此模式消除了大多数清理路径的 bug。代码比早期返回风格更长，但明显更安全。
 
 ### 也不要信任你自己
 
-A final aspect of fail-safe design is to assume that even your own code has bugs. Include `KASSERT(9)` checks for invariants. `KASSERT` does nothing when `INVARIANTS` is not configured (typical in release builds), but in developer kernels it checks every assertion and panics on failure. That turns a subtle corruption bug into a loud, debuggable panic.
+故障安全设计的最后一个方面是假设即使是你自己的代码也有 bug。为不变量包含 `KASSERT(9)` 检查。当未配置 `INVARIANTS` 时（发布构建中的典型情况），`KASSERT` 什么也不做，但在开发者内核中，它检查每个断言并在失败时 panic。这将微妙的损坏 bug 变成了响亮的、可调试的 panic。
 
 ```c
 KASSERT(sc != NULL, ("secdev: NULL softc"));
 KASSERT(len <= SECDEV_MAX_BUFLEN, ("secdev: len %zu too large", len));
 ```
 
-Invariants documented as `KASSERT` help readers (future you, future colleagues) understand what the code expects. They also catch regressions that would otherwise silently corrupt state.
+记录为 `KASSERT` 的不变量帮助读者（未来的你、未来的同事）理解代码的期望。它们还捕获否则会静默损坏状态的回归。
 
 ### 优雅降级与完全拒绝
 
-A design choice that often arises in fail-safe work: when a non-critical part of an operation fails, should the driver continue with a degraded result, or should it refuse the operation entirely?
+故障安全工作中经常出现的一个设计选择是：当操作的非关键部分失败时，驱动程序应该以降级结果继续，还是应该完全拒绝该操作？
 
-There is no universal answer. Each case depends on what the caller is likely to do with partial success. A driver that returns a packet with some fields uninitialized (because a subsystem call failed) is inviting the caller to trust the zero bytes as meaningful. A driver that fails the whole operation is more disruptive but less surprising.
+没有通用的答案。每种情况取决于调用者可能如何处理部分成功。返回包含某些未初始化字段的数据包的驱动程序（因为子系统调用失败）是在邀请调用者将零字节视为有意义的。使整个操作失败的驱动程序更具破坏性但更少意外。
 
-For security-relevant operations, prefer full refusal. A privilege check that fails should not result in "most of the operation ran, but we did not do the privileged step"; it should result in the whole thing refused. A partial success that depended on the skipped step is a bug waiting to be found.
+对于安全相关的操作，优先完全拒绝。失败的权限检查不应导致"大部分操作已运行，但我们没有执行特权步骤"；它应该导致整个操作被拒绝。依赖于被跳过步骤的部分成功是等待被发现的 bug。
 
-For non-security operations, graceful degradation is often the right call. If an optional statistics update fails, the main operation should still succeed. Document what the degradation looks like so callers can anticipate it.
+对于非安全操作，优雅降级通常是正确的选择。如果可选的统计信息更新失败，主操作仍应成功。记录降级的样子，以便调用者可以预期它。
 
 ### 案例研究：/dev/null 中真实世界的安全默认值
 
-The FreeBSD `null` driver, at `/usr/src/sys/dev/null/null.c`, is worth studying as an example of secure-by-default design. It is one of the simplest drivers in the tree, yet its construction embodies most of the principles in this chapter.
+位于 `/usr/src/sys/dev/null/null.c` 的 FreeBSD `null` 驱动程序值得作为安全默认设计的示例来学习。它是树中最简单的驱动程序之一，然而其构造体现了本章中的大多数原则。
 
-It creates two device nodes, `/dev/null` and `/dev/zero`, both with world-accessible permissions (`0666`). This is intentional: they are meant to be used by every process, privileged or not, and neither can leak information or corrupt kernel state. The permission decision is deliberate and documented.
+它创建了两个设备节点，`/dev/null` 和 `/dev/zero`，都具有世界可访问的权限（`0666`）。这是有意为之：它们旨在被每个进程使用，无论特权与否，两者都不能泄露信息或损坏内核状态。权限决定是审慎的并有文档记录。
 
-The read, write, and ioctl handlers are minimal. `null_read` returns 0 (end of file). `null_write` consumes input without touching kernel state. `zero_read` fills the user buffer with zeros using `uiomove_frombuf` against a static zero-filled buffer.
+读、写和 ioctl 处理程序是最简的。`null_read` 返回 0（文件结束）。`null_write` 消耗输入而不触及内核状态。`zero_read` 使用 `uiomove_frombuf` 针对静态零填充缓冲区用零填充用户缓冲区。
 
-The ioctl handler returns `ENOIOCTL` for unknown commands, so the upper layers can translate to the proper error. A small set of specific `FIO*` commands for non-blocking and async behavior are handled, each doing only the minimal bookkeeping that makes sense for a null or zero stream.
+ioctl 处理程序对未知命令返回 `ENOIOCTL`，以便上层可以转换为适当的错误。处理了一小组特定的 `FIO*` 命令用于非阻塞和异步行为，每个只做对 null 或 zero 流有意义的极简簿记。
 
-The driver has no locking because it has no mutable state worth protecting: the zero buffer is constant, and the read/write operations do not modify any shared data. The absence of locking is not carelessness; it is a consequence of the design minimizing what is shared in the first place.
+驱动程序没有加锁，因为它没有值得保护的可变状态：零缓冲区是常量，读/写操作不修改任何共享数据。没有加锁不是粗心；它是从一开始就最小化共享内容的设计结果。
 
-The driver's `detach` is straightforward, destroying the device nodes. Because there is no async state, no callouts, no interrupts, no taskqueues, the cleanup is correspondingly simple.
+驱动程序的 `detach` 很简单，销毁设备节点。因为没有异步状态、没有 callout、没有中断、没有 taskqueue，清理相应地简单。
 
-What makes this a good example of secure defaults is the discipline of not doing more than is needed. The driver does not speculatively add features, does not expose internal state, does not support ioctls that were not demanded by specific users. Its interface is minimal, which keeps its attack surface minimal. Its behaviour is predictable and has been exactly the same for decades.
+这成为安全默认值的好示例的原因是不做超出需要的功能的纪律。驱动程序不投机地添加功能，不暴露内部状态，不支持未被特定用户要求的 ioctl。其接口是最小的，这使其攻击面最小化。其行为是可预测的，并且几十年来一直完全相同。
 
-Real drivers cannot always be this simple; most have state to manage, hardware to talk to, and operations to perform. But the design principle generalizes: the simpler the driver, the fewer the failure modes. When faced with a choice between adding functionality and leaving it out, the more secure choice is usually to leave it out.
+真实的驱动程序不能总是这么简单；大多数有状态要管理，有硬件要通信，有操作要执行。但设计原则是通用的：驱动程序越简单，失败模式就越少。当面临添加功能还是保留原样的选择时，更安全的选择通常是保留原样。
 
 ### 第9节总结
 
-Secure defaults come down to a disposition toward refusal. Default to `EINVAL` for unknown inputs. Default to restrictive modes on device nodes. Default to conservative limits on resources. Default to short timeouts. Default to strict privilege requirements. Whitelist, do not blacklist. Fail closed, not open.
+安全默认值归结为一种倾向于拒绝的态度。对未知输入默认返回 `EINVAL`。对设备节点默认使用限制性模式。对资源默认使用保守限制。对超时默认使用短时间。对权限要求默认严格。白名单，不要黑名单。故障时关闭，不要开放。
 
-None of these are exotic. They are design habits that add up. A driver built on them is not merely a driver that can be made secure; it is a driver that is secure by default, and has to be actively broken before it becomes insecure.
+这些都不是异国情调的。它们是积累起来的设计习惯。建立在它们之上的驱动程序不仅仅是一个可以被变得安全的驱动程序；它是一个默认安全的驱动程序，必须被主动破坏才会变得不安全。
 
-The next section brings the chapter to a close by looking at the other end of the development cycle: testing. How do you know your driver is as safe as you think it is? How do you hunt for the bugs that review missed?
+下一节通过查看开发周期的另一端来结束本章：测试。你如何知道你的驱动程序像你认为的那样安全？你如何找到审查遗漏的漏洞？
 
 ## 第10节：测试与加固驱动程序
 
@@ -2715,7 +2715,7 @@ The next section brings the chapter to a close by looking at the other end of th
 
 ### 演示：使用 KASAN 发现漏洞
 
-Before the general guidance, consider a specific scenario. You have a driver that passes all your functional tests but that you suspect has a memory-safety bug. You build a kernel with `options KASAN`, boot it, load your driver, and run a stress test. The test crashes the kernel with output that looks something like:
+在给出通用指导之前，考虑一个特定场景。你有一个通过所有功能测试但怀疑存在内存安全 bug 的驱动程序。你构建一个带有 `options KASAN` 的内核，启动它，加载你的驱动程序，并运行压力测试。测试使内核崩溃，输出看起来像这样的内容：
 
 ```text
 ==================================================================
@@ -2742,35 +2742,35 @@ The buffer was freed by thread 100089:
 ==================================================================
 ```
 
-Read the output carefully. KASAN tells you the exact instruction that accessed freed memory (`secdev_callout_fn`), the exact allocation that was freed (in `secdev_attach`), and the exact free (in `secdev_detach`). Now the bug is obvious: the callout was scheduled at attach, but detach freed the buffer before draining the callout. When the callout fires after the free, it accesses the freed buffer.
+仔细阅读输出。KASAN 告诉你访问已释放内存的确切指令（`secdev_callout_fn`）、被释放的确切分配（在 `secdev_attach` 中）以及确切的释放（在 `secdev_detach` 中）。现在 bug 很明显了：callout 在 attach 时被调度，但 detach 在排空 callout 之前释放了缓冲区。当 callout 在释放后触发时，它访问了已释放的缓冲区。
 
-The fix: add `callout_drain` to detach before the `free`. KASAN helped you find, in thirty seconds, a bug that might have taken hours or weeks to find by inspection, and that might never have been found in production until a customer reported a random crash.
+修复方法：在 `free` 之前向 detach 添加 `callout_drain`。KASAN 帮助你在三十秒内找到了一个可能需要数小时或数周通过审查才能发现、并且可能直到客户报告随机崩溃才会在生产中被发现的 bug。
 
-KASAN is not free. The runtime overhead is substantial, both in CPU (perhaps 2 to 3 times slower) and in memory (each byte of allocated memory has an accompanying shadow byte). You would not run production with it. But for developer testing, and especially for driver authors, it is one of the most effective tools available.
+KASAN 不是免费的。运行时开销很大，无论是在 CPU（可能慢 2 到 3 倍）还是在内存方面（每个已分配内存字节都有一个附带的影子字节）。你不会在生产中使用它。但对于开发者测试，特别是对于驱动程序作者，它是最有效的可用工具之一。
 
-KMSAN works analogously for uninitialized memory reads, and KCOV powers coverage-guided fuzzing. Together they address the main classes of memory-safety bugs: use-after-free (KASAN), uninitialized memory (KMSAN), and bugs not reached by your tests (KCOV plus a fuzzer).
+KMSAN 类似地适用于未初始化内存读取，KCOV 为覆盖引导的模糊测试提供支持。它们共同解决了内存安全 bug 的主要类别：释放后使用（KASAN）、未初始化内存（KMSAN）以及你的测试未触及的 bug（KCOV 加模糊测试器）。
 
 ### 使用内核净化器构建
 
-A stock FreeBSD kernel is optimized for production. A development kernel for driver testing should be optimized for finding bugs. The options you add to the kernel config file turn on extra checking.
+标准的 FreeBSD 内核为生产环境优化。用于驱动程序测试的开发内核应该为发现 bug 而优化。你添加到内核配置文件中的选项启用额外的检查。
 
-**`options INVARIANTS`** enables `KASSERT(9)`. Every assertion is checked at runtime. A failed assertion panics the kernel with a stack trace pointing to the assertion. This catches invariant violations that would otherwise corrupt data silently.
+**`options INVARIANTS`** 启用 `KASSERT(9)`。每个断言在运行时被检查。断言失败会使内核 panic，并带有指向该断言的栈跟踪。这捕获了否则会静默损坏数据的不变量违反。
 
-**`options INVARIANT_SUPPORT`** is implied by `INVARIANTS` but is sometimes needed as a separate option for modules built against an `INVARIANTS` kernel.
+**`options INVARIANT_SUPPORT`** 由 `INVARIANTS` 隐含，但有时需要作为针对 `INVARIANTS` 内核构建的模块的单独选项。
 
-**`options WITNESS`** turns on the WITNESS lock-order checker. Every lock acquisition is recorded, and the kernel panics if a cycle is detected (A held, then B acquired; later, B held, then A acquired). This catches deadlock bugs before they deadlock.
+**`options WITNESS`** 开启 WITNESS 锁顺序检查器。每次锁获取被记录，如果检测到循环则内核 panic（先持有 A，然后获取 B；稍后，持有 B，然后获取 A）。这会在死锁发生之前捕获死锁 bug。
 
-**`options WITNESS_SKIPSPIN`** disables WITNESS for spin mutexes, which can reduce overhead at the cost of missing some checks.
+**`options WITNESS_SKIPSPIN`** 禁用在自旋互斥锁上的 WITNESS，这可以减少开销，代价是丢失一些检查。
 
-**`options DIAGNOSTIC`** enables additional runtime checks in various subsystems. It is looser than `INVARIANTS` and catches some additional cases.
+**`options DIAGNOSTIC`** 在各个子系统中启用额外的运行时检查。它比 `INVARIANTS` 宽松，并捕获一些额外的情况。
 
-**`options KASAN`** enables the Kernel Address Sanitizer, which detects use-after-free, out-of-bounds access, and some uninitialized memory uses. It requires compiler support and a substantial memory overhead but is excellent for finding memory-safety bugs.
+**`options KASAN`** 启用内核地址净化器，检测释放后使用、越界访问和一些未初始化内存使用。它需要编译器支持和大量的内存开销，但对于发现内存安全 bug 非常出色。
 
-**`options KMSAN`** enables the Kernel Memory Sanitizer, which detects uses of uninitialized memory. This directly catches the information-leak bugs described in Section 7.
+**`options KMSAN`** 启用内核内存净化器，检测未初始化内存的使用。这直接捕获第 7 节中描述的信息泄露 bug。
 
-**`options KCOV`** enables kernel coverage tracking, which is what makes coverage-guided fuzzing work.
+**`options KCOV`** 启用内核覆盖跟踪，这使得覆盖引导的模糊测试成为可能。
 
-A driver-development kernel might add:
+一个驱动程序开发内核可能会添加：
 
 ```text
 options INVARIANTS
@@ -2779,163 +2779,163 @@ options WITNESS
 options DIAGNOSTIC
 ```
 
-and, for deeper memory-safety testing, `KASAN` or `KMSAN` on supported architectures. Build that kernel, boot it, and run your driver against it. Many bugs surface immediately.
+并且，对于更深度的内存安全测试，在支持的架构上添加 `KASAN` 或 `KMSAN`。构建那个内核，启动它，并针对它运行你的驱动程序。许多 bug 会立即浮出水面。
 
-Production builds do not typically include these options (they slow the kernel significantly). Use them as a development safety net.
+生产构建通常不包括这些选项（它们会显著降低内核速度）。将它们用作开发安全网。
 
 ### 压力测试
 
-A driver that passes functional tests can still fail under stress. Stress testing exercises the driver's concurrency, its allocation patterns, and its error paths at volumes that amplify race conditions.
+通过功能测试的驱动程序在压力下仍可能失败。压力测试以放大竞态条件的量级来锻炼驱动程序的并发性、分配模式和错误路径。
 
-A simple stress harness for a character device might:
+一个简单的字符设备压力测试框架可能：
 
-Open the device from N processes concurrently.
+从 N 个进程并发打开设备。
 
-Each process issues M ioctls with valid and invalid arguments in a random order.
+每个进程以随机顺序发出 M 个有效和无效参数的 ioctl。
 
-A separate process periodically detaches and re-attaches the device (or kldunload/kldload).
+一个单独的进程周期性地分离和重新附着设备（或 kldunload/kldload）。
 
-This quickly exposes races between user-space operations and detach, which are among the hardest race categories to catch by inspection.
+这迅速暴露了用户空间操作与 detach 之间的竞态，这是最难通过审查捕获的竞态类别之一。
 
-FreeBSD's `stress2` test framework at `https://github.com/pho/stress2` has a long history of finding kernel bugs. It includes scenarios for VFS, networking, and various subsystems. A driver author can learn a lot by reading those scenarios and adapting them to the driver's interface.
+位于 `https://github.com/pho/stress2` 的 FreeBSD `stress2` 测试框架在发现内核 bug 方面有着悠久的历史。它包括用于 VFS、网络和各种子系统的场景。驱动程序作者可以通过阅读这些场景并将其适应于驱动程序的接口来学到很多。
 
 ### 模糊测试
 
-Fuzzing is the technique of generating large numbers of random or semi-random inputs and observing whether the program crashes, asserts, or misbehaves. Modern fuzzers are coverage-guided: they watch which code paths are exercised and evolve inputs that explore new paths. This is far more effective than purely random input.
+模糊测试是生成大量随机或半随机输入并观察程序是否崩溃、断言或行为异常的技术。现代模糊测试器是覆盖引导的：它们观察哪些代码路径被执行，并演化出探索新路径的输入。这比纯随机输入有效得多。
 
-For driver testing, the key fuzzer is **syzkaller**, an external project that understands syscall semantics and produces structured inputs. Syzkaller is not part of the FreeBSD base system; it is an external tool that runs on top of a FreeBSD kernel built with `KCOV` coverage instrumentation. Syzkaller has found many bugs in the FreeBSD kernel over the years, and a driver that wants to be exercised thoroughly benefits from being described in a syzkaller syscall description (`.txt` file under syzkaller's `sys/freebsd/`).
+对于驱动程序测试，关键的模糊测试器是 **syzkaller**，一个理解系统调用语义并产生结构化输入的外部项目。Syzkaller 不是 FreeBSD 基本系统的一部分；它是一个运行在带有 `KCOV` 覆盖工具的 FreeBSD 内核之上的外部工具。多年来，Syzkaller 在 FreeBSD 内核中发现了许多 bug，想要被彻底测试的驱动程序受益于在 syzkaller 系统调用描述（syzkaller 的 `sys/freebsd/` 下的 `.txt` 文件）中被描述。
 
-If your driver exposes a substantial ioctl or sysctl interface, consider writing a syzkaller description for it. The format is straightforward, and the investment pays off the first time syzkaller finds a bug no human reviewer would have spotted.
+如果你的驱动程序暴露了重要的 ioctl 或 sysctl 接口，考虑为其编写 syzkaller 描述。格式很直接，当 syzkaller 第一次发现人类审查者不会发现的 bug 时，投资就得到了回报。
 
-Simpler fuzzing approaches also work. A shell script that issues random ioctls with random arguments and watches `dmesg` for panics is better than no fuzzing at all. The goal is to generate inputs your design did not anticipate.
+更简单的模糊测试方法也有效。一个发出随机 ioctl 和随机参数并观察 `dmesg` 中 panic 的 shell 脚本总比没有模糊测试好。目标是生成你的设计未预料到的输入。
 
 ### ASLR、PIE 和栈保护
 
-Modern FreeBSD kernels use several exploit-mitigation techniques. Understanding them is part of understanding why the bugs we have discussed matter.
+现代 FreeBSD 内核使用几种利用缓解技术。理解它们是我们讨论的 bug 为何重要的部分原因。
 
-**kASLR**, kernel Address Space Layout Randomization, places the kernel's code, data, and stacks at randomized addresses at boot. An attacker who wants to jump to kernel code, or to overwrite a specific function pointer, does not know where that code or pointer is. kASLR is foundational for making many memory-safety bugs unexploitable in practice.
+**kASLR**，内核地址空间布局随机化，将内核的代码、数据和栈在启动时放置在随机地址。想要跳转到内核代码或覆盖特定函数指针的攻击者不知道该代码或指针在哪里。kASLR 是使许多内存安全 bug 在实践中不可利用的基础。
 
-Information leaks (Section 7) are particularly dangerous because they can defeat kASLR. A single leaked kernel pointer gives the attacker the base address and unlocks everything else.
+信息泄露（第 7 节）特别危险，因为它们可以击败 kASLR。单个泄露的内核指针就给了攻击者基地址并解锁了其他一切。
 
-**SSP**, the Stack-Smashing Protector, places a canary value on the stack between local variables and the return address. When a function returns, the canary is checked; if it has been overwritten (because a buffer overflow clobbered it on the way to the return address), the kernel panics. SSP does not prevent overflows but it prevents many of them from gaining control of execution.
+**SSP**，栈粉碎保护器，在栈上的局部变量和返回地址之间放置一个金丝雀值。当函数返回时检查金丝雀；如果它已被覆盖（因为缓冲区溢出在通往返回地址的路上破坏了它），内核 panic。SSP 不能防止溢出，但能阻止许多溢出获得执行控制权。
 
-Not every function is protected. The compiler applies SSP based on heuristics: functions with local buffers, functions that take addresses of locals, and so on. Understanding this means understanding why certain buffer-overflow patterns are more exploitable than others.
+并非每个函数都被保护。编译器基于启发式规则应用 SSP：有局部缓冲区的函数、获取局部变量地址的函数等等。理解这一点意味着理解为什么某些缓冲区溢出模式比其他模式更容易被利用。
 
-**PIE**, Position-Independent Executables, allows the kernel (and modules) to be relocated to random addresses. Combined with kASLR, this is what makes the randomization effective.
+**PIE**，位置无关可执行文件，允许内核（和模块）被重定位到随机地址。与 kASLR 结合，这就是随机化有效的原因。
 
-**Stack guards and guard pages** surround kernel stacks with unmapped pages. An attempt to write past the stack hits an unmapped page and panics rather than silently corrupting adjacent memory.
+**栈防护与防护页** 用未映射的页面包围内核栈。试图写入超过栈末尾会触及未映射的页面并 panic，而不是静默损坏相邻内存。
 
-**W^X**, write-xor-execute, keeps kernel memory either writable or executable, never both. This prevents many classic exploits that relied on writing shellcode into memory and then jumping to it.
+**W^X**，写异或执行，使内核内存要么可写要么可执行，不能同时兼具。这防止了许多依赖于将 shellcode 写入内存然后跳转到它的经典利用。
 
-A driver author does not implement any of these; they are kernel-wide protections. But a driver's bugs can undermine them. An information leak defeats kASLR. A buffer overflow that reliably hits a function pointer or vtable defeats SSP. A use-after-free that races a fresh allocation gives an attacker controlled memory at a kernel address.
+驱动程序作者不实现这些中的任何一个；它们是内核范围的保护。但驱动程序的 bug 可以破坏它们。信息泄露击败了 kASLR。可靠地命中函数指针或 vtable 的缓冲区溢出击败了 SSP。与新鲜分配竞态的释放后使用在某个内核地址给了攻击者受控的内存。
 
-In short: the point of careful driver code is not just to avoid crashes. It is to keep the kernel's defenses intact. When your driver leaks a pointer, you did not merely expose information; you downgraded the entire system's exploit-mitigation posture.
+简而言之：仔细的驱动程序代码的意义不仅仅是避免崩溃。它是保持内核的防御完好无损。当你的驱动程序泄露指针时，你不仅仅暴露了信息；你降低了整个系统的利用缓解态势。
 
 ### 审查你的差异
 
-Every time you modify the driver, read the diff carefully. Look for:
+每次修改驱动程序时，仔细阅读差异。寻找：
 
-New `copyin` or `copyout` calls: are the lengths clamped? Are the buffers zeroed first?
+新的 `copyin` 或 `copyout` 调用：长度是否被限制？缓冲区是否先被清零？
 
-New privilege-sensitive operations: do they have `priv_check` or equivalent?
+新的特权敏感操作：它们有 `priv_check` 或等价物吗？
 
-New locking: is the lock order consistent with other code?
+新的加锁：锁顺序与其它代码一致吗？
 
-New allocations: are they paired with frees on every path, including error paths?
+新的分配：它们在每条路径（包括错误路径）上都与释放配对吗？
 
-New log messages: are they rate-limited? Do they leak sensitive data?
+新的日志消息：它们被速率限制了吗？它们泄露敏感数据吗？
 
-New user-visible fields in structures: are they initialized? Is the structure zeroed before the copyout?
+结构中新的用户可见字段：它们被初始化了吗？结构在 copyout 前被清零了吗？
 
-A diff-review habit catches many regressions. If your project uses code review (it should), make these questions part of the checklist.
+审查差异的习惯能捕获许多回归。如果你的项目使用代码审查（它应该如此），让这些问题成为检查清单的一部分。
 
 ### 静态分析
 
-FreeBSD kernel code can be analyzed by several static-analysis tools, including `cppcheck`, `clang-analyzer` (scan-build), and, increasingly, Coverity and GitHub CodeQL-style tools. These tools often report warnings that a human reviewer would miss: a conditional that can never be true, a pointer used after a path where it was freed, a missing null check.
+FreeBSD 内核代码可以通过几种静态分析工具分析，包括 `cppcheck`、`clang-analyzer`（scan-build），以及越来越多的 Coverity 和 GitHub CodeQL 风格的工具。这些工具通常报告人类审查者会遗漏的警告：永远不可能为真的条件、在指针被释放的路径之后使用指针、缺少空检查。
 
-Treat static-analysis warnings seriously. Most are false positives; some are real bugs. Silencing a warning should be a decision, not a reflex. When the tool is wrong, add a comment explaining why. When the tool is right, fix the code.
+认真对待静态分析警告。大多数是误报；有些是真正的 bug。静默警告应该是一个决定，而不是一种反射。当工具错了时，添加注释解释原因。当工具对了时，修复代码。
 
-`syntax check` with `bmake` on the kernel source tree is a fast first pass. Running `clang --analyze` or `scan-build` against your driver is a deeper pass. Neither replaces review or testing, but both catch bugs at low cost.
+在内核源代码树上使用 `bmake` 进行 `syntax check` 是一个快速的初步检查。对你的驱动程序运行 `clang --analyze` 或 `scan-build` 是更深度的检查。两者都不能替代审查或测试，但都能以低成本捕获 bug。
 
 ### 代码审查
 
-No tool replaces another pair of eyes. Review is especially important for security-relevant code. When proposing a change to a security-sensitive path, find someone else to look at it. Describe what the change is, what invariants it preserves, and what you checked. Be grateful when they find a problem you missed.
+没有工具能替代另一双眼睛。审查对于安全相关代码尤其重要。当提议对安全敏感路径进行更改时，找其他人看看。描述更改是什么、它保留了哪些不变量以及你检查了什么。当他们发现你遗漏的问题时，心存感激。
 
-For open-source projects, the FreeBSD review system (`reviews.freebsd.org`) provides a convenient way to get external review. Use it. The community has a long tradition of thoughtful, security-aware review, and reviewers often catch things you would not.
+对于开源项目，FreeBSD 审查系统（`reviews.freebsd.org`）提供了一种获得外部审查的便捷方式。使用它。社区有着深思熟虑、安全意识审查的悠久传统，审查者经常捕获你不会注意到的东西。
 
 ### 修改后的测试
 
-When a bug is found and fixed, add a test that would have caught it. This matters because:
+当发现并修复了一个 bug 时，添加一个本可以捕获它的测试。这很重要，因为：
 
-The same bug class often recurs in other places. A test that catches the specific instance may catch future similar bugs.
+相同的 bug 类别经常在其他地方重现。捕获特定实例的测试可能捕获未来类似的 bug。
 
-Without a test, you have no way to know that the fix worked.
+没有测试，你就无法知道修复是否有效。
 
-Without a test, a future refactoring may re-introduce the bug.
+没有测试，未来的重构可能会重新引入该 bug。
 
-Tests can be unit tests (in user space, exercising individual functions), integration tests (loading the driver in a VM and exercising it), or fuzz cases (inputs that used to crash and should not now). All have their place.
+测试可以是单元测试（在用户空间，练习单个函数）、集成测试（在 VM 中加载驱动程序并练习它）或模糊测试用例（以前会导致崩溃而现在不应该的输入）。它们各有各的位置。
 
 ### 持续集成
 
-Automated testing on every change catches regressions early. A CI setup that builds the driver against a development kernel with `INVARIANTS`, `WITNESS`, and possibly `KASAN` runs the stress harness, and checks the result, is the backbone of a driver that stays safe.
+每次更改后的自动测试能及早捕获回归。一个 CI 设置，用带有 `INVARIANTS`、`WITNESS` 和可能的 `KASAN` 的开发内核构建驱动程序，运行压力测试框架，并检查结果，是保持驱动程序安全的主干。
 
-For a driver in the FreeBSD tree, this is already provided by the project's CI. For out-of-tree drivers, setting up CI takes some effort but pays back quickly.
+对于 FreeBSD 树中的驱动程序，这已经由项目的 CI 提供了。对于树外的驱动程序，设置 CI 需要一些努力但很快就能得到回报。
 
 ### 严肃对待漏洞报告
 
-When someone reports a crash or a suspected vulnerability in your driver, treat it as real until you have evidence otherwise. Even a "harmless" bug may be exploitable in ways the reporter did not see. "I can crash the kernel with this ioctl" is not a minor issue; it is at minimum a denial-of-service bug, and very often a memory-safety bug that could become arbitrary code execution.
+当有人报告你的驱动程序崩溃或疑似漏洞时，将其视为真实情况，直到你找到相反的证据。即使是"无害"的 bug 也可能以报告者未发现的方式被利用。"我可以用这个 ioctl 使内核崩溃"不是一个小问题；它至少是一个拒绝服务 bug，而且通常是一个可能变成任意代码执行的内存安全 bug。
 
-The FreeBSD security team (`secteam@freebsd.org`) is the right audience for vulnerability reports in the base system. For out-of-tree drivers, have a similar channel. Respond quickly, fix carefully, and credit the reporter when appropriate.
+FreeBSD 安全团队（`secteam@freebsd.org`）是基本系统中漏洞报告的正确接收者。对于树外驱动程序，设置类似的渠道。快速响应，仔细修复，并在适当时感谢报告者。
 
 ### 随时间推移进行加固
 
-A driver's security posture is not static. New classes of bugs emerge. New mitigations become available. New attack techniques make old bugs more exploitable. Budget time every release cycle to:
+驱动程序的安全态势不是静态的。新类别的 bug 会出现。新的缓解措施变得可用。新的攻击技术使旧 bug 更容易被利用。每个发布周期都要预算时间来：
 
-Re-read the security-relevant paths of the driver.
+重新阅读驱动程序中与安全相关的路径。
 
-Check for newly discovered compiler warnings or static-analysis findings.
+检查新发现的编译器警告或静态分析发现。
 
-Try the latest tools (KASAN, KMSAN, syzkaller) against the driver.
+尝试最新的工具（KASAN、KMSAN、syzkaller）针对驱动程序。
 
-Update the privilege model if FreeBSD has added new `PRIV_*` codes or more specific checks.
+如果 FreeBSD 添加了新的 `PRIV_*` 代码或更具体的检查，更新权限模型。
 
-Remove interfaces that no user actually needs.
+删除没有用户实际需要的接口。
 
-The discipline of regular re-examination is what distinguishes a driver that is secure on the day it ships from one that stays secure through its lifetime.
+定期重新检查的纪律是区分发布当天安全的驱动程序和在其整个生命周期中保持安全的驱动程序的因素。
 
 ### 事后处理：当漏洞变成 CVE 时该做什么
 
-A realistic chapter on security must cover the possibility that, despite all the precautions, a bug in your driver gets reported externally as a vulnerability. The pathway is typically:
+一个关于安全的现实章节必须涵盖这样一种可能性：尽管采取了所有预防措施，你的驱动程序中的 bug 仍被外部报告为漏洞。路径通常是：
 
-A researcher or user discovers unexpected behavior in your driver.
+研究人员或用户在你的驱动程序中发现了意外行为。
 
-They investigate and determine that the behavior is a security bug: information leak, privilege escalation, crash-on-untrusted-input, or similar.
+他们进行调查并确定该行为是一个安全 bug：信息泄露、权限提升、对不可信输入的崩溃，或类似情况。
 
-They report the bug, ideally via a responsible-disclosure channel (for FreeBSD base-system drivers, this is the `secteam@freebsd.org` address).
+他们报告该 bug，理想情况下通过负责的披露渠道（对于 FreeBSD 基本系统驱动程序，这是 `secteam@freebsd.org` 地址）。
 
-You receive the report.
+你收到报告。
 
-The first response matters. Even if the bug turns out to be less serious than it looks, treat the reporter as a collaborator, not an adversary. Acknowledge receipt promptly. Ask clarifying questions if needed. Do not dismiss without investigation. Do not attempt to gag the reporter. Most vulnerability researchers want the bug fixed; if you cooperate, you get a fix faster and usually get public credit that reflects well on the project.
+第一反应很重要。即使 bug 最终看起来不那么严重，也要将报告者视为合作者，而不是对手。及时确认收到。如果需要，提出澄清性问题。未经调查不要驳回。不要试图让报告者保持沉默。大多数漏洞研究人员希望 bug 被修复；如果你合作，你会更快地得到修复，并且通常会得到对项目有益的公开认可。
 
-Triage the report technically. Can you reproduce the bug? Is it a crash, an information leak, a privilege escalation, or something else? What is the attacker model: who has to have access, and what do they gain? Is it exploitable in combination with other known bugs?
+对报告进行技术分类。你能复现这个 bug 吗？是崩溃、信息泄露、权限提升还是其他什么？攻击者模型是什么：谁必须拥有访问权限，他们能得到什么？它是否与其他已知 bug 结合可利用？
 
-If confirmed, coordinate a fix. Keep in mind that for FreeBSD base-system drivers, the fix must flow through the project's normal review process and, where appropriate, through the security advisory process. For out-of-tree drivers, you have more flexibility but still should write the fix carefully and test it thoroughly.
+如果确认，协调修复。记住，对于 FreeBSD 基本系统驱动程序，修复必须通过项目正常的审查流程，并在适当时通过安全公告流程。对于树外驱动程序，你有更多灵活性，但仍应仔细编写修复并彻底测试。
 
-Prepare the disclosure. Typical disclosure practice gives the project time to fix the bug before details become public. Industry norms are usually 90 days. Within that window, the advisory is prepared, a patched version is released, and public disclosure happens simultaneously with the release. Do not leak details early; do not delay past the agreed date.
+准备披露。典型的披露实践给予项目时间在细节公开之前修复 bug。行业规范通常是 90 天。在这个窗口内，准备公告，发布修补版本，公开披露与发布同时进行。不要提前泄露细节；不要延迟超过约定的日期。
 
-Write the commit message carefully. Security fix commits should mention the vulnerability without giving attackers a roadmap. "Fix incorrect bounds check in secdev_write that could allow kernel memory disclosure" is better than either "tweak write" (too vague, reviewers miss it) or "Fix CVE-2026-12345, where an attacker can read arbitrary kernel memory by issuing a write of X bytes followed by a read, bypassing Y check" (too specific, attackers read your commit history before users can upgrade).
+仔细编写提交消息。安全修复提交应提及漏洞而不给攻击者提供路线图。"修复 secdev_write 中可能允许内核内存泄露的错误边界检查"既好于"调整 write"（太模糊，审查者错过），也好于"修复 CVE-2026-12345，攻击者可以通过先写入 X 字节然后读取来绕过 Y 检查读取任意内核内存"（太具体，攻击者在用户可以升级之前阅读你的提交历史）。
 
-After the release, if details become public, be prepared to answer questions. Users want to know: am I vulnerable, how do I upgrade, and how can I tell if I was attacked? Have clear, calm answers ready.
+发布之后，如果细节公开，准备回答问题。用户想知道：我是否易受攻击，如何升级，以及如何判断我是否被攻击了？准备好清晰、冷静的答案。
 
-Post-mortem the bug. Not to blame, but to learn. Why did the bug exist? Was there a pattern the review missed? Could a tool have caught it? Should the team's process change? Write the conclusions down; apply them in future work.
+对 bug 进行事后分析。不是为了指责，而是为了学习。为什么这个 bug 存在？审查遗漏了哪种模式？工具本可以捕获它吗？团队的流程应该改变吗？写下结论；在未来的工作中应用它们。
 
-Security is a continuing practice, and post-incident learning is one of its most important parts. A project that fixes the bug and moves on has learned nothing; a project that reflects on why the bug occurred makes the next bug less likely.
+安全是一个持续的实践，事后学习是其最重要的部分之一。修复了 bug 然后继续前进的项目什么也没学到；反思 bug 为何发生的项目使下一个 bug 更不可能发生。
 
 ### 第10节总结
 
-Testing and hardening are how a careful design becomes a secure one. Build your development kernel with `INVARIANTS`, `WITNESS`, and, where possible, `KASAN` or `KMSAN`. Stress-test under concurrent load. Fuzz with syzkaller or, at minimum, with a random-input harness. Use static analysis. Review diffs. Respond seriously to bug reports. Re-test after every fix. Harden over time.
+测试和加固是精心设计变成安全设计的方式。用 `INVARIANTS`、`WITNESS` 以及可能的情况下用 `KASAN` 或 `KMSAN` 构建你的开发内核。在并发负载下进行压力测试。用 syzkaller 或至少在随机输入框架下进行模糊测试。使用静态分析。审查差异。认真对待 bug 报告。每次修复后重新测试。随时间推移进行加固。
 
-A driver does not become secure by accident. It becomes secure because the author assumed bugs existed, looked for them with every tool available, and fixed them one at a time.
+驱动程序不是偶然变安全的。它之所以安全，是因为作者假设有 bug 存在，用每个可用的工具寻找它们，并逐一修复。
 
 ## 动手实验
 
@@ -2943,7 +2943,7 @@ A driver does not become secure by accident. It becomes secure because the autho
 
 这些实验设计为在 FreeBSD 14.3 虚拟机或测试主机上运行，内核崩溃是可以接受的。不要在运行重要服务的机器上运行它们；不安全驱动程序中的错误可能导致内核崩溃。
 
-If you are running these labs inside a VM, make sure the VM is configured to write crash dumps to a location you can recover after reboot. Enable `dumpon(8)` and set `/etc/fstab` appropriately so that core dumps land in `/var/crash` after a panic. See `/usr/src/sbin/savecore/savecore.8` for details. This infrastructure is how you will diagnose any panics the labs provoke.
+如果你在虚拟机内运行这些实验，确保虚拟机配置为将崩溃转储写入重启后可以恢复的位置。启用 `dumpon(8)` 并适当设置 `/etc/fstab`，以便核心转储在 panic 后落入 `/var/crash`。详细信息请参阅 `/usr/src/sbin/savecore/savecore.8`。这个基础设施是你诊断实验引发的任何 panic 的方式。
 
 这些实验的配套文件位于 `examples/part-07/ch31-security/` 下。每个实验都有自己的子文件夹，包含 `secdev.c` 源文件、`Makefile`、描述实验的 `README.md`，以及适当情况下包含小型用户空间测试程序的 `test/` 子文件夹。
 
@@ -2959,52 +2959,52 @@ If you are running these labs inside a VM, make sure the VM is configured to wri
 
 **步骤。**
 
-1. Copy `examples/part-07/ch31-security/lab01-unsafe/` to a working directory on your FreeBSD test machine. You can either clone the book's companion repository or copy the files manually if you extracted them locally.
+1. 将 `examples/part-07/ch31-security/lab01-unsafe/` 复制到 FreeBSD 测试机器上的工作目录。你可以克隆书籍的配套仓库，或者如果本地提取了文件则手动复制。
 
-2. Read `secdev.c` carefully. Note what it does: it provides a `/dev/secdev` character device with `read`, `write`, and `ioctl` operations. `read` returns the contents of an internal buffer. `write` copies user data into the buffer. An ioctl (`SECDEV_GET_INFO`) returns a structure describing the device.
+2. 仔细阅读 `secdev.c`。注意它的功能：它提供一个带有 `read`、`write` 和 `ioctl` 操作的 `/dev/secdev` 字符设备。`read` 返回内部缓冲区的内容。`write` 将用户数据复制到缓冲区中。ioctl（`SECDEV_GET_INFO`）返回描述设备的结构。
 
-3. Read `Makefile`. It should be a standard FreeBSD kernel module makefile using `bsd.kmod.mk`.
+3. 阅读 `Makefile`。它应该是一个使用 `bsd.kmod.mk` 的标准 FreeBSD 内核模块 makefile。
 
-4. Build the module with `make`. Address any build errors by consulting earlier chapters on module-building. A successful build produces `secdev.ko`.
+4. 用 `make` 构建模块。通过查阅前面关于模块构建的章节来解决任何构建错误。成功的构建会产生 `secdev.ko`。
 
-5. Load the module with `kldload ./secdev.ko`. Verify with:
+5. 用 `kldload ./secdev.ko` 加载模块。验证：
    ```
    kldstat | grep secdev
    ls -l /dev/secdev
    ```
-   You should see the module listed and the device node present with whatever permissions the unsafe driver created.
+   你应该看到模块被列出，设备节点存在，具有不安全驱动程序创建的任何权限。
 
-6. Exercise the device as a normal functional test:
+6. 作为正常功能测试练习设备：
    ```
    echo "hello" > /dev/secdev
    cat /dev/secdev
    ```
-   You should see `hello` printed back. If you do not, check `dmesg` for error messages.
+   你应该看到 `hello` 被打印回来。如果没有，检查 `dmesg` 的错误消息。
 
-7. Now, review the code with the security mindset from this chapter. For each of the following categories, find at least one issue in the unsafe code:
-   - Buffer overflow opportunity.
-   - Information leak opportunity.
-   - Missing privilege check.
-   - Unchecked user input.
-   Write down each finding in your lab logbook, including the line number and the specific concern.
+7. 现在，用本章的安全思维方式审查代码。针对以下每个类别，在不安全代码中找到至少一个问题：
+   - 缓冲区溢出机会。
+   - 信息泄露机会。
+   - 缺少权限检查。
+   - 未检查的用户输入。
+   在你的实验日志中写下每个发现，包括行号和具体关注点。
 
-8. Unload the module with `kldunload secdev` when you are done. Verify with `kldstat` that it is gone.
+8. 完成后用 `kldunload secdev` 卸载模块。用 `kldstat` 验证它已消失。
 
 **观察。**
 
-The unsafe `secdev` has several issues by design. In `secdev_write`, the code calls `uiomove(sc->sc_buf, uio->uio_resid, uio)`, which copies `uio_resid` bytes regardless of `sizeof(sc->sc_buf)`. A write of 8192 bytes to a 4096-byte buffer overflows the internal buffer. Depending on what lies next to `sc_buf` in memory, this may or may not crash immediately, but it always corrupts adjacent kernel memory.
+不安全的 `secdev` 故意有多个问题。在 `secdev_write` 中，代码调用 `uiomove(sc->sc_buf, uio->uio_resid, uio)`，它复制 `uio_resid` 字节而不考虑 `sizeof(sc->sc_buf)`。向 4096 字节缓冲区写入 8192 字节会使内部缓冲区溢出。根据内存中 `sc_buf` 旁边是什么，这可能不会立即崩溃，但它总是会损坏相邻的内核内存。
 
-`SECDEV_GET_INFO` returns a `struct secdev_info` that is filled in field-by-field without being zeroed first. Any padding bytes between fields carry stack contents to user space. The structure likely has padding around the `uint64_t` members for alignment.
+`SECDEV_GET_INFO` 返回一个 `struct secdev_info`，它逐字段填充而没有先清零。字段之间的任何填充字节都将栈内容传送到用户空间。该结构可能为了对齐而在 `uint64_t` 成员周围有填充。
 
-The device is created with `args.mda_mode = 0666` (or equivalent), allowing any user on the system to read and write. A user with no special privilege can corrupt the kernel buffer or leak information through the ioctl.
+设备以 `args.mda_mode = 0666`（或等效）创建，允许系统上的任何用户读写。没有特殊特权的用户可以损坏内核缓冲区或通过 ioctl 泄露信息。
 
-The ioctl handler does not check `priv_check` or similar. Any user who can open the device can issue any ioctl.
+ioctl 处理程序不检查 `priv_check` 或类似机制。任何可以打开设备的用户都可以发出任何 ioctl。
 
-`secdev_read` copies `sc->sc_buflen` bytes regardless of the caller's buffer size, potentially reading beyond valid data if `sc_buflen` was ever larger than the currently valid content.
+`secdev_read` 复制 `sc->sc_buflen` 字节而不考虑调用者的缓冲区大小，如果 `sc_buflen` 曾经大于当前有效内容，可能会读取超出有效数据的范围。
 
 **额外探索。**
 
-As a non-root user, try the operations that should be privileged and confirm that they succeed when they should not. Write a short C program that issues `SECDEV_GET_INFO` and prints the returned structure as a hex dump. Look for non-zero bytes in fields that were not explicitly set; those are leaked kernel data.
+作为非 root 用户，尝试那些应该是特权的操作，并确认它们在不该成功时成功了。编写一个简短的 C 程序，发出 `SECDEV_GET_INFO` 并将返回的结构打印为十六进制转储。查找未显式设置的字段中的非零字节；那些就是泄露的内核数据。
 
 **总结。**
 
@@ -3016,30 +3016,30 @@ As a non-root user, try the operations that should be privileged and confirm tha
 
 **步骤。**
 
-1. Start from `lab02-bounds/secdev.c`. This is `lab01`'s code plus some `TODO` comments marking where you will add checks.
+1. 从 `lab02-bounds/secdev.c` 开始。这是 `lab01` 的代码加上一些标记你将添加检查位置的 `TODO` 注释。
 
-2. In `secdev_write`, calculate how much data can safely be written to the internal buffer. Remember that `uiomove` writes at most the length you pass. Clamp `uio->uio_resid` to the remaining space before calling `uiomove`.
+2. 在 `secdev_write` 中，计算可以安全写入内部缓冲区的数据量。记住 `uiomove` 最多写入你传入的长度。在调用 `uiomove` 之前，将 `uio->uio_resid` 钳制到剩余空间。
 
-3. In `secdev_read`, make sure you only copy out as much data as is actually valid in the buffer, not its full allocated size.
+3. 在 `secdev_read` 中，确保你只复制出缓冲区中实际有效的数据量，而不是其完整的分配大小。
 
-4. Rebuild and re-test. With the fixes in place, a write of 10KB to a 4KB buffer should simply fill the buffer, not overflow it.
+4. 重新构建并重新测试。有了修复，向 4KB 缓冲区写入 10KB 应该只是填满缓冲区，而不是溢出它。
 
-5. Stress-test the fixed driver:
+5. 对修复后的驱动程序进行压力测试：
    ```
    dd if=/dev/zero of=/dev/secdev bs=8192 count=100
    dd if=/dev/secdev of=/dev/null bs=8192 count=100
    ```
-   Neither command should crash the kernel or produce warnings in `dmesg`. If they do, your bounds check is incomplete.
+   这两个命令都不应使内核崩溃或在 `dmesg` 中产生警告。如果出现这种情况，你的边界检查不完整。
 
-6. Compare your fix with `lab02-fixed/secdev.c`. If your fix is different but correct, that is fine; multiple solutions can be valid. If yours is incorrect, study the reference fix and understand where you went wrong.
+6. 将你的修复与 `lab02-fixed/secdev.c` 进行比较。如果你的修复不同但正确，那也没问题；多种解决方案都可以是有效的。如果你的是错误的，研究参考修复并理解你哪里出错了。
 
-**Building confidence.**
+**建立信心。**
 
-Write a small C program that issues writes of various sizes (0 bytes, 1 byte, buffer size, buffer size + 1, much larger than buffer size) and verifies that each returns the expected number of bytes written or a sensible error. This kind of boundary testing is what real driver tests look like.
+编写一个简短的 C 程序，发出各种大小的写入（0 字节、1 字节、缓冲区大小、缓冲区大小 + 1、远大于缓冲区大小），并验证每个返回预期的写入字节数或合理的错误。这种边界测试就是真实驱动程序测试的样子。
 
 **总结。**
 
-Bounds checking is the simplest security fix and it catches a large fraction of real-world driver bugs. Internalize the pattern: every `uiomove`, `copyin`, `copyout`, and memcpy bounds the length against both source and destination sizes. The compiler cannot catch this for you; it is entirely the author's responsibility.
+边界检查是最简单的安全修复，它捕获了很大一部分真实世界驱动程序 bug。内化这个模式：每个 `uiomove`、`copyin`、`copyout` 和 memcpy 都对照源和目标大小限制长度。编译器不能为你捕获这个；这完全是作者的责任。
 
 ### 实验3：copyout 前清零
 
@@ -3047,9 +3047,9 @@ Bounds checking is the simplest security fix and it catches a large fraction of 
 
 **步骤。**
 
-1. Start from `lab03-info-leak/secdev.c`. This contains the ioctl as in the original unsafe code.
+1. 从 `lab03-info-leak/secdev.c` 开始。这包含了原始不安全代码中的 ioctl。
 
-2. Observe the structure definition. Note the padding between fields:
+2. 观察结构定义。注意字段之间的填充：
    ```c
    struct secdev_info {
        uint32_t version;
@@ -3060,21 +3060,21 @@ Bounds checking is the simplest security fix and it catches a large fraction of 
        char name[32];
    };
    ```
-   Check the size with `pahole` or a small C program that prints `sizeof(struct secdev_info)`.
+   用 `pahole` 或打印 `sizeof(struct secdev_info)` 的简短 C 程序检查大小。
 
-3. Before fixing, build and load the broken version. Run the test program provided in `lab03-info-leak/test/leak_check.c`. It issues the ioctl repeatedly and dumps the returned structure as a hex dump. Look at the padding bytes. You should see non-zero values that differ between runs; those are leaked kernel stack bytes.
+3. 在修复之前，构建并加载有问题的版本。运行 `lab03-info-leak/test/leak_check.c` 中提供的测试程序。它重复发出 ioctl 并将返回的结构转储为十六进制转储。查看填充字节。你应该看到每次运行不同的非零值；那些是泄露的内核栈字节。
 
-4. In `secdev_ioctl`, before filling in the `struct secdev_info`, zero the structure with `bzero` (or use `= { 0 }` initialization).
+4. 在 `secdev_ioctl` 中，在填充 `struct secdev_info` 之前，用 `bzero` 清零结构（或使用 `= { 0 }` 初始化）。
 
-5. Also fix the name field: use `snprintf` instead of `strncpy` to guarantee a NUL terminator, and copy only up to the NUL rather than the full buffer size.
+5. 同时修复 name 字段：使用 `snprintf` 而不是 `strncpy` 以保证 NUL 终止符，并且只复制到 NUL 而不是整个缓冲区大小。
 
-6. Rebuild and re-test with the same `leak_check` program. The padding bytes should now be zero on every run. The visible behavior from user space is unchanged; the internal change is that padding bytes no longer carry stack contents.
+6. 重新构建并用相同的 `leak_check` 程序重新测试。填充字节现在在每次运行时应该为零。用户空间可见的行为不变；内部变化是填充字节不再携带栈内容。
 
-7. Compare with `lab03-fixed/secdev.c`.
+7. 与 `lab03-fixed/secdev.c` 进行比较。
 
-**A deeper exploration.**
+**更深入的探索。**
 
-If you have `KMSAN` built into your kernel, load the broken version of the driver and run `leak_check`. KMSAN should report an uninitialized read when the structure is copied out. This demonstrates why KMSAN is valuable: it catches information leaks that are invisible without it.
+如果你的内核中构建了 `KMSAN`，加载有问题的驱动程序版本并运行 `leak_check`。KMSAN 应该在结构被复制出去时报告未初始化的读取。这说明了 KMSAN 为何有价值：它捕获了没有它就会不可见的信息泄露。
 
 **总结。**
 
@@ -3086,59 +3086,59 @@ If you have `KMSAN` built into your kernel, load the broken version of the drive
 
 **步骤。**
 
-1. Start from `lab04-privilege/secdev.c`.
+1. 从 `lab04-privilege/secdev.c` 开始。
 
-2. Modify the device-node creation code in `secdev_modevent` (or `secdev_attach`, depending on structure) to use a restrictive mode (`0600`) and the root user and group:
+2. 修改 `secdev_modevent`（或 `secdev_attach`，取决于结构）中的设备节点创建代码，使用限制性模式（`0600`）和 root 用户及组：
    ```c
    args.mda_uid = UID_ROOT;
    args.mda_gid = GID_WHEEL;
    args.mda_mode = 0600;
    ```
 
-3. In `secdev_open`, add a `priv_check(td, PRIV_DRIVER)` call at the top:
+3. 在 `secdev_open` 中，在顶部添加一个 `priv_check(td, PRIV_DRIVER)` 调用：
    ```c
    error = priv_check(td, PRIV_DRIVER);
    if (error != 0)
        return (error);
    ```
-   Return the error if the check fails.
+   如果检查失败则返回错误。
 
-4. Rebuild and reload the module.
+4. 重新构建并重新加载模块。
 
-5. Test from a non-root shell:
+5. 从非 root shell 测试：
    ```
    % cat /dev/secdev
    cat: /dev/secdev: Permission denied
    ```
-   Open should fail with `EPERM` (reported as "Permission denied"). The filesystem mode blocks access before `d_open` is even reached.
+   打开应该以 `EPERM` 失败（报告为"Permission denied"）。文件系统模式在到达 `d_open` 之前就阻止了访问。
 
-6. Temporarily change the device-node mode (as root) with `chmod 0666 /dev/secdev`. Try again as non-root. This time the filesystem allows the open, but `priv_check` in `d_open` refuses:
+6. 临时用 `chmod 0666 /dev/secdev` 更改设备节点模式（以 root 身份）。以非 root 身份再次尝试。这次文件系统允许打开，但 `d_open` 中的 `priv_check` 拒绝：
    ```
    % cat /dev/secdev
    cat: /dev/secdev: Operation not permitted
    ```
-   This demonstrates the in-kernel layer of the defense.
+   这展示了内核内防御层。
 
-7. Reset the permissions with `chmod 0600 /dev/secdev` or reload the module to restore the default.
+7. 用 `chmod 0600 /dev/secdev` 重置权限，或重新加载模块以恢复默认值。
 
-8. As root, the device should continue to work normally. Verify:
+8. 以 root 身份，设备应继续正常工作。验证：
    ```
    # echo "hello" > /dev/secdev
    # cat /dev/secdev
    hello
    ```
 
-9. Compare with `lab04-fixed/secdev.c`.
+9. 与 `lab04-fixed/secdev.c` 进行比较。
 
-**Digging deeper.**
+**更深入的探索。**
 
-Try creating a jailed environment and running a shell as root inside the jail:
+尝试创建一个 jail 环境并在 jail 内以 root 身份运行 shell：
 ```console
 # jail -c path=/ name=testjail persist
 # jexec testjail sh
 # cat /dev/secdev
 ```
-Depending on whether your driver has added a `jailed()` check, the behavior differs. If the driver does not check `jailed`, jailed-root can still access the device. Add `if (jailed(td->td_ucred)) return (EPERM);` at the top of `secdev_open` and verify that the jailed access is now refused.
+根据你的驱动程序是否添加了 `jailed()` 检查，行为会有所不同。如果驱动程序不检查 `jailed`，jail 内的 root 仍然可以访问设备。在 `secdev_open` 顶部添加 `if (jailed(td->td_ucred)) return (EPERM);`，并验证 jail 内的访问现在被拒绝。
 
 **总结。**
 
@@ -3150,15 +3150,15 @@ Depending on whether your driver has added a `jailed()` check, the behavior diff
 
 **步骤。**
 
-1. Start from `lab05-ratelimit/secdev.c`.
+1. 从 `lab05-ratelimit/secdev.c` 开始。
 
-2. Add a static `struct timeval` and a static `int` to hold rate-limit state. These are global per-driver, not per-softc, unless you specifically want per-device limits:
+2. 添加一个静态的 `struct timeval` 和一个静态的 `int` 来保存速率限制状态。这些是每个驱动器的全局变量，不是每个 softc 的，除非你特别想要每设备限制：
    ```c
    static struct timeval secdev_log_last;
    static int secdev_log_pps;
    ```
 
-3. In `secdev_ioctl`, in the `default` branch (the case that handles unknown ioctls), use `ppsratecheck` to decide whether to log:
+3. 在 `secdev_ioctl` 的 `default` 分支（处理未知 ioctl 的情况）中，使用 `ppsratecheck` 来决定是否记录：
    ```c
    default:
        if (ppsratecheck(&secdev_log_last, &secdev_log_pps, 5)) {
@@ -3168,11 +3168,11 @@ Depending on whether your driver has added a `jailed()` check, the behavior diff
        }
        return (ENOTTY);
    ```
-   The third argument, `5`, is the maximum messages per second.
+   第三个参数 `5` 是每秒最大消息数。
 
-4. Rebuild and reload.
+4. 重新构建并重新加载。
 
-5. Write a tiny test program that issues a million bad ioctls in a tight loop:
+5. 编写一个微小测试程序，在紧凑循环中发出百万次错误 ioctl：
    ```c
    #include <sys/ioctl.h>
    #include <fcntl.h>
@@ -3184,15 +3184,15 @@ Depending on whether your driver has added a `jailed()` check, the behavior diff
    }
    ```
 
-6. While it runs (as root), monitor `dmesg -f`. You should see messages arriving, but at no more than about 5 per second. Without rate limiting, you would have a million messages.
+6. 在它运行时（以 root 身份），监控 `dmesg -f`。你应该看到消息到达，但不超过每秒约 5 条。没有速率限制，你将有一百万条消息。
 
-7. Count the messages with something like `dmesg | grep "unknown ioctl" | wc -l`. Compare to one million (the number of attempts).
+7. 用类似 `dmesg | grep "unknown ioctl" | wc -l` 的命令计数消息。与一百万（尝试次数）进行比较。
 
-8. Compare with `lab05-fixed/secdev.c`.
+8. 与 `lab05-fixed/secdev.c` 进行比较。
 
-**Variations to try.**
+**可尝试的变体。**
 
-Replace `ppsratecheck` with `eventratecheck` and note the difference (event-based vs per-second). Experiment with different maximum rates. Add a suppressed-count summary that emits periodically ("suppressed N messages in last M seconds") for operator visibility.
+将 `ppsratecheck` 替换为 `eventratecheck` 并注意区别（基于事件 vs 每秒）。尝试不同的最大速率。添加一个定期发出的抑制计数摘要（"最近 M 秒内抑制了 N 条消息"）以提高运维人员可见性。
 
 **总结。**
 
@@ -3204,39 +3204,39 @@ Replace `ppsratecheck` with `eventratecheck` and note the difference (event-base
 
 **步骤。**
 
-1. Start from `lab06-detach/secdev.c`. This version introduces a small callout that periodically updates an internal counter, and an ioctl that sleeps briefly to simulate long-running work.
+1. 从 `lab06-detach/secdev.c` 开始。这个版本引入了一个定期更新内部计数器的小型 callout，以及一个短暂睡眠以模拟长时间运行的 ioctl。
 
-2. Review the current `detach` function. Note what it frees and in what order. The starter file intentionally has a flawed detach that frees the softc without draining.
+2. 审查当前的 `detach` 函数。注意它释放了什么以及以什么顺序。起始文件故意有一个有缺陷的 detach，它在没有排干的情况下释放了 softc。
 
-3. Test the flawed version first (build with `INVARIANTS` and `WITNESS` in the kernel):
-   - Start a test program that holds `/dev/secdev` open and issues the slow ioctl in a loop.
-   - While it runs, issue `kldunload secdev`.
-   - Observe the result. You may see a kernel panic, a stuck kldunload, or, if you are lucky, nothing visible (the race may not fire on every run). `WITNESS` may complain about lock state.
-   - Rebuild and try again until you see the problem. Concurrent races can be flaky.
+3. 首先测试有缺陷的版本（在内核中构建 `INVARIANTS` 和 `WITNESS`）：
+   - 启动一个保持 `/dev/secdev` 打开并在循环中发出慢速 ioctl 的测试程序。
+   - 在它运行时，发出 `kldunload secdev`。
+   - 观察结果。你可能会看到内核 panic、卡住的 kldunload，或者如果幸运的话，什么也看不到（竞态可能不是每次运行都触发）。`WITNESS` 可能会抱怨锁状态。
+   - 重新构建并再次尝试直到你看到问题。并发竞态可能不稳定。
 
-4. Now fix the detach:
-   - Use `destroy_dev` on the cdev before any other cleanup, so that no new user-space thread can enter the driver, and any in-flight thread finishes before `destroy_dev` returns.
-   - Add a `callout_drain` call before freeing the softc. This ensures that any in-flight callout has finished.
-   - If the driver uses a taskqueue, add `taskqueue_drain_all`.
-   - Only after all draining, free resources.
+4. 现在修复 detach：
+   - 在任何其他清理之前，在 cdev 上使用 `destroy_dev`，这样没有新的用户空间线程可以进入驱动程序，任何正在进行中的线程在 `destroy_dev` 返回之前完成。
+   - 在释放 softc 之前添加 `callout_drain` 调用。这确保任何正在进行的 callout 已经完成。
+   - 如果驱动程序使用了 taskqueue，添加 `taskqueue_drain_all`。
+   - 只有在所有排干之后，才释放资源。
 
-5. Rebuild and re-test the same race:
-   - The user program continues running uninterrupted during `kldunload`.
-   - After `kldunload`, the user program's next ioctl receives an error (typically `ENXIO`) because the cdev was destroyed.
-   - The kernel remains stable. No panic, no WITNESS complaint.
+5. 重新构建并重新测试相同的竞态：
+   - 在 `kldunload` 期间用户程序继续不间断地运行。
+   - `kldunload` 之后，用户程序的下一个 ioctl 收到错误（通常是 `ENXIO`），因为 cdev 已被销毁。
+   - 内核保持稳定。没有 panic，没有 WITNESS 投诉。
 
-6. Compare with `lab06-fixed/secdev.c`. Confirm that the fixed version handles in-flight activity safely.
+6. 与 `lab06-fixed/secdev.c` 进行比较。确认修复版本安全地处理正在进行的活动。
 
-**Understanding what happened.**
+**理解发生了什么。**
 
-The flawed version races because:
-- `destroy_dev` is called, or is not called early enough. In-flight d_* calls continue.
-- The callout is scheduled in the future and has not fired yet.
-- The softc is freed while something still references it.
-- The freed softc is reused by the allocator for some other purpose.
-- The callout fires, touches what it thinks is its softc, and corrupts whatever memory is now there.
+有缺陷的版本发生竞态是因为：
+- `destroy_dev` 被调用，或者没有尽早被调用。正在进行的 d_* 调用继续。
+- callout 被调度在未来且尚未触发。
+- softc 在有东西仍在引用它时被释放。
+- 已释放的 softc 被分配器重用于其他目的。
+- callout 触发，触及它认为是其 softc 的东西，并损坏现在在那里的任何内存。
 
-The fix sequences the cleanup: stop accepting new entries first (`destroy_dev`), stop in-flight entries by waiting for them to leave (part of `destroy_dev`'s contract), stop scheduled work (`callout_drain`), and only then free state. Each step closes a door; nothing beyond a closed door can reach the memory being freed.
+修复方法对清理进行排序：首先停止接受新条目（`destroy_dev`），通过等待它们离开来停止正在进行的条目（`destroy_dev` 约定的一部分），停止计划的工作（`callout_drain`），然后才释放状态。每一步关闭一扇门；没有东西能穿过已关闭的门到达正在释放的内存。
 
 **总结。**
 
@@ -3248,42 +3248,42 @@ The fix sequences the cleanup: stop accepting new entries first (`destroy_dev`),
 
 **步骤。**
 
-1. Start from `lab07-secure/secdev.c`. This is a skeleton with `TODO` markers in many places.
+1. 从 `lab07-secure/secdev.c` 开始。这是一个在许多地方有 `TODO` 标记的骨架。
 
-2. Fill in each `TODO`, applying the lessons from Labs 1 to 6 plus any additional defenses you think appropriate. Suggested additions:
-   - A `MALLOC_DEFINE` for the driver's memory.
-   - A softc mutex protecting all shared fields.
-   - `priv_check(td, PRIV_DRIVER)` in `d_open` and in each privileged ioctl.
-   - `jailed()` checks for operations that should not be available to jailed users.
-   - `securelevel_gt` for operations that should be refused at elevated securelevel.
-   - `bzero` on every structure before filling it for `copyout`.
-   - `M_ZERO` on every allocation that will be copied to user space.
-   - `explicit_bzero` on sensitive buffers before `free`.
-   - Rate-limited `device_printf` on every log message triggerable from user space.
-   - `destroy_dev`, `callout_drain`, and other drains in `detach` before any free.
-   - A sysctl-controlled `secdev_debug` flag that gates verbose logging.
-   - Input validation that whitelists allowed operation codes.
-   - Bounded copies in both directions.
-   - `KASSERT` statements documenting internal invariants.
+2. 填充每个 `TODO`，应用实验 1 到 6 的经验教训以及你认为合适的任何额外防御。建议添加：
+   - 驱动程序内存的 `MALLOC_DEFINE`。
+   - 保护所有共享字段的 softc 互斥锁。
+   - `d_open` 中以及每个特权 ioctl 中的 `priv_check(td, PRIV_DRIVER)`。
+   - 对不应供 jailed 用户使用的操作进行 `jailed()` 检查。
+   - 对应在升高安全级别时拒绝的操作进行 `securelevel_gt` 检查。
+   - 在填充每个结构用于 `copyout` 之前使用 `bzero`。
+   - 每个将被复制到用户空间的分配使用 `M_ZERO`。
+   - 在 `free` 之前对敏感缓冲区使用 `explicit_bzero`。
+   - 每个可从用户空间触发的日志消息上使用速率限制的 `device_printf`。
+   - 在任何释放之前，在 `detach` 中使用 `destroy_dev`、`callout_drain` 和其他排干操作。
+   - 一个 sysctl 控制的 `secdev_debug` 标志，用于门控详细日志记录。
+   - 白名单允许操作码的输入验证。
+   - 两个方向的有界复制。
+   - 记录内部不变量的 `KASSERT` 语句。
 
-3. Rebuild and load the module.
+3. 重新构建并加载模块。
 
-4. Run a comprehensive functional test to confirm everything still works:
-   - As root, open the device, read, write, ioctl.
-   - As non-root, confirm `/dev/secdev` is inaccessible.
-   - Inside a jail, confirm sensitive operations are refused.
+4. 运行全面功能测试以确认一切仍然有效：
+   - 以 root 身份，打开设备，读取，写入，ioctl。
+   - 以非 root 身份，确认 `/dev/secdev` 不可访问。
+   - 在 jail 内部，确认敏感操作被拒绝。
 
-5. Run a security stress test:
-   - Boundary cases (0-byte reads, exactly buffer-size writes, one-byte-over writes).
-   - Malformed ioctls.
-   - Concurrent open/read/write/close from multiple processes.
-   - `kldunload` during active use.
+5. 运行安全压力测试：
+   - 边界情况（0 字节读取、恰好缓冲区大小的写入、超出一字节的写入）。
+   - 格式错误的 ioctl。
+   - 多个进程并发 open/read/write/close。
+   - 活跃使用期间的 `kldunload`。
 
-6. Compare your work with `lab07-fixed/secdev.c`. Note differences. Where your version is more defensive, ask whether the extra defense is worth the complexity. Where the reference is more defensive, ask whether you missed a defense.
+6. 将你的工作与 `lab07-fixed/secdev.c` 进行比较。注意差异。如果你的版本更防御性，询问额外的防御是否值得复杂性。如果参考版本更防御性，询问你是否遗漏了某种防御。
 
-**A self-review.**
+**自我审查。**
 
-Once your lab 7 driver builds and passes tests, put on the reviewer hat. Go through the Security Checklist section of this chapter and confirm each item. Any items you cannot confirm are gaps in your driver. Fix them now, while the code is fresh; later, finding and fixing such gaps is slower and more error-prone.
+一旦你的实验 7 驱动程序构建并通过测试，戴上审查者的帽子。浏览本章的安全检查清单部分并确认每个项目。任何你无法确认的项目都是驱动程序中的缺口。现在修复它们，趁代码还在新鲜状态；以后找到并修复这样的缺口会更慢、更容易出错。
 
 **总结。**
 
@@ -3297,273 +3297,273 @@ Once your lab 7 driver builds and passes tests, put on the reviewer hat. Go thro
 
 ### 挑战1：添加多步骤 ioctl
 
-Design and implement an ioctl that performs a multi-step operation on `secdev`: first, the user uploads a blob; second, the user requests processing; third, the user downloads the result. Each step is a separate ioctl call.
+设计并实现一个在 `secdev` 上执行多步骤操作的 ioctl：首先，用户上传一个数据块；其次，用户请求处理；第三，用户下载结果。每个步骤是一个独立的 ioctl 调用。
 
-The challenge is to manage per-open state correctly: the blob uploaded in step 1 must be associated with the calling file descriptor, not globally. Two concurrent users must not see each other's blobs. State must be cleaned up when the file descriptor is closed, even if the user never reached step 3.
+挑战在于正确管理每次打开的状态：步骤 1 中上传的数据块必须与调用文件描述符关联，而不是全局的。两个并发用户不能看到彼此的数据块。当文件描述符关闭时，即使从未到达步骤 3，状态也必须被清理。
 
-Security considerations: bound the blob size, validate each step of the state machine (cannot request processing without a blob; cannot download without completing processing), make sure partial state on error paths is cleaned up, and make sure a user-visible identifier (if you expose one) is not a kernel pointer.
+安全考虑：限制数据块大小，验证状态机的每个步骤（没有数据块就不能请求处理；没有完成处理就不能下载），确保错误路径上的部分状态被清理，并确保用户可见的标识符（如果你暴露了一个）不是内核指针。
 
 ### 挑战2：编写 syzkaller 描述
 
-Write a syzkaller syscall description for `secdev`'s ioctl interface. The format is documented in the syzkaller repository. Install syzkaller and feed it your driver; run it for at least an hour (ideally longer) and see what it finds.
+为 `secdev` 的 ioctl 接口编写一个 syzkaller 系统调用描述。格式在 syzkaller 仓库中有文档记录。安装 syzkaller 并将其输入你的驱动程序；运行至少一小时（理想情况下更长时间），看看它能找到什么。
 
-If it finds bugs, fix them. Write a note about what each bug was and how the fix works. If it does not find bugs in several hours, consider whether your syzkaller description really exercises the driver. Often a description that does not find bugs is not exploring the interface thoroughly.
+如果它发现了 bug，修复它们。写下每个 bug 是什么以及修复是如何工作的。如果它几小时内没有发现 bug，考虑你的 syzkaller 描述是否真的在练习驱动程序。通常没有发现 bug 的描述并没有彻底探索接口。
 
 ### 挑战3：在自己的代码中检测双重释放
 
-Intentionally introduce a double-free bug into a copy of your secure `secdev`. Build the module against a kernel with `INVARIANTS` and `WITNESS`. Load and exercise the module in a way that triggers the double-free. Observe what happens.
+故意在你的安全 `secdev` 副本中引入一个双重释放 bug。针对带有 `INVARIANTS` 和 `WITNESS` 的内核构建模块。以触发双重释放的方式加载并练习该模块。观察发生了什么。
 
-Now rebuild the kernel with `KASAN`. Load and exercise the same broken module. Observe the difference in how the bug is detected.
+现在用 `KASAN` 重新构建内核。加载并练习相同的有问题模块。观察在如何检测 bug 方面的差异。
 
-Write down what each sanitizer caught and how readable the output was. This exercise builds intuition for which sanitizer to reach for first in which situation.
+写下每个净化器捕获了什么以及输出的可读性。这个练习建立了关于在哪种情况下首先使用哪个净化器的直觉。
 
 ### 挑战4：对现有驱动程序进行威胁建模
 
-Pick a driver in the FreeBSD tree that you have not previously examined (something small, ideally under 2000 lines). Read it carefully. Write a threat model: who are the callers, what privileges do they need, what could go wrong, what mitigations are in place, what could be added?
+在 FreeBSD 树中选择一个你以前没有检查过的驱动程序（小型的，理想情况下少于 2000 行）。仔细阅读它。编写一个威胁模型：调用者是谁，他们需要什么权限，可能出什么问题，有哪些缓解措施，可以添加什么？
 
-The goal is not to find specific bugs. It is to practice the security mindset on real code. A good threat model is a few pages of prose that would let another engineer review the same driver efficiently.
+目标不是找到特定的 bug。它是在真实代码上练习安全思维方式。一个好的威胁模型是几页文字，能让另一位工程师高效地审查同一个驱动程序。
 
 ### 挑战5：比较 `/dev/null` 和 `/dev/mem`
 
-Open `/usr/src/sys/dev/null/null.c` and `/usr/src/sys/dev/mem/memdev.c` (or the per-architecture equivalents). Read both.
+打开 `/usr/src/sys/dev/null/null.c` 和 `/usr/src/sys/dev/mem/memdev.c`（或每个架构的等价物）。阅读两者。
 
-Write a short essay (a page or two) on the security differences. `/dev/null` is one of the simplest drivers in FreeBSD; what does it do, and why is it safe? `/dev/mem` is one of the most dangerous; what does it do, and how does FreeBSD keep it safe? What can you learn about the shape of secure driver code from the contrast?
+就安全差异写一篇短文（一两页）。`/dev/null` 是 FreeBSD 中最简单的驱动程序之一；它做什么，为什么安全？`/dev/mem` 是最危险的之一；它做什么，FreeBSD 如何保持其安全？从对比中你可以学到安全驱动程序代码的形状？
 
 ## 故障排除与常见错误
 
-A short catalogue of mistakes I have seen repeatedly in real driver code, with the symptom, the cause, and the fix.
+一个我在真实驱动程序代码中反复看到的错误简短目录，包括症状、原因和修复方法。
 
 ### "有时能工作，有时不能"
 
-**Symptom.** A test passes most of the time but occasionally fails. Running under load amplifies the failure rate.
+**症状。** 测试大部分时间通过但偶尔失败。在负载下运行会放大失败率。
 
-**Cause.** Almost always a race condition. Something is being read and written concurrently without a lock.
+**原因。** 几乎总是竞态条件。某物被并发读写而没有锁。
 
-**Fix.** Identify the shared state. Add a lock. Acquire the lock for the whole check-and-act sequence. Do not trust `atomic_*` operations to solve a multi-field invariant problem.
+**修复。** 识别共享状态。添加锁。为整个检查-行动序列获取锁。不要信任 `atomic_*` 操作来解决多字段不变量问题。
 
 ### "驱动程序在卸载时崩溃"
 
-**Symptom.** `kldunload` triggers a panic or a stuck kernel.
+**症状。** `kldunload` 触发 panic 或卡住内核。
 
-**Cause.** A callout, taskqueue task, or kernel thread is still running when `detach` frees the structure it uses. Or an in-flight cdev operation is still in the driver's code when `destroy_dev` is skipped.
+**原因。** 当 `detach` 释放 callout、taskqueue 任务或内核线程使用的结构时，它们仍在运行。或者当 `destroy_dev` 被跳过时，正在进行中的 cdev 操作仍在驱动程序的代码中。
 
-**Fix.** In `detach`, call `destroy_dev` before anything else. Then `callout_drain` every callout, `taskqueue_drain_all` every taskqueue, and wait for every kernel thread to exit. Only then free state. Structure the detach as a strict reverse of attach.
+**修复。** 在 `detach` 中，在任何其他操作之前调用 `destroy_dev`。然后对每个 callout 使用 `callout_drain`，对每个 taskqueue 使用 `taskqueue_drain_all`，并等待每个内核线程退出。只有这样才释放状态。将 detach 构建为 attach 的严格逆操作。
 
 ### "ioctl 以 root 身份可以工作，但以服务账户不行"
 
-**Symptom.** User reports that root can use the device, but a non-root account cannot.
+**症状。** 用户报告 root 可以使用设备，但非 root 账户不能。
 
-**Cause.** Device node permissions are too restrictive, or a `priv_check` call refuses the operation.
+**原因。** 设备节点权限过于严格，或者 `priv_check` 调用拒绝了操作。
 
-**Fix.** If the operation truly should be privileged, this is working as intended; document it. If not, reconsider: was the privilege check added in error? Is the device-node mode too tight? The correct answer depends on the operation; most real answers are "yes, it should be privileged, update the docs".
+**修复。** 如果操作确实应该是特权的，这就是按预期工作；记录它。如果不是，重新考虑：权限检查是否错误地添加了？设备节点模式是否过紧？正确答案取决于操作；大多数真实答案是"是的，它应该是特权的，更新文档"。
 
 ### "dmesg 被淹没"
 
-**Symptom.** `dmesg` shows thousands of identical messages from the driver. Legitimate messages are being pushed out.
+**症状。** `dmesg` 显示来自驱动程序的数千条相同消息。合法消息被推出。
 
-**Cause.** A log statement in a path triggerable from user space, without rate limiting.
+**原因。** 在可从用户空间触发的路径中的日志语句，没有速率限制。
 
-**Fix.** Wrap the log in `ppsratecheck` or `eventratecheck`. Limit to a few per second. If the message is about an error, include a count of suppressed messages when the rate returns to normal (the rate helpers support this).
+**修复。** 将日志包裹在 `ppsratecheck` 或 `eventratecheck` 中。限制为每秒几条。如果消息是关于错误的，在速率恢复正常时包括抑制消息的计数（速率辅助函数支持此功能）。
 
 ### "返回的结构中包含垃圾字节"
 
-**Symptom.** A user-space tool reports seeing apparently random data in a field it did not expect to be set.
+**症状。** 用户空间工具报告在它不期望设置的字段中看到明显随机的数据。
 
-**Cause.** The driver did not zero the structure before filling and copying out. The "random" data is actually stack or heap content from before.
+**原因。** 驱动程序在填充和复制出去之前没有清零结构。"随机"数据实际上是之前的栈或堆内容。
 
-**Fix.** Add a `bzero` at the top of the function, or initialize the structure with `= { 0 }` at declaration. Never `copyout` an uninitialized structure.
+**修复。** 在函数顶部添加 `bzero`，或在声明时用 `= { 0 }` 初始化结构。永远不要 `copyout` 未初始化的结构。
 
 ### "内存泄漏但看不到在哪里"
 
-**Symptom.** `vmstat -m` shows the driver's malloc type growing over time. Eventually the system runs out of memory.
+**症状。** `vmstat -m` 显示驱动程序的 malloc 类型随时间增长。最终系统内存耗尽。
 
-**Cause.** An allocation path that does not pair with a free path, or an error path that returns without freeing.
+**原因。** 一个没有与释放路径配对的分配路径，或者一个返回而未释放的错误路径。
 
-**Fix.** Use a named malloc type (`MALLOC_DEFINE`). Audit every allocation. Walk every error path. Consider the single-cleanup-label pattern. Build with `INVARIANTS` and watch for allocator warnings on unload.
+**修复。** 使用命名的 malloc 类型（`MALLOC_DEFINE`）。审计每个分配。遍历每个错误路径。考虑单一清理标签模式。用 `INVARIANTS` 构建并注意卸载时的分配器警告。
 
 ### "kldload 成功但设备没有出现在 /dev 中"
 
-**Symptom.** `kldstat` shows the module loaded, but there is no `/dev/secdev` entry.
+**症状。** `kldstat` 显示模块已加载，但没有 `/dev/secdev` 条目。
 
-**Cause.** Usually an error in the `attach` sequence before `make_dev_s` is called, or `make_dev_s` itself failed silently.
+**原因。** 通常是在调用 `make_dev_s` 之前的 `attach` 序列中的错误，或者 `make_dev_s` 本身静默失败。
 
-**Fix.** Check the return value of `make_dev_s`. Add a `device_printf` reporting any error. Verify `attach` is being reached by adding a `device_printf` at the top.
+**修复。** 检查 `make_dev_s` 的返回值。添加报告任何错误的 `device_printf`。通过在顶部添加 `device_printf` 验证 `attach` 是否被到达。
 
 ### "简单的 C 测试通过，但循环执行的 shell 脚本失败"
 
-**Symptom.** Single-shot testing works. Rapid repeated testing fails.
+**症状。** 单次测试有效。快速重复测试失败。
 
-**Cause.** Likely a race between repeated operations, or a resource that is not being cleaned up between calls. Sometimes a TOCTOU bug that is timing-sensitive.
+**原因。** 可能是重复操作之间的竞态，或者调用之间未清理的资源。有时是对时序敏感的 TOCTOU bug。
 
-**Fix.** Stress-test harder. Use `dtrace` or `ktrace` to see what is happening. Look for state that persists across calls and should not.
+**修复。** 更努力地进行压力测试。使用 `dtrace` 或 `ktrace` 查看正在发生的事情。寻找跨调用持续存在且不应存在的状态。
 
 ### "KASAN 报告释放后使用，但我的 malloc/free 是平衡的"
 
-**Symptom.** `KASAN` reports access to freed memory, but visual inspection of the driver shows each allocation freed exactly once.
+**症状。** `KASAN` 报告对已释放内存的访问，但对驱动程序的目视检查显示每个分配恰好被释放一次。
 
-**Cause.** A common subtle case: a callout or taskqueue task still holds a pointer to the freed object. The callout fires after free.
+**原因。** 一种常见的微妙情况：callout 或 taskqueue 任务仍持有指向已释放对象的指针。callout 在释放后触发。
 
-**Fix.** Trace the callout lifecycle. Ensure `callout_drain` (or equivalent) runs before any free. A related case is an asynchronous completion callback; ensure the operation is either completed or cancelled before the owning structure is freed.
+**修复。** 追踪 callout 生命周期。确保 `callout_drain`（或等效操作）在任何释放之前运行。一个相关的情况是异步完成回调；确保操作在拥有它的结构被释放之前要么完成要么被取消。
 
 ### "WITNESS 抱怨锁顺序"
 
-**Symptom.** `WITNESS` reports "lock order reversal" and identifies two locks that were acquired in inconsistent order.
+**症状。** `WITNESS` 报告"锁顺序反转"并标识了两个按不一致顺序获取的锁。
 
-**Cause.** At one point the code acquired lock A then lock B; at another point it acquired lock B then lock A. This can deadlock.
+**原因。** 在一个点代码获取了锁 A 然后锁 B；在另一个点它获取了锁 B 然后锁 A。这可能导致死锁。
 
-**Fix.** Decide on a canonical order for your locks. Document it. Acquire them in that order everywhere. If a code path legitimately needs the reverse order, use `mtx_trylock` with a backoff-and-retry pattern.
+**修复。** 为你的锁决定一个规范顺序。记录它。在所有地方按该顺序获取它们。如果某个代码路径合法地需要相反的顺序，使用带有回退和重试模式的 `mtx_trylock`。
 
 ### "vmstat -m 显示负数的空闲计数"
 
-**Symptom.** `vmstat -m` lists the driver's malloc type with a negative number of allocations, or with an inuse count that increases over time without bound.
+**症状。** `vmstat -m` 列出驱动程序的 malloc 类型时显示的分配数为负数，或者正在使用的计数无限制地随时间增长。
 
-**Cause.** A mismatched `malloc`/`free` type, or a leak where allocations happen without corresponding frees.
+**原因。** `malloc`/`free` 类型不匹配，或者有分配而无对应释放的泄漏。
 
-**Fix.** A negative free count almost always means a `free` call passed the wrong type tag. Audit every `free(ptr, M_TYPE)` and confirm the type matches the `malloc`. A continuously rising inuse count is a leak; audit every path that allocates and confirm it has a matching free on every exit.
+**修复。** 负数空闲计数几乎总是意味着 `free` 调用传递了错误的类型标签。审计每个 `free(ptr, M_TYPE)` 并确认类型与 `malloc` 匹配。持续增长的 inuse 计数是一个泄漏；审计每个分配的路径，并确认它在每个出口都有匹配的释放。
 
 ### "驱动程序在 amd64 上工作但在 arm64 上崩溃"
 
-**Symptom.** Functional testing on amd64 passes; the same driver panics on arm64.
+**症状。** amd64 上的功能测试通过；相同的驱动程序在 arm64 上 panic。
 
-**Cause.** Often a mismatch in structure padding or alignment. arm64 has different padding rules from amd64 for some structures. An access that is aligned on amd64 may be misaligned on arm64 and panic.
+**原因。** 通常是结构填充或对齐的不匹配。arm64 对于某些结构有与 amd64 不同的填充规则。在 amd64 上对齐的访问可能在 arm64 上未对齐并 panic。
 
-**Fix.** Use `__packed` carefully (it changes alignment), use `__aligned(N)` where alignment matters, and avoid assuming the size or layout of a structure matches between architectures. For fields crossing the user/kernel boundary, use explicit widths (`uint32_t` rather than `int`, `uint64_t` rather than `long`).
+**修复。** 小心使用 `__packed`（它改变对齐），在对齐重要的地方使用 `__aligned(N)`，并避免假设结构的大小或布局在架构之间匹配。对于跨越用户/内核边界的字段，使用显式宽度（`uint32_t` 而不是 `int`，`uint64_t` 而不是 `long`）。
 
 ### "驱动程序编译无错误但 dmesg 显示内核构建警告"
 
-**Symptom.** The module builds, but loading it produces warnings about unresolved symbols or ABI mismatches.
+**症状。** 模块构建成功，但加载时产生关于未解析符号或 ABI 不匹配的警告。
 
-**Cause.** The module was built against a different kernel than the one it is being loaded into. The kernel ABI is not guaranteed stable across versions, so a module built against 14.2 may not load cleanly on 14.3.
+**原因。** 模块是针对与加载到的目标不同的内核构建的。内核 ABI 不保证跨版本稳定，所以针对 14.2 构建的模块可能无法在 14.3 上干净加载。
 
-**Fix.** Rebuild the module against the running kernel's source tree. `uname -r` shows the running kernel version; verify that `/usr/src` matches. If they do not, install the matching source (via `freebsd-update`, `svn`, or `git`, depending on your source distribution).
+**修复。** 针对正在运行的内核源代码树重新构建模块。`uname -r` 显示正在运行的内核版本；验证 `/usr/src` 匹配。如果不匹配，安装匹配的源代码（通过 `freebsd-update`、`svn` 或 `git`，取决于你的源代码分发）。
 
 ### "驱动程序间歇性地比预期慢"
 
-**Symptom.** Benchmarks show occasional large latency spikes even under moderate load.
+**症状。** 基准测试显示即使在中等负载下也会偶尔出现大的延迟峰值。
 
-**Cause.** Often a lock-contention issue: multiple threads queue on a single mutex. Sometimes an allocator stall: `malloc(M_WAITOK)` in a hot path waits for memory to become available.
+**原因。** 通常是锁争用问题：多个线程排队等待单个互斥锁。有时是分配器停顿：热点路径中的 `malloc(M_WAITOK)` 等待内存可用。
 
-**Fix.** Use `dtrace` to profile lock contention (`lockstat` provider) and identify which lock is hot. Restructure to reduce the critical section, split the lock, or use a lock-free approach. For allocator stalls, preallocate or use a UMA zone with a high-water mark.
+**修复。** 使用 `dtrace` 分析锁争用（`lockstat` 提供者）并识别哪个锁是热点。重构以减少临界区，拆分锁，或使用无锁方法。对于分配器停顿，预分配或使用带有高水位标记的 UMA 区域。
 
 ## 驱动程序代码审查安全检查清单
 
-This section is a reference checklist you can keep next to your code as you review a driver, yours or someone else's. It is not exhaustive, but if every item on the list has been consciously considered, the driver is in much better shape than the average.
+本节是一个参考检查清单，你可以放在代码旁边，在审查驱动程序（你自己的或别人的）时使用。它不是详尽的，但如果清单上的每个项目都被有意识地考虑过，驱动程序的状态会比平均水平好得多。
 
 ### 结构检查
 
-The driver's module-load and module-unload paths are symmetric. Every resource allocated on load is freed on unload, and the order of freeing is the reverse of the order of allocation.
+驱动程序的模块加载和模块卸载路径是对称的。加载时分配的每个资源在卸载时释放，释放顺序与分配顺序相反。
 
-The driver uses `make_dev_s` or `make_dev_credf` (not the legacy `make_dev` alone) so that errors during device-node creation are reported and handled.
+驱动程序使用 `make_dev_s` 或 `make_dev_credf`（而不是单独的遗留 `make_dev`），以便设备节点创建期间的错误被报告和处理。
 
-The device node is created with conservative permissions. Mode `0600` or `0640` is the default; anything more permissive has an explicit reason recorded in comments or commit messages.
+设备节点以保守权限创建。模式 `0600` 或 `0640` 是默认值；任何更宽松的权限都有明确的原因记录在注释或提交消息中。
 
-The driver declares a named `malloc_type` via `MALLOC_DECLARE` and `MALLOC_DEFINE`. All allocations use this type.
+驱动程序通过 `MALLOC_DECLARE` 和 `MALLOC_DEFINE` 声明了一个命名的 `malloc_type`。所有分配都使用此类型。
 
-Every lock in the driver has a comment next to its declaration saying what it protects. The comment is accurate.
+驱动程序中的每个锁在其声明旁边都有一条注释说明它保护什么。注释是准确的。
 
 ### 输入与边界检查
 
-Every `copyin` call is paired with a size argument that cannot exceed the destination buffer size.
+每个 `copyin` 调用都有一个不能超过目标缓冲区大小的大小参数。
 
-Every `copyout` call uses a length that is the minimum of the caller's buffer size and the kernel source's size.
+每个 `copyout` 调用使用调用者缓冲区大小和内核源大小中较小的一个。
 
-`copyinstr` is used for strings that should be NUL-terminated. The return value (including `done`) is checked.
+`copyinstr` 应用于应为 NUL 终止的字符串。检查返回值（包括 `done`）。
 
-Every ioctl argument structure is copied into kernel space before any of its fields are read.
+每个 ioctl 参数结构在其任何字段被读取之前被复制到内核空间。
 
-`uiomove` calls pass a length that is clamped to the buffer being read from or written to, not `uio->uio_resid` alone.
+`uiomove` 调用传递被钳制到正在读取或写入的缓冲区大小的长度，而不是单独使用 `uio->uio_resid`。
 
-Every user-provided length field is validated: non-zero when required, bounded below the appropriate maximum, checked against remaining buffer space.
+每个用户提供的长度字段都被验证：在需要时非零，限制在适当的最大值以下，对照剩余缓冲区空间检查。
 
 ### 内存管理
 
-Every `malloc` call checks the return value if `M_NOWAIT` is used. `M_WAITOK` without `M_NULLOK` is never null-checked uselessly; the code relies on the allocator's guarantee.
+如果使用 `M_NOWAIT`，每个 `malloc` 调用都会检查返回值。不带 `M_NULLOK` 的 `M_WAITOK` 永远不会无用地进行空值检查；代码依赖分配器的保证。
 
-Every `malloc` is paired with exactly one `free` on every code path. Success paths and error paths are both audited.
+每个 `malloc` 在每条代码路径上都与恰好一个 `free` 配对。成功路径和错误路径都被审计。
 
-Sensitive data (keys, passwords, credentials, proprietary secrets) is zeroed with `explicit_bzero` or `zfree` before the memory is released.
+敏感数据（密钥、密码、凭据、专有秘密）在内存释放前用 `explicit_bzero` 或 `zfree` 清零。
 
-Structures that will be copied to user space are zeroed before being filled.
+将被复制到用户空间的结构在填充之前被清零。
 
-Buffers allocated for user output use `M_ZERO` at allocation time to prevent stale-data leaks through the tail.
+为用户输出分配的缓冲区在分配时使用 `M_ZERO` 以防止通过尾部泄露陈旧数据。
 
-After a pointer is freed, it is either set to NULL or the scope immediately ends.
+指针被释放后，要么设置为 NULL，要么作用域立即结束。
 
 ### 权限与访问控制
 
-Operations that require administrative privilege call `priv_check(td, PRIV_DRIVER)` or a more specific `PRIV_*` constant.
+需要管理权限的操作调用 `priv_check(td, PRIV_DRIVER)` 或更具体的 `PRIV_*` 常量。
 
-Operations that should not be allowed inside a jail explicitly check `jailed(td->td_ucred)` and return `EPERM` if jailed.
+不应在 jail 内允许的操作显式检查 `jailed(td->td_ucred)`，如果被 jailed 则返回 `EPERM`。
 
-Operations that depend on the system's securelevel call `securelevel_gt` or `securelevel_ge` and handle the return value correctly (note the inverted semantics: nonzero means refuse).
+依赖于系统安全级别的操作调用 `securelevel_gt` 或 `securelevel_ge` 并正确处理返回值（注意反转的语义：非零意味着拒绝）。
 
-No operation uses `cr_uid == 0` as a privilege gate. `priv_check` is used instead.
+没有操作使用 `cr_uid == 0` 作为权限门控。而是使用 `priv_check`。
 
-Sysctls that expose sensitive data use `CTLFLAG_SECURE` or restrict themselves to privileged users via permission checks.
+暴露敏感数据的 sysctl 使用 `CTLFLAG_SECURE` 或通过权限检查限制自己仅供特权用户使用。
 
 ### 并发
 
-Every field of the softc that is accessed by more than one context is protected by a lock.
+softc 中被多个上下文访问的每个字段都由锁保护。
 
-The full check-and-act sequence (including lookups that decide whether an operation is legal) is held under the appropriate lock.
+完整的检查-行动序列（包括决定操作是否合法的查找）在适当的锁下持有。
 
-No `copyin`, `copyout`, or `uiomove` call is made while holding a mutex. If user-space I/O is needed, the code drops the lock, does the I/O, and re-acquires, checking invariants.
+持有互斥锁时不进行 `copyin`、`copyout` 或 `uiomove` 调用。如果需要用户空间 I/O，代码释放锁，执行 I/O，然后重新获取，检查不变量。
 
-`detach` calls `destroy_dev` (or equivalent) first, then drains callouts, taskqueues, and interrupts, then frees state.
+`detach` 首先调用 `destroy_dev`（或等效操作），然后排干 callout、taskqueue 和中断，然后释放状态。
 
-Callouts, taskqueues, and kernel threads are tracked so that every one of them can be drained during unload.
+Callout、taskqueue 和内核线程被跟踪，以便它们中的每一个都可以在卸载期间被排干。
 
 ### 信息卫生
 
-No kernel pointer (`%p` or equivalent) is returned to user space through an ioctl, sysctl, or log message in a user-triggerable path.
+没有内核指针（`%p` 或等效物）通过用户可触发的路径中的 ioctl、sysctl 或日志消息返回给用户空间。
 
-No user-triggerable log message is uncapped; `ppsratecheck` or similar wraps every such message.
+没有用户可触发的日志消息是不设上限的；`ppsratecheck` 或类似的机制包裹每条这样的消息。
 
-Logs do not include user-supplied data that could contain control characters or sensitive information.
+日志不包括可能包含控制字符或敏感信息的用户提供的数据。
 
-Debug logging is wrapped in a conditional (sysctl or compile-time) so that production builds do not emit it by default.
+调试日志被包裹在条件（sysctl 或编译时）中，以便生产构建默认不发出它们。
 
 ### 故障模式
 
-Every switch statement has a `default:` branch that returns a sensible error.
+每个 switch 语句都有一个返回合理错误的 `default:` 分支。
 
-Every parser or validator whitelists what is allowed, rather than blacklisting what is not.
+每个解析器或验证器白名单允许的内容，而不是黑名单不允许的内容。
 
-Every operation with resource use has a cap. The cap is documented.
+每个有资源使用的操作都有一个上限。上限被记录。
 
-Every sleep has a finite timeout unless a genuine reason requires unbounded waiting (and even then, `PCATCH` is used to allow signals).
+每次睡眠都有一个有限的超时，除非有真正的理由需要无限等待（即使如此，也使用 `PCATCH` 来允许信号）。
 
-Every error path frees the resources its success path would have kept.
+每个错误路径都会释放其成功路径本会保留的资源。
 
-The driver's response to unexpected input is to refuse the operation, not to guess.
+驱动程序对意外输入的响应是拒绝操作，而不是猜测。
 
 ### 测试
 
-The driver has been loaded and tested against a kernel built with `INVARIANTS` and `WITNESS`. No assertions fire and no lock-order violations are reported.
+驱动程序已加载并针对使用 `INVARIANTS` 和 `WITNESS` 构建的内核进行了测试。没有断言触发，没有锁顺序违规报告。
 
-The driver has been tested under concurrent load (multiple processes, multiple open file descriptors, interleaved operations).
+驱动程序已在并发负载下测试（多进程、多打开文件描述符、交织操作）。
 
-The driver has been tested under detach-time concurrency (a user is inside the driver while unload is attempted).
+驱动程序已在分离时并发下测试（在尝试卸载时用户位于驱动程序内部）。
 
-Some form of fuzzing (ideally syzkaller, at minimum a randomized shell test) has been run against the driver.
+已对驱动程序运行了某种形式的模糊测试（理想情况下是 syzkaller，至少是随机化的 shell 测试）。
 
-The driver has been reviewed by someone other than its author. The review was specifically for security considerations, not only functionality.
+驱动程序已由作者以外的人审查。审查专门针对安全考虑，而不仅仅是功能。
 
 ### 演进
 
-The driver's security posture is re-examined at regular intervals. New compiler warnings and new sanitizer findings are triaged seriously. New FreeBSD privilege codes are considered. Unused interfaces are removed.
+驱动程序的安全态势定期重新检查。新的编译器警告和新的净化器发现被认真分类。考虑新的 FreeBSD 权限代码。删除未使用的接口。
 
-Bug reports against the driver are treated as possibly exploitable until proven otherwise.
+针对驱动程序的 bug 报告被视为可能可利用，直到证明并非如此。
 
-Commit history shows that security-relevant changes receive careful commit messages that explain what was wrong and what the fix does.
+提交历史显示安全相关的更改有仔细的提交消息，解释了什么出错了以及修复做了什么。
 
 ## 深入了解真实世界的漏洞模式
 
-The principles in this chapter are abstractions over real bugs that happened in real kernels. This section studies a few patterns that have appeared across the FreeBSD, Linux, and other open-source operating systems over the years. The goal is not to catalogue CVEs (there are whole databases for that) but to train pattern recognition.
+本章的原则是对真实内核中发生的真实 bug 的抽象。本节研究了一些多年来出现在 FreeBSD、Linux 和其他开源操作系统中的模式。目标不是编录 CVE（有整个数据库做这个），而是训练模式识别。
 
 ### 不完整的复制
 
-A classic pattern: a driver receives a variable-length user buffer. It copies a fixed header, extracts a length field from the header, then copies the variable portion according to that length.
+一个经典模式：驱动程序接收一个可变长度的用户缓冲区。它复制一个固定头部，从头部提取长度字段，然后根据该长度复制可变部分。
 
 ```c
 error = copyin(uaddr, &hdr, sizeof(hdr));
@@ -3576,13 +3576,13 @@ if (hdr.body_len > MAX_BODY)
 error = copyin(uaddr + sizeof(hdr), body, hdr.body_len);
 ```
 
-The bug is that the length check compares `body_len` against `MAX_BODY`, but `body` may be a fixed-size buffer sized differently. If `MAX_BODY` is defined carelessly, or if it was once the size of `body` but `body` has since shrunk, the copy overflows `body`.
+bug 在于长度检查将 `body_len` 与 `MAX_BODY` 进行比较，但 `body` 可能是一个不同大小的固定大小缓冲区。如果 `MAX_BODY` 定义不小心，或者它曾经是 `body` 的大小但后来 `body` 缩小了，复制就会溢出 `body`。
 
-Every time you see a pattern of "validate header, then copy body based on header", check that the length bound actually matches the destination buffer size. Use `sizeof(body)` directly if you can, rather than a macro that might drift.
+每当你看到"验证头部，然后根据头部复制主体"的模式时，检查长度边界是否实际匹配目标缓冲区大小。如果可能，直接使用 `sizeof(body)`，而不是可能漂移的宏。
 
 ### 符号混淆
 
-A length is stored as `int` but should be non-negative. A caller passes `-1`. Your code:
+长度存储为 `int` 但应为非负数。调用者传入 `-1`。你的代码：
 
 ```c
 if (len > MAX_LEN)
@@ -3592,28 +3592,28 @@ buf = malloc(len, M_FOO, M_WAITOK);
 copyin(uaddr, buf, len);
 ```
 
-Does the first check pass? Yes, because `-1` is less than `MAX_LEN` when compared as a signed `int`. What happens in `malloc(len, ...)` with `len = -1`? On many platforms, `-1` silently becomes a very large positive `size_t`. The allocation fails (or worse, succeeds at a huge size), or `copyin` tries to copy a huge buffer.
+第一次检查通过了吗？是的，因为 `-1` 作为有符号 `int` 比较时小于 `MAX_LEN`。当 `len = -1` 时在 `malloc(len, ...)` 中会发生什么？在许多平台上，`-1` 静默变成非常大的正数 `size_t`。分配失败（或者更糟，以巨大的大小成功），或者 `copyin` 尝试复制一个巨大的缓冲区。
 
-The fix is to use unsigned types for sizes (preferably `size_t`), or to check for negative values explicitly:
+修复方法是对大小使用无符号类型（最好是 `size_t`），或显式检查负值：
 
 ```c
 if (len < 0 || len > MAX_LEN)
     return (EINVAL);
 ```
 
-Or, better, change the type so that negative values cannot exist:
+或者，更好的是，改变类型使负值不可能存在：
 
 ```c
-size_t len = arg->len;     /* copied from user, already size_t */
+size_t len = arg->len;     /* 从用户复制过来，已经是 size_t */
 if (len > MAX_LEN)
     return (EINVAL);
 ```
 
-Sign confusion is one of the most common root causes of buffer overflows in kernel code. Use `size_t` for sizes. Use `ssize_t` only when negative values are meaningful. Never mix signed and unsigned in a size check.
+符号混淆是内核代码中缓冲区溢出最常见的根本原因之一。对大小使用 `size_t`。只有在负值有意义时才使用 `ssize_t`。永远不要在大小检查中混合有符号和无符号。
 
 ### 不完整的验证
 
-A driver accepts a complex structure with many fields. The validation function checks some fields but forgets others:
+驱动程序接收一个具有许多字段的复杂结构。验证函数检查了一些字段但忘记了其他字段：
 
 ```c
 if (args->type > TYPE_MAX)
@@ -3625,13 +3625,13 @@ if (args->count > COUNT_MAX)
 use(args->offset);  /* attacker-controlled */
 ```
 
-The bug is that `args->offset` is used as an index into an array without being bounds-checked. An attacker supplies a huge offset and reads or writes kernel memory.
+bug 在于 `args->offset` 被用作数组索引而未进行边界检查。攻击者提供一个巨大的偏移量并读取或写入内核内存。
 
-The fix is to treat validation as a checklist. For every field in the input structure, ask: what values are legal? Enforce them all. A helper function `is_valid_arg` that centralizes the validation and is called early is better than scattered checks.
+修复方法是将验证视为检查清单。对于输入结构中的每个字段，问：哪些值合法？强制执行所有合法值。一个集中验证并尽早调用的辅助函数 `is_valid_arg` 比分散的检查更好。
 
 ### 错误路径上跳过的检查
 
-A driver carefully validates input on the success path, but the error path cleans up based on a field that was never validated:
+驱动程序在成功路径上仔细验证输入，但错误路径基于从未验证的字段进行清理：
 
 ```c
 if (args->count > COUNT_MAX)
@@ -3647,13 +3647,13 @@ if (error != 0) {
 }
 ```
 
-The error path uses `args->free_flag` and `args->ptr`, neither of which were validated. If the attacker arranges for `copyin` to fail (say, by unmapping the memory), the error path frees an attacker-controlled pointer, corrupting the kernel heap.
+错误路径使用了 `args->free_flag` 和 `args->ptr`，两者都未被验证。如果攻击者安排 `copyin` 失败（例如，通过取消映射内存），错误路径会释放攻击者控制的指针，损坏内核堆。
 
-The lesson: validation must cover every field that any code path reads. It is tempting to think "the error path is unusual; it is fine". Attackers specifically aim for error paths because they are less tested.
+教训：验证必须覆盖任何代码路径读取的每个字段。人们很容易认为"错误路径不常见；没问题"。攻击者专门针对错误路径，因为它们测试较少。
 
 ### 双重查找
 
-A driver looks up an object in a table by name or ID, then performs an operation. Between the lookup and the operation, the object is removed by another thread. The operation then acts on freed memory.
+驱动程序通过名称或 ID 在表中查找对象，然后执行操作。在查找和操作之间，该对象被另一个线程移除。然后操作作用于已释放的内存。
 
 ```c
 obj = lookup(id);
@@ -3662,27 +3662,27 @@ if (obj == NULL)
 do_operation(obj);   /* obj may have been freed in between */
 ```
 
-The fix is to take a reference on the object (using a refcount) inside the lookup, hold the reference across the operation, and release it at the end. The lookup function takes the lock, increments the refcount, and releases the lock. The operation then works with a refcount-held pointer that cannot be freed out from under it. The release decrements the refcount; when it drops to zero, the last holder frees the object.
+修复方法是在查找内部获取对象上的引用（使用引用计数），在整个操作期间持有引用，并在结束时释放它。查找函数获取锁，增加引用计数，并释放锁。然后操作使用持有引用的指针，该指针不能从它下面被释放。释放递减引用计数；当它降到零时，最后一个持有者释放对象。
 
-Reference counts are the FreeBSD-canonical answer to the double-lookup problem. See `/usr/src/sys/sys/refcount.h`.
+引用计数是 FreeBSD 规范的对双重查找问题的答案。参见 `/usr/src/sys/sys/refcount.h`。
 
 ### 增长的缓冲区
 
-A buffer was once 256 bytes. A constant `BUF_SIZE = 256` was defined. The code checked `len <= BUF_SIZE` and copied `len` bytes into the buffer. Later, someone increased the buffer to 1024 bytes but forgot to update the constant. Or the constant was updated but an `sizeof(buf)` in one call was not, because it was not using the constant.
+一个缓冲区曾经是 256 字节。定义了一个常量 `BUF_SIZE = 256`。代码检查 `len <= BUF_SIZE` 并将 `len` 字节复制到缓冲区中。后来，有人将缓冲区增加到 1024 字节但忘记更新常量。或者常量被更新了但一个调用中的 `sizeof(buf)` 没有被更新，因为它没有使用常量。
 
-This class of bug is prevented by always using `sizeof` on the destination buffer directly, rather than a constant that may drift:
+这类 bug 可以通过始终直接对目标缓冲区使用 `sizeof` 来防止，而不是使用可能漂移的常量：
 
 ```c
 char buf[BUF_SIZE];
-if (len > sizeof(buf))     /* always matches the actual buf size */
+if (len > sizeof(buf))     /* 始终匹配实际的 buf 大小 */
     return (EINVAL);
 ```
 
-Constants are useful when multiple places need the same bound. If you use a constant, keep the definition and the array adjacent in the source code, and consider adding a `_Static_assert(sizeof(buf) == BUF_SIZE, ...)` to catch drift.
+当多个地方需要相同的边界时，常量是有用的。如果你使用常量，将定义和数组放在源代码中相邻的位置，并考虑添加 `_Static_assert(sizeof(buf) == BUF_SIZE, ...)` 以捕获漂移。
 
 ### 结构中未检查的指针
 
-A driver receives a structure from user space that contains pointers. The driver uses the pointers directly:
+驱动程序从用户空间接收一个包含指针的结构。驱动程序直接使用指针：
 
 ```c
 error = copyin(uaddr, &cmd, sizeof(cmd));
@@ -3690,13 +3690,13 @@ error = copyin(uaddr, &cmd, sizeof(cmd));
 use(cmd.data_ptr);   /* treating user pointer as kernel pointer */
 ```
 
-This is a catastrophic bug: the pointer is a user-space address, but the code dereferences it as if it were kernel memory. On some architectures this may access whatever memory happens to be at that address in kernel space, which is usually garbage or invalid. On others, it faults. In some specific pathological cases, it accesses sensitive kernel data.
+这是一个灾难性的 bug：该指针是用户空间地址，但代码将其解引用为内核内存。在某些架构上，这可能会访问内核空间中碰巧在该地址的任何内存，通常是垃圾或无效的。在其他架构上，它会引发故障。在某些特定的病理情况下，它会访问敏感的内核数据。
 
-The fix: never dereference a pointer obtained from user space. Pointers in user-supplied structures must be passed to `copyin` or `copyout`, which correctly translate user addresses. Never treat them as kernel addresses.
+修复方法：永远不要解引用从用户空间获得的指针。用户提供结构中的指针必须传递给 `copyin` 或 `copyout`，它们正确翻译用户地址。永远不要将它们视为内核地址。
 
 ### 被遗忘的 copyout
 
-A driver reads a structure from user space, modifies it, but forgets to copy the modified version back:
+驱动程序从用户空间读取一个结构，修改它，但忘记将修改后的版本复制回去：
 
 ```c
 error = copyin(uaddr, &cmd, sizeof(cmd));
@@ -3708,13 +3708,13 @@ cmd.status = STATUS_OK;
 return (0);
 ```
 
-This is a functional bug, not strictly a security bug, but its mirror image is: forgetting `copyin` and assuming a field was already set. "I set `cmd.status` in `copyin`, then I read it later" is wrong if the field was actually set by user space; the user's value is what the code reads.
+这是一个功能 bug，不完全是安全 bug，但它的镜像问题是：忘记 `copyin` 并假设字段已被设置。"我在 `copyin` 中设置了 `cmd.status`，然后稍后读取它"是错误的，如果该字段实际上是由用户空间设置的；代码读取的是用户的值。
 
-Every structure that flows user-to-kernel and back needs a clear convention about when `copyin` and `copyout` happen, and what fields are authoritative in which direction. Document it and follow it.
+每个从用户到内核再返回的结构都需要关于 `copyin` 和 `copyout` 何时发生、以及哪些字段在哪个方向是权威的明确约定。记录它并遵循它。
 
 ### 意外的竞态
 
-A driver takes a lock, reads a field, releases the lock, and then uses the value:
+驱动程序获取锁，读取字段，释放锁，然后使用该值：
 
 ```c
 mtx_lock(&sc->sc_mtx);
@@ -3730,279 +3730,279 @@ if (val == sc->sc_val) {
 mtx_unlock(&sc->sc_mtx);
 ```
 
-The driver assumes `val` is still current because it re-checks. But "act on val" uses the stale copy, not the current field. If `sc_val` is a pointer, the act may operate on a freed object. If `sc_val` is an index, the act may use a stale index.
+驱动程序假设 `val` 仍然是最新的，因为它重新检查。但"对 val 采取行动"使用的是过时的副本，而不是当前字段。如果 `sc_val` 是指针，操作可能作用于已释放的对象。如果 `sc_val` 是索引，操作可能使用过时的索引。
 
-The lesson: once you release a lock, any value you read under that lock is stale. If you need to re-act under the lock, re-read the state inside the re-acquisition. The `if (val == sc->sc_val)` check protects against changes; the act needs to use the current value, not the stored one.
+教训：一旦释放锁，你在该锁下读取的任何值都是过时的。如果你需要在锁下重新操作，在重新获取锁时重新读取状态。`if (val == sc->sc_val)` 检查防止了更改；操作需要使用当前值，而不是存储的值。
 
 ### 静默截断
 
-A driver receives a string of up to 256 bytes, stores it in a 128-byte buffer. The code uses `strncpy`:
+驱动程序接收一个最长 256 字节的字符串，将其存储在 128 字节缓冲区中。代码使用 `strncpy`：
 
 ```c
 strncpy(sc->sc_name, user_name, sizeof(sc->sc_name));
 ```
 
-`strncpy` stops at the destination size. But `strncpy` does not guarantee a NUL terminator if the source was longer. Later code does:
+`strncpy` 在达到目标大小时停止。但如果源字符串更长，`strncpy` 不保证 NUL 终止符。后面的代码：
 
 ```c
 printf("name: %s\n", sc->sc_name);
 ```
 
-`printf("%s", ...)` reads until a NUL. If `sc_name` is not NUL-terminated, printf reads past the end of the array into adjacent memory, potentially leaking that memory in the log or crashing.
+`printf("%s", ...)` 读取直到遇到 NUL。如果 `sc_name` 不是 NUL 终止的，printf 会读取数组末尾进入相邻内存，可能在日志中泄露该内存或崩溃。
 
-Safer options: `strlcpy` (guarantees NUL termination, truncates if needed), or `snprintf` (same guarantee with formatting). `strncpy` is a landmine; it is in the standard library only for historical reasons.
+更安全的选择：`strlcpy`（保证 NUL 终止，必要时截断），或 `snprintf`（带有格式化的相同保证）。`strncpy` 是一个地雷；它仅出于历史原因存在于标准库中。
 
 ### 过度记录的事件
 
-A driver logs every time an event fires. The event is user-triggerable. A user sends a million events in a loop. The kernel message buffer fills and overflows; legitimate messages are lost. The user has accomplished a denial-of-service on the logging subsystem itself.
+驱动程序在每次事件触发时记录日志。该事件是用户可触发的。用户在循环中发送一百万次事件。内核消息缓冲区填满并溢出；合法消息丢失。用户已经对日志子系统本身完成了拒绝服务攻击。
 
-The fix, as discussed in Section 8, is rate limiting. Every user-triggerable log message should be wrapped in a rate-limit check. A suppressed-count summary ("[secdev] 1234 suppressed messages in last 5 seconds") can be emitted periodically to inform the operator of ongoing flooding.
+修复方法，如第 8 节所讨论的，是速率限制。每个用户可触发的日志消息都应该包裹在速率限制检查中。可以定期发出抑制计数摘要（"[secdev] 最近 5 秒内抑制了 1234 条消息"）以通知运维人员正在发生的泛洪。
 
 ### 隐形漏洞
 
-A driver works fine for years. Then a compiler update changes how it handles a specific idiom, or a kernel API changes semantics in a new FreeBSD release, and the driver's behaviour changes. A check that used to work silently stops working. Users do not notice until an exploit appears.
+一个驱动程序正常工作多年。然后编译器更新改变了它处理特定惯用法的方式，或者内核 API 在 FreeBSD 新版本中改变了语义，驱动程序的行为发生了变化。曾经安静工作的检查停止了工作。用户直到利用出现时才注意到。
 
-Invisible bugs are the strongest argument for `KASSERT`, sanitizers, and tests. A `KASSERT(p != NULL)` at the top of every function documents what that function expects. An `INVARIANTS` kernel catches the moment an invariant breaks. A good test suite notices when behavior changes.
+隐形 bug 是 `KASSERT`、净化器和测试的最有力论据。每个函数顶部的 `KASSERT(p != NULL)` 记录了该函数的期望。`INVARIANTS` 内核捕获不变量被破坏的时刻。一个好的测试套件注意到行为何时改变。
 
-The simpler the function and the clearer its contract, the fewer places invisible bugs can hide. This is one reason the FreeBSD kernel coding style described in `style(9)` values short functions with clear responsibilities: they are easier to reason about, which makes invisible bugs easier to avoid in the first place.
+函数越简单，其契约越清晰，隐形 bug 可以隐藏的地方就越少。这是 `style(9)` 中描述的 FreeBSD 内核编码风格重视具有清晰职责的简短函数的原因之一：它们更容易推理，这使隐形 bug 从一开始就更容易避免。
 
 ### 漏洞模式目录总结
 
-Each of the patterns above has been seen in real kernel code. Many have been CVEs. The defenses are:
+上述每种模式都在真实内核代码中出现过。许多已成为 CVE。防御措施是：
 
-- Use `size_t` for sizes; avoid sign confusion.
-- Whitelist validation; do not forget fields.
-- Treat error paths with the same rigor as success paths.
-- Use refcounts to manage object lifetime under concurrency.
-- Use `sizeof` directly on the buffer rather than a drift-prone constant.
-- Never dereference user pointers.
-- Keep the `copyin` / `copyout` story explicit per field.
-- Remember that a value read under a lock is stale after the lock is released.
-- Use `strlcpy` or `snprintf`, never `strncpy`.
-- Rate-limit every user-triggerable log.
-- Write invariants as `KASSERT` so regressions are caught.
+- 对大小使用 `size_t`；避免符号混淆。
+- 白名单验证；不要忘记字段。
+- 以与成功路径相同的严谨对待错误路径。
+- 使用引用计数来管理并发下的对象生命周期。
+- 直接在缓冲区上使用 `sizeof`，而不是可能漂移的常量。
+- 永远不要解引用用户指针。
+- 保持每个字段的 `copyin`/`copyout` 过程明确。
+- 记住在锁下读取的值在锁释放后是过时的。
+- 使用 `strlcpy` 或 `snprintf`，永远不要用 `strncpy`。
+- 对每个用户可触发的日志进行速率限制。
+- 将不变量写为 `KASSERT`，以便捕获回归。
 
-Memorize these patterns. Apply them as a mental checklist on every function you write or review.
+记住这些模式。将它们作为心理检查清单应用到你编写或审查的每个函数上。
 
 ## 附录：本章使用的头文件和 API
 
-A short reference to the FreeBSD headers referenced throughout this chapter, grouped by topic. Each header is in `/usr/src/sys/` followed by the path listed.
+一个按主题分组的本章引用的 FreeBSD 头文件的简短参考。每个头文件在 `/usr/src/sys/` 后跟列出的路径。
 
 ### 内存与复制操作
 
-- `sys/systm.h`: declarations for `copyin`, `copyout`, `copyinstr`, `bzero`, `explicit_bzero`, `printf`, `log`, and many kernel core primitives.
-- `sys/malloc.h`: `malloc(9)`, `free(9)`, `zfree(9)`, `MALLOC_DECLARE`, `MALLOC_DEFINE`, M_* flags.
-- `sys/uio.h`: `struct uio`, `uiomove(9)`, UIO_READ / UIO_WRITE constants.
-- `vm/uma.h`: UMA zone allocator (`uma_zcreate`, `uma_zalloc`, `uma_zfree`, `uma_zdestroy`).
-- `sys/refcount.h`: reference-count primitives (`refcount_init`, `refcount_acquire`, `refcount_release`).
+- `sys/systm.h`: `copyin`、`copyout`、`copyinstr`、`bzero`、`explicit_bzero`、`printf`、`log` 和许多内核核心原语的声明。
+- `sys/malloc.h`: `malloc(9)`、`free(9)`、`zfree(9)`、`MALLOC_DECLARE`、`MALLOC_DEFINE`、M_* 标志。
+- `sys/uio.h`: `struct uio`、`uiomove(9)`、UIO_READ / UIO_WRITE 常量。
+- `vm/uma.h`: UMA 区域分配器（`uma_zcreate`、`uma_zalloc`、`uma_zfree`、`uma_zdestroy`）。
+- `sys/refcount.h`: 引用计数原语（`refcount_init`、`refcount_acquire`、`refcount_release`）。
 
 ### 权限与访问控制
 
-- `sys/priv.h`: `priv_check(9)`, `priv_check_cred(9)`, `PRIV_*` constants, `securelevel_gt`, `securelevel_ge`.
-- `sys/ucred.h`: `struct ucred` and its fields.
-- `sys/jail.h`: `struct prison`, `jailed(9)` macro, prison-related helpers.
-- `sys/capsicum.h`: Capsicum capabilities, `cap_rights_t`, `IN_CAPABILITY_MODE(td)`.
-- `security/mac/mac_framework.h`: MAC framework hooks (mostly for policy writers, but reference).
+- `sys/priv.h`: `priv_check(9)`、`priv_check_cred(9)`、`PRIV_*` 常量、`securelevel_gt`、`securelevel_ge`。
+- `sys/ucred.h`: `struct ucred` 及其字段。
+- `sys/jail.h`: `struct prison`、`jailed(9)` 宏、与监狱相关的辅助函数。
+- `sys/capsicum.h`: Capsicum 能力、`cap_rights_t`、`IN_CAPABILITY_MODE(td)`。
+- `security/mac/mac_framework.h`: MAC 框架钩子（主要供策略编写者使用，但作为参考）。
 
 ### 加锁与并发
 
-- `sys/mutex.h`: `struct mtx`, `mtx_init`, `mtx_lock`, `mtx_unlock`, `mtx_destroy`.
-- `sys/sx.h`: shared/exclusive locks.
-- `sys/rwlock.h`: read/write locks.
-- `sys/condvar.h`: condition variables (`cv_init`, `cv_wait`, `cv_signal`).
-- `sys/lock.h`: common lock infrastructure.
-- `sys/atomic_common.h`: atomic operations (and architecture-specific headers).
+- `sys/mutex.h`: `struct mtx`、`mtx_init`、`mtx_lock`、`mtx_unlock`、`mtx_destroy`。
+- `sys/sx.h`: 共享/排他锁。
+- `sys/rwlock.h`: 读写锁。
+- `sys/condvar.h`: 条件变量（`cv_init`、`cv_wait`、`cv_signal`）。
+- `sys/lock.h`: 通用锁基础设施。
+- `sys/atomic_common.h`: 原子操作（以及架构特定的头文件）。
 
 ### 设备文件与 Dev 基础设施
 
-- `sys/conf.h`: `struct cdev`, `struct cdevsw`, `struct make_dev_args`, `make_dev_s`, `make_dev_credf`, `destroy_dev`.
-- `sys/module.h`: `DRIVER_MODULE`, `MODULE_VERSION`, kernel module declarations.
-- `sys/kernel.h`: SYSINIT, SYSUNINIT, and related kernel hook macros.
-- `sys/bus.h`: `device_t`, device methods, `bus_alloc_resource`, `bus_teardown_intr`.
+- `sys/conf.h`: `struct cdev`、`struct cdevsw`、`struct make_dev_args`、`make_dev_s`、`make_dev_credf`、`destroy_dev`。
+- `sys/module.h`: `DRIVER_MODULE`、`MODULE_VERSION`、内核模块声明。
+- `sys/kernel.h`: SYSINIT、SYSUNINIT 及相关内核钩子宏。
+- `sys/bus.h`: `device_t`、设备方法、`bus_alloc_resource`、`bus_teardown_intr`。
 
 ### 定时、速率限制、调用
 
-- `sys/time.h`: `eventratecheck(9)`, `ppsratecheck(9)`, `struct timeval`.
-- `sys/callout.h`: `struct callout`, `callout_init_mtx`, `callout_reset`, `callout_drain`.
-- `sys/taskqueue.h`: task queue primitives (`taskqueue_create`, `taskqueue_enqueue`, `taskqueue_drain`).
+- `sys/time.h`: `eventratecheck(9)`、`ppsratecheck(9)`、`struct timeval`。
+- `sys/callout.h`: `struct callout`、`callout_init_mtx`、`callout_reset`、`callout_drain`。
+- `sys/taskqueue.h`: 任务队列原语（`taskqueue_create`、`taskqueue_enqueue`、`taskqueue_drain`）。
 
 ### 日志与诊断
 
-- `sys/syslog.h`: `LOG_*` priority constants for `log(9)`.
-- `sys/kassert.h`: `KASSERT`, `MPASS`, assertion macros.
-- `sys/ktr.h`: KTR tracing macros.
-- `sys/sdt.h`: Statically Defined Tracing probes for dtrace(1).
+- `sys/syslog.h`: 用于 `log(9)` 的 `LOG_*` 优先级常量。
+- `sys/kassert.h`: `KASSERT`、`MPASS`、断言宏。
+- `sys/ktr.h`: KTR 跟踪宏。
+- `sys/sdt.h`: 用于 dtrace(1) 的静态定义跟踪探针。
 
 ### Sysctl
 
-- `sys/sysctl.h`: `SYSCTL_*` macros, `CTLFLAG_*` flags including `CTLFLAG_SECURE`, `CTLFLAG_PRISON`, `CTLFLAG_CAPRD`, `CTLFLAG_CAPWR`.
+- `sys/sysctl.h`: `SYSCTL_*` 宏、`CTLFLAG_*` 标志，包括 `CTLFLAG_SECURE`、`CTLFLAG_PRISON`、`CTLFLAG_CAPRD`、`CTLFLAG_CAPWR`。
 
 ### 网络（适用时）
 
-- `sys/mbuf.h`: `struct mbuf`, mbuf allocation and manipulation.
-- `net/if.h`: `struct ifnet`, network interface primitives.
+- `sys/mbuf.h`: `struct mbuf`、mbuf 分配和操作。
+- `net/if.h`: `struct ifnet`、网络接口原语。
 
 ### 时代与无锁
 
-- `sys/epoch.h`: epoch-based reclamation primitives (`epoch_enter`, `epoch_exit`, `epoch_wait`).
-- `sys/atomic_common.h` and architecture-specific atomic headers: memory barriers, atomic reads and writes.
+- `sys/epoch.h`: 基于时代的回收原语（`epoch_enter`、`epoch_exit`、`epoch_wait`）。
+- `sys/atomic_common.h` 和架构特定的原子头文件：内存屏障、原子读写。
 
 ### 追踪与可观测性
 
-- `security/audit/audit.h`: kernel audit framework (when compiled in).
-- `sys/sdt.h`: Statically Defined Tracing for dtrace integration.
-- `sys/ktr.h`: KTR in-kernel tracing.
+- `security/audit/audit.h`: 内核审计框架（编译时启用）。
+- `sys/sdt.h`: 用于 dtrace 集成的静态定义跟踪。
+- `sys/ktr.h`: KTR 内核内跟踪。
 
-This appendix is not exhaustive; the full set of headers a driver may need is far larger. It covers the ones referenced in this chapter. When writing your own driver, `grep` through `/usr/src/sys/sys/` for the primitive you need, and read the header to understand what is available. Many of these headers are well commented and repay careful reading.
+本附录并不详尽；驱动程序可能需要的一整套头文件要大得多。它涵盖了本章中引用的头文件。在编写自己的驱动程序时，通过 `/usr/src/sys/sys/` 中 `grep` 你需要的原语，并阅读头文件以了解可用的内容。这些头文件中有许多注释良好，值得仔细阅读。
 
-Reading the headers is itself a security practice. Every primitive has a contract: what arguments it accepts, what constraints it imposes, what it guarantees on success, what it returns on failure. A driver that uses a primitive without reading its contract is relying on assumptions that may not hold. A driver that reads the contract, and holds itself to it, is a driver that benefits from the kernel's own discipline.
+阅读头文件本身就是一种安全实践。每个原语都有一个契约：它接受什么参数，它施加什么约束，它在成功时保证什么，它在失败时返回什么。在不阅读契约的情况下使用原语的驱动程序正在依赖可能不成立的假设。阅读契约并遵守契约的驱动程序是受益于内核自身纪律的驱动程序。
 
-Many of the headers listed above are themselves worth studying as examples of good kernel design. `sys/refcount.h` is small, carefully commented, and demonstrates how a simple primitive is built from atomic operations. `sys/kassert.h` shows how conditional compilation is used to build a feature that costs nothing in production but catches bugs in developer kernels. `sys/priv.h` shows how a long list of named constants can be organized by subsystem and used as the grammar of a policy. When you run out of ideas for how to structure your own driver's internals, these headers are a good place to find inspiration.
+上面列出的许多头文件本身也值得作为良好内核设计的例子来学习。`sys/refcount.h` 很小，注释仔细，并展示了如何从原子操作构建一个简单的原语。`sys/kassert.h` 展示了如何使用条件编译来构建一个在生产中零成本但在开发者内核中捕获 bug 的功能。`sys/priv.h` 展示了如何按子系统组织一长串命名常量并将其用作策略的语法。当你对如何构建自己的驱动程序内部结构失去想法时，这些头文件是寻找灵感的好地方。
 
 ## 附录：延伸阅读
 
-A short list of resources that go deeper into FreeBSD security than this chapter can:
+一个比本章更深入探讨 FreeBSD 安全的简短资源列表：
 
-**FreeBSD Architecture Handbook**, in particular the chapters on the jail subsystem, Capsicum, and MAC framework. Available online at `https://docs.freebsd.org/en/books/arch-handbook/`.
+**FreeBSD Architecture Handbook**，特别是关于 jail 子系统、Capsicum 和 MAC 框架的章节。可在 `https://docs.freebsd.org/en/books/arch-handbook/` 在线获取。
 
-**FreeBSD Handbook security chapter**, which is oriented toward administrators but includes useful context on how system-level features (jails, securelevel, MAC) interact.
+**FreeBSD Handbook security chapter**，面向管理员，但包括关于系统级功能（jails、securelevel、MAC）如何交互的有用上下文。
 
-**Capsicum: Practical Capabilities for UNIX**, the original paper by Robert Watson, Jonathan Anderson, Ben Laurie, and Kris Kennaway. Explains the design rationale behind Capsicum, which helps when deciding how your driver should behave in capability mode.
+**Capsicum: Practical Capabilities for UNIX**，Robert Watson、Jonathan Anderson、Ben Laurie 和 Kris Kennaway 的原始论文。解释了 Capsicum 背后的设计原理，有助于决定你的驱动程序在能力模式下应如何表现。
 
-**"The Design and Implementation of the FreeBSD Operating System"**, by Marshall Kirk McKusick, George V. Neville-Neil, and Robert N. M. Watson. The second edition covers FreeBSD 11; many security-relevant chapters remain applicable in later versions.
+**"The Design and Implementation of the FreeBSD Operating System"**，作者 Marshall Kirk McKusick、George V. Neville-Neil 和 Robert N. M. Watson。第二版涵盖 FreeBSD 11；许多与安全相关的章节在后续版本中仍然适用。
 
-**style(9)**, the FreeBSD kernel coding style guide, available as a manual page: `man 9 style`. Readable kernel code is safer kernel code; the conventions in `style(9)` are part of how the tree stays reviewable at scale.
+**style(9)**，FreeBSD 内核编码风格指南，可作为手册页获取：`man 9 style`。可读的内核代码是更安全的内核代码；`style(9)` 中的约定是树在规模上保持可审查性的一部分。
 
-**KASAN, KMSAN, and KCOV documentation** in `/usr/src/share/man/` and related sections. Reading these helps you configure and interpret sanitizer output.
+**KASAN、KMSAN 和 KCOV 文档** 在 `/usr/src/share/man/` 和相关章节中。阅读这些内容有助于你配置和解释净化器输出。
 
-**syzkaller documentation**, at `https://github.com/google/syzkaller`. The `sys/freebsd/` directory contains syscall descriptions that illustrate how to describe your own driver's interface.
+**syzkaller 文档**，位于 `https://github.com/google/syzkaller`。`sys/freebsd/` 目录包含系统调用描述，展示了如何描述你自己的驱动程序接口。
 
-**CVE databases** such as `https://nvd.nist.gov/vuln/search` or `https://cve.mitre.org/`. Searching for "FreeBSD" or specific driver names shows real bugs that have been found and fixed. Reading a few CVE reports per month teaches a great deal about what kinds of bugs occur in practice.
+**CVE 数据库**，如 `https://nvd.nist.gov/vuln/search` 或 `https://cve.mitre.org/`。搜索"FreeBSD"或特定驱动程序名称会显示已发现和修复的真实 bug。每月阅读一些 CVE 报告能让你了解到实践中出现什么样的 bug。
 
-**FreeBSD security advisories**, at `https://www.freebsd.org/security/advisories/`. These are official reports on fixed vulnerabilities. Many are kernel-side and relevant to driver authors.
+**FreeBSD 安全公告**，位于 `https://www.freebsd.org/security/advisories/`。这些是关于已修复漏洞的官方报告。许多是内核端的，与驱动程序作者相关。
 
-**The FreeBSD source tree itself** is the largest and most authoritative reference. Spend time reading drivers similar to yours. Look at how they validate input, check privilege, manage locking, and handle detach. Imitating the patterns you see in well-reviewed code is one of the fastest ways to learn.
+**FreeBSD 源代码树本身** 是最大和最权威的参考。花时间阅读与你类似的驱动程序。看看它们如何验证输入、检查权限、管理加锁和处理 detach。模仿你在经过良好审查的代码中看到的模式是学习最快的方法之一。
 
-**Security mailing lists**, such as `freebsd-security@` and the broader `oss-security` list, carry daily traffic on kernel and driver issues across open-source projects. Subscribing passively and skimming a few posts a week builds awareness of threat trends without demanding much effort.
+**安全邮件列表**，如 `freebsd-security@` 和更广泛的 `oss-security` 列表，每天都有关于开源项目中内核和驱动程序问题的信息。被动订阅并每周浏览几篇文章可以建立对威胁趋势的认识，而不需要太多精力。
 
-**Formal verification literature**, although specialist, has begun to touch kernel code. Projects like seL4 demonstrate what a fully verified microkernel looks like. FreeBSD is not that, but reading about formal verification shapes how you think about invariants and contracts in your own code.
+**形式化验证文献**，虽然是专业领域，但已经开始触及内核代码。像 seL4 这样的项目展示了完全验证的微内核是什么样子。FreeBSD 不是那样，但阅读形式化验证会塑造你对自己代码中不变量和契约的思考方式。
 
-**Books on secure coding practices in C** such as `Secure Coding in C and C++` by Robert Seacord translate well to kernel work, since kernel C is a dialect of the same language and has the same pitfalls, plus more. Chapter-by-chapter, they provide the mental catalogue of bugs that this chapter could only sketch.
+**关于 C 语言安全编码实践的书籍**，如 Robert Seacord 的 `Secure Coding in C and C++`，很好地适用于内核工作，因为内核 C 是同一种语言的方言，有相同的陷阱，甚至更多。逐章来看，它们提供了本章只能勾勒的 bug 的心理目录。
 
-**FreeBSD-specific books**, notably the McKusick, Neville-Neil, and Watson book mentioned above, but also older volumes that cover the evolution of specific subsystems. Reading about how jails evolved, how Capsicum was designed, or how MAC came to be helps you understand the rationale behind the primitives rather than just their mechanics.
+**FreeBSD 特定书籍**，特别是上面提到的 McKusick、Neville-Neil 和 Watson 的书，但也有涵盖特定子系统演变的较旧卷。阅读关于 jails 如何演变、Capsicum 如何设计或 MAC 如何形成的，有助于你理解原语背后的原理而不仅仅是它们的机制。
 
-**Conference talks** from BSDCan, EuroBSDCon, and AsiaBSDCon often touch security topics. Video archives let you watch years of past talks at your own pace. Many talks are given by active FreeBSD developers and reflect current thinking.
+**会议演讲**，来自 BSDCan、EuroBSDCon 和 AsiaBSDCon，经常涉及安全主题。视频档案让你可以按自己的节奏观看过去几年的演讲。许多演讲由活跃的 FreeBSD 开发者发表，反映了当前的思考。
 
-**Academic papers on operating system security** from venues such as USENIX Security, IEEE S&P, and CCS provide a longer-term view. Not every paper is relevant to drivers, but the ones that are deepen your understanding of threat models, attacker capabilities, and the theoretical basis for mitigations.
+**操作系统安全领域的学术论文**，来自 USENIX Security、IEEE S&P 和 CCS 等会议，提供了更长远的视角。并非每篇论文都与驱动程序相关，但相关的那些加深了你对威胁模型、攻击者能力以及缓解措施理论基础的理解。
 
-**The CVE feed**, particularly when filtered for kernel issues, is a continuous drip of real-world examples. Reading a few each week builds intuition for what bugs look like in practice and which classes recur most often.
+**CVE 推送**，特别是在过滤内核问题时，是持续不断的真实世界示例流。每周阅读几条有助于建立对实践中 bug 看起来是什么样以及哪些类别最常重复出现的直觉。
 
-**Your own code, six months later**. Rereading your earlier work with the benefit of distance is a valuable learning tool. The bugs you will notice are the bugs you have learned to see since you wrote it. Make a habit of this; schedule time for it.
+**你自己的代码，六个月后**。以后退一步的视角重新阅读你早期的作品是一个宝贵的学习工具。你会注意到的 bug 是你自编写以来学会看到的 bug。养成习惯；为此安排时间。
 
-The resources above, even a small subset of them, will keep you growing for years. Security is a field of continuous learning. This chapter is one step in that learning; the next step is yours.
+以上资源，即使只是其中一小部分，也将让你在多年内持续成长。安全是一个持续学习的领域。本章是那个学习中的一步；下一步是你的。
 
-Every security-minded driver author should have read at least a few of these. The field moves, and staying current is part of the craft.
+每个有安全意识的驱动程序作者都应该至少阅读过其中的一些内容。这个领域在变化，保持最新状态是这门手艺的一部分。
 
 ## 总结
 
 设备驱动程序中的安全不是单一技术。它是一种工作方式。每一行代码都为内核的安全承担一点责任。本章涵盖了主要支柱：
 
-**The kernel trusts every driver fully.** Once code runs in the kernel, there is no sandbox, no isolation, no second chance. The driver author's discipline is the system's last line of defense.
+**内核完全信任每个驱动程序。** 一旦代码在内核中运行，就没有沙箱、没有隔离、没有第二次机会。驱动程序作者的纪律是系统的最后一道防线。
 
-**Buffer overflows and memory corruption** are the classical kernel vulnerability. They are prevented by bounding every copy, preferring bounded string functions, and treating pointer arithmetic with suspicion.
+**缓冲区溢出和内存损坏** 是经典的内核漏洞。通过限制每次复制、优先使用有界字符串函数以及以怀疑态度对待指针算术来预防。
 
-**User input crosses a trust boundary.** Every byte from user space must be copied into the kernel with `copyin(9)`, `copyinstr(9)`, or `uiomove(9)` before it is used. Every byte going back must be copied out with `copyout(9)` or `uiomove(9)`. The user-space memory is not trustworthy; kernel memory is. Keep them cleanly separated.
+**用户输入跨越信任边界。** 来自用户空间的每个字节必须在使用前通过 `copyin(9)`、`copyinstr(9)` 或 `uiomove(9)` 复制到内核中。每个返回的字节必须通过 `copyout(9)` 或 `uiomove(9)` 复制出去。用户空间内存不可信；内核内存可信。保持它们干净分离。
 
-**Memory allocation** must be checked, balanced, and accounted for. Always check `M_NOWAIT` returns. Use `M_ZERO` by default. Pair every `malloc` with exactly one `free`. Use a per-driver `malloc_type` for accountability. Use `explicit_bzero` or `zfree` for sensitive data.
+**内存分配** 必须被检查、平衡和记账。始终检查 `M_NOWAIT` 返回值。默认使用 `M_ZERO`。将每个 `malloc` 与恰好一次 `free` 配对。使用每驱动程序 `malloc_type` 进行追溯。对敏感数据使用 `explicit_bzero` 或 `zfree`。
 
-**Races and TOCTOU bugs** are caused by inconsistent locking or by treating user-space data as stable. Fix them with locks around shared state and by copying user data before validating.
+**竞态和 TOCTOU 漏洞** 由不一致的加锁或将用户空间数据视为稳定而引起。用共享状态周围的锁和在验证前复制用户数据来修复它们。
 
-**Privilege checks** use `priv_check(9)` as the canonical primitive. Layer with jail awareness and securelevel where appropriate. Set conservative device-node permissions. Let the MAC and Capsicum frameworks work alongside.
+**权限检查** 使用 `priv_check(9)` 作为标准原语。在适当时叠加 jail 感知和安全级别。设置保守的设备节点权限。让 MAC 和 Capsicum 框架在旁边工作。
 
-**Information leaks** are prevented by zeroing structures before filling them, bounding copy lengths on both ends, and keeping kernel pointers out of user-visible output.
+**信息泄露** 通过在填充前清零结构、限制两端的复制长度以及将内核指针排除在用户可见输出之外来预防。
 
-**Logging** is part of the driver's interface. Use it to help the operator without helping the attacker. Rate-limit anything triggerable from user space. Do not log sensitive data.
+**日志记录** 是驱动程序接口的一部分。用它帮助运维人员而不帮助攻击者。对用户空间可触发的任何内容进行速率限制。不要记录敏感数据。
 
-**Secure defaults** mean failing closed, whitelisting rather than blacklisting, setting conservative default values, and treating error paths with the same care as success paths.
+**安全默认值** 意味着故障时关闭、白名单而不是黑名单、设置保守的默认值、并以与成功路径相同的关注处理错误路径。
 
-**Testing and hardening** turn careful code into trustworthy code. Build with `INVARIANTS`, `WITNESS`, and the kernel sanitizers. Stress-test. Fuzz. Review. Re-test.
+**测试和加固** 将仔细的代码变为可信赖的代码。使用 `INVARIANTS`、`WITNESS` 和内核净化器构建。压力测试。模糊测试。审查。重新测试。
 
 这些都不是一次性的努力。驱动程序保持安全是因为其作者在代码的整个生命周期中，每次提交、每个版本都持续应用这些习惯。
 
-The discipline is not glamorous. It is boring work: zero the structure, check the length, acquire the lock, use `priv_check`. But this boring work is exactly what keeps systems secure. An exploited kernel is a catastrophic event for users. An exploited driver is a foothold into the kernel. The person at the keyboard of that driver, deciding whether to add the bounds check or to skip it, is making a security decision that may be invisible for years and then suddenly matter very much.
+这种纪律并不光鲜。它是枯燥的工作：清零结构、检查长度、获取锁、使用 `priv_check`。但这种枯燥的工作正是保持系统安全的要素。被利用的内核对用户来说是灾难性事件。被利用的驱动程序是进入内核的立足点。在键盘前决定是添加边界检查还是跳过它的人，正在做一个可能多年不可见但突然变得非常重要的安全决策。
 
-Be the author who adds the bounds check.
+做那个添加边界检查的作者。
 
 ### 再一次反思：安全作为职业身份
 
-Something worth saying explicitly: the habits in this chapter are not merely techniques. They are what distinguishes a journeyman kernel author from an apprentice. Every mature kernel engineer carries this mental checklist not because they memorized it but because they have, over years, internalized a skepticism toward their own code. The skepticism is not anxiety. It is discipline.
+值得明确说的是：本章中的习惯不仅仅是技术。它们是区分熟练内核作者和学徒的东西。每个成熟的内核工程师都带着这个心理检查清单，不是因为他们记住了它，而是因为多年来他们已经内化了对自己的代码的怀疑。这种怀疑不是焦虑。它是纪律。
 
-Write code, and then read it back as if a stranger had written it. Ask what happens if the caller is hostile. Ask what happens if the value is zero, or negative, or impossibly large. Ask what happens if the other thread arrives between these two statements. Ask what happens on the error path you did not plan to test. Write the check. Write the assertion. Move on.
+编写代码，然后像陌生人写的那样回读它。问如果调用者是敌意的会发生什么。问如果值为零、或负数、或不可能大的时候会发生什么。问如果另一个线程到达这两条语句之间会发生什么。问你没有计划测试的错误路径上会发生什么。写检查。写断言。继续前进。
 
-This is what professional kernel engineers do. It is not glamorous, it is rarely applauded, and it is what keeps the operating system we all rely on from falling apart. The kernel is not magic; it is millions of lines of carefully checked code, written and rewritten by people who treat every line as a small responsibility. Joining that profession means joining that discipline.
+这就是专业内核工程师所做的。它不光鲜，很少被喝彩，它正是保持我们都依赖的操作系统不崩溃的要素。内核不是魔法；它是数百万行经过仔细检查的代码，由将每一行视为小责任的人编写和重写。加入那个职业意味着加入那种纪律。
 
-You have now been given the tools. The rest is practice.
+你现在已经被赋予了工具。剩下的就是练习。
 
 ## 展望：设备树与嵌入式开发
 
-This chapter trained you to look at your driver from the outside, through the eyes of whoever might try to misuse it. The boundaries you learned to watch were invisible to the compiler but very real to the kernel: user space on one side, kernel memory on the other; one thread with privilege, another without; a length field the caller claimed, a length the driver had to verify. Chapter 31 was about *who is allowed to ask the driver to do something*, and *what the driver should check before it agrees*.
+本章训练你从外部，通过可能试图误用它的人的眼睛来审视你的驱动程序。你学到要关注的边界对编译器来说是不可见的，但对内核来说是非常真实的：一边是用户空间，另一边是内核内存；一个线程有权限，另一个没有；调用者声称的长度字段，驱动程序必须验证的长度。第31章是关于*谁被允许要求驱动程序做某事*，以及*驱动程序在同意之前应该检查什么*。
 
-Chapter 32 shifts the perspective entirely. The question stops being *who wants this driver to run* and becomes *how does this driver find its hardware at all*. On the PC-like machines we have leaned on so far, that question had a comfortable answer. PCI devices announced themselves through standard configuration registers. ACPI-described peripherals appeared in a table the firmware handed to the kernel. The bus did the looking, the kernel probed each candidate, and your driver's `probe()` function only had to look at an identifier and say yes or no. Discovery was mostly someone else's problem.
+第32章完全改变了视角。问题不再是*谁想让这个驱动程序运行*，而是*这个驱动程序如何找到它的硬件*。在我们一直依赖的 PC 类机器上，这个问题有一个舒适的答案。PCI 设备通过标准配置寄存器宣布自己。ACPI 描述的外围设备出现在固件交给内核的表中。总线做了查找工作，内核探测每个候选者，你的驱动程序的 `probe()` 函数只需查看一个标识符并说是或否。发现主要是别人的问题。
 
-On embedded platforms that assumption breaks. A small ARM board does not speak PCI, does not carry an ACPI BIOS, and does not hand the kernel a neat table of devices. The SoC has an I2C controller at a fixed physical address, three UARTs at three other fixed addresses, a GPIO bank at a fourth, a timer, a watchdog, a clock tree, and a dozen other peripherals soldered onto the board in a particular arrangement. Nothing in the silicon announces itself. If the kernel is going to attach drivers to these peripherals, something has to tell the kernel where they are, what they are, and how they relate.
+在嵌入式平台上，这个假设不成立。小型 ARM 板不使用 PCI，不携带 ACPI BIOS，也不向内核交出一个整齐的设备表。SoC 在固定物理地址有一个 I2C 控制器，在另外三个固定地址有三个 UART，在第四个地址有一个 GPIO 银行，一个定时器、一个看门狗、一个时钟树，以及十几个以特定排列焊接到板上的其他外围设备。硅片中没有任何东西自我宣布。如果内核要将驱动程序附着到这些外围设备上，必须有东西告诉内核它们在哪里、它们是什么，以及它们如何关联。
 
-That something is the **Device Tree**, and Chapter 32 is where you learn to work with it. You will see how `.dts` source files describe the hardware, how the Device Tree Compiler (`dtc`) turns them into the `.dtb` blobs the bootloader hands to the kernel, and how FreeBSD's FDT support walks those blobs to decide which drivers to attach. You will meet the `ofw_bus` interfaces, the `simplebus` enumerator, and the Open Firmware helpers (`ofw_bus_search_compatible`, `ofw_bus_get_node`, the property-reading calls) that turn a Device Tree node into a working driver attachment. You will compile a small overlay, load it, and watch a pedagogical driver attach in `dmesg`.
+那个东西就是**设备树**，第32章就是你学习使用它的地方。你将看到 `.dts` 源文件如何描述硬件，设备树编译器（`dtc`）如何将它们转化为引导加载程序交给内核的 `.dtb` 二进制块，以及 FreeBSD 的 FDT 支持如何遍历这些块来决定附着哪些驱动程序。你将遇到 `ofw_bus` 接口、`simplebus` 枚举器和 Open Firmware 辅助函数（`ofw_bus_search_compatible`、`ofw_bus_get_node`、属性读取调用），它们将设备树节点转化为可工作的驱动程序附着。你将编译一个小型覆盖层，加载它，并观察教学驱动程序在 `dmesg` 中附着。
 
-The security habits you have built in this chapter travel with you into that territory. A driver for an embedded board is still a driver: it still runs in kernel space, still copies data across user-space boundaries, still needs bounds checks, still takes locks, still cleans up in detach. An ARM board does not loosen any of those requirements. If anything, embedded systems raise the stakes, because the same board image may ship to thousands of devices in the field, each one harder to patch than a server in a data center. The disposition you have just learned, skeptical of inputs, careful with memory, conservative about privilege, is exactly the disposition an embedded driver author needs.
+你在本章中建立的安全习惯将伴随你进入那个领域。嵌入式板的驱动程序仍然是驱动程序：它仍然在内核空间运行，仍然跨用户空间边界复制数据，仍然需要边界检查，仍然获取锁，仍然在 detach 中清理。ARM 板不会放宽这些要求中的任何一个。如果有的话，嵌入式系统提高了赌注，因为同一个板镜像可能发布到现场数千台设备，每台都比数据中心中的服务器更难打补丁。你刚刚学到的性格——怀疑输入、小心处理内存、对权限保守——正是嵌入式驱动程序作者需要的性格。
 
-What changes in Chapter 32 is the set of helpers you call to discover your hardware and the files you read to know where to point them. The probe-attach-detach shape stays. The softc stays. The lifecycle stays. A handful of new calls and a new way of thinking about hardware description are what you add. The chapter builds them up gently, from the shape of a `.dts` file to a working driver that blinks an LED on a real or emulated board.
+第32章中改变的是你用来发现硬件的辅助函数集和你阅读以知道指向它们的文件。probe-attach-detach 形状保留。softc 保留。生命周期保留。少量新调用和一种思考硬件描述的新方式是你添加的东西。本章温和地构建它们，从 `.dts` 文件的形状到一个在真实或模拟板上闪烁 LED 的可工作驱动程序。
 
-See you there.
+在那里见。
 
 ## 关于习惯的最终说明
 
-This chapter has been longer than some. The length is deliberate. Security is not a topic that can be summarized into a single punchy rule; it is a way of thinking that requires examples, practice, and repetition. A reader who finishes this chapter once will have been exposed to the patterns. A reader who returns to this chapter when starting a new driver will find new meaning in passages that seemed merely informative on the first read.
+本章比一些章节要长。长度是有意为之的。安全不是一个可以总结为一条有力规则的主题；它是一种需要示例、练习和重复的思维方式。一次读完本章的读者已经接触到了这些模式。在开始新驱动程序时回到本章的读者会在第一次阅读时看似只是信息性的段落中找到新的含义。
 
-Here are the most important habits, condensed into a single list for you to carry forward. They are the reflexes that matter most in daily driver work:
+这里是最重要的习惯，浓缩成单一列表供你随身携带。它们是日常驱动程序工作中最重要的反射：
 
-Every user-space value is hostile until copied in, bounded, and validated.
+每个用户空间值都是敌对的，直到被复制进来、限制和验证。
 
-Every length has a maximum. The maximum is enforced before anything uses the length.
+每个长度都有最大值。最大值在任何东西使用长度之前被执行。
 
-Every structure copied to user space is zeroed first.
+每个复制到用户空间的结构首先被清零。
 
-Every allocation is paired with a free on every code path.
+每个分配在每条代码路径上与一次释放配对。
 
-Every critical section is held across the full check-and-act sequence it protects.
+每个临界区都持有在它保护的完整检查-行动序列上。
 
-Every privilege-sensitive operation checks `priv_check` before acting.
+每个权限敏感操作在行动前检查 `priv_check`。
 
-Every detach path drains async work before freeing state.
+每个 detach 路径在释放状态前排干异步工作。
 
-Every log message triggerable from user space is rate-limited.
+每个可从用户空间触发的日志消息都被速率限制。
 
-Every unknown input returns an error, never a silent success.
+每个未知输入返回错误，永远不静默成功。
 
-Every assumption worth making is worth writing as a `KASSERT`.
+每个值得做的假设都值得写为 `KASSERT`。
 
-Nine lines. If these become automatic, you have the core of what this chapter teaches.
+九行。如果这些变得自动，你就拥有了本章教授的核心。
 
-The craft grows from here. There are more patterns, more subtleties, more tools; you will encounter them as you read more FreeBSD source, as you review more code, as you write more drivers. What stays the same is the disposition: skeptical of hostile inputs, careful with memory, clear about lock boundaries, conservative about what to expose. That disposition is the one kernel engineers share across decades. You have it now. Use it well.
+工艺从这里继续增长。还有更多的模式、更多的微妙之处、更多的工具；当你阅读更多 FreeBSD 源代码、审查更多代码、编写更多驱动程序时，你会遇到它们。保持不变的是那种性格：对敌对输入的怀疑、对内存的小心、对锁边界的清晰、对暴露什么的保守。那种性格是内核工程师跨越几十年共享的。你现在拥有了它。好好使用它。
 
 ## 关于不断演变的威胁的说明
 
-One further thought before the closing words. The threats we defend against today are not the threats we will defend against in ten years. Attackers evolve. Mitigations evolve. New classes of bugs are discovered, old classes are retired. A driver that was state-of-the-art in its defenses in 2020 may need updating to be considered safe in 2030.
+在结束语之前还有一个想法。我们今天防御的威胁不是我们十年后将防御的威胁。攻击者演进。缓解措施演进。新的漏洞类别被发现，旧的类别被淘汰。在 2020 年其防御方面是最先进的驱动程序可能需要更新才能在 2030 年被认为是安全的。
 
-This is not a reason for despair. It is a reason for continuous learning. Every year, a responsible driver author should read a few new security papers, try a few new sanitizers, and look at the recent CVEs affecting kernels similar to their own. Not to memorize specific vulnerabilities, but to keep a sense of where the bugs are being found today.
+这不是绝望的理由。这是持续学习的理由。每年，负责任的驱动程序作者应该阅读几篇新的安全论文，尝试几个新的净化器，看看影响类似内核的最新 CVE。不是为了记住特定的漏洞，而是为了保持对今天漏洞在哪里被发现的感觉。
 
-The patterns this chapter teaches are stable. Buffer overflows have been bugs since before UNIX. Use-after-free has been a bug since C had malloc. Race conditions have been bugs since kernels had multiple threads. The specific incarnations change, but the underlying defenses endure. A driver written with the disposition this chapter encourages will be mostly right in any decade; when the details shift, the author who built the disposition will adapt faster than one who merely memorized a checklist.
+本章教授的模式是稳定的。缓冲区溢出从 UNIX 之前就是漏洞了。释放后使用从 C 有 malloc 以来就是漏洞。竞态条件从内核有多个线程以来就是漏洞。具体的化身会变，但底层防御是持久的。以本章鼓励的性格编写的驱动程序在任何十年中都大体正确；当细节变化时，建立了那种性格的作者会比仅仅记住检查清单的人适应得更快。
 
 ## 结语
 
-A driver is small. A driver's influence is large. The code you write runs in the most privileged part of the system, touches memory that every other process depends on, and is trusted with the secrets of users who will never see your name. That trust is not automatic; it is earned, one careful line at a time, by authors who assumed the attacker was watching and built accordingly.
+驱动程序很小。驱动程序的影响力很大。你编写的代码运行在系统中特权最高的部分，触及每个其他进程依赖的内存，并被信任保护永远不会看到你名字的用户的秘密。那种信任不是自动的；它是赢得的，一次仔细的一行，由假设攻击者在观察并据此构建的作者赢得。
 
-The authors of FreeBSD have been writing that kind of code for decades. The FreeBSD kernel is not perfect; no kernel of its scale can be. But it has a culture of care, a set of primitives that reward diligence, and a community that treats security bugs as learning opportunities rather than embarrassments. When you write a FreeBSD driver, you are writing into that culture. Your code will be read by people who know the difference between a buffer overflow and a buffer that happens to be large enough; who know the difference between a privilege check that catches root-outside-jail and one that catches root-inside-jail; who know that a race condition is not a rare timing fluke but a vulnerability waiting for the right attacker.
+FreeBSD 的作者们几十年来一直在编写那种代码。FreeBSD 内核不完美；没有它那样规模的内核可以完美。但它有一种关爱的文化、一组奖励勤奋的原语，以及一个将安全漏洞视为学习机会而不是尴尬的社区。当你编写 FreeBSD 驱动程序时，你是在那种文化中编写。你的代码将被知道缓冲区溢出和碰巧足够大的缓冲区之间区别的人阅读；知道捕获 jail 外 root 和捕获 jail 内 root 的权限检查之间区别的人；知道竞态条件不是罕见的时序偶然而是等待正确攻击者的漏洞的人阅读。
 
-Write for those readers. Write for the user whose laptop runs your code without knowing it is there. Write for the maintainer who will inherit your work in ten years. Write for the reviewer who will spot the defensive check you added and feel quietly glad that someone thought of it.
+为那些读者编写。为在笔记本电脑上运行你的代码却不知道它在那里的用户编写。为十年后继承你工作的维护者编写。为会注意到你添加的防御性检查并暗自高兴有人想到了它的审查者编写。
 
-That is what chapter 31 has been about. That is what the rest of your career as a kernel author will be about. Thank you for taking the time to work through it carefully. The chapter ends here; the practice begins tomorrow.
+这就是第31章一直在讲的。这就是你作为内核作者职业生涯的其余部分将一直讲的。感谢你花时间仔细阅读。本章在这里结束；实践从明天开始。

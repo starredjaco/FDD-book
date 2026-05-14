@@ -1039,39 +1039,39 @@ myfirst_pci_shutdown(device_t dev)
 
 第2阶段驱动尚不做的是正确回来。恢复方法仍是第1阶段骨架；它记录日志并返回0而不恢复任何东西。如果挂起的设备有任何硬件丢失的状态，该状态已消失，后续传输将失败。第4节修复恢复路径使完整挂起-恢复周期将设备留在之前相同的状态。
 
-## Section 4: 恢复时恢复状态
+## 第4节：恢复时恢复状态
 
-Section 3 gave the driver a correct suspend path. Section 4 writes the matching resume. The resume is the complement of the suspend: every thing suspend stopped, resume restarts; every value suspend saved, resume writes back; every flag suspend set, resume clears. The sequence is not an exact mirror (resume runs in a different kernel context, with the PCI layer having already done work, and the device in a different state than where suspend left it), but the contents correspond one-to-one. Doing the resume correctly is a matter of respecting the contract the PCI layer has already partly fulfilled, and filling in the rest.
+第3节给了驱动正确的挂起路径。第4节编写匹配的恢复。恢复是挂起的补集：挂起停止的一切，恢复重启；挂起保存的每个值，恢复写回；挂起设置的每个标志，恢复清除。顺序不是精确的镜像（恢复在不同的内核上下文中运行，PCI层已经做了一些工作，设备处于与挂起留下的不同状态），但内容一一对应。正确执行恢复意味着尊重PCI层已经部分完成的契约，并填补其余部分。
 
-### What the PCI Layer Has Already Done
+### PCI层已经做了什么
 
-When the kernel's `DEVICE_RESUME` method is called on the driver, several things have already happened:
+当内核在驱动上调用`DEVICE_RESUME`方法时，几件事已经发生：
 
-1. The CPU has come out of the S-state (resumed from S3 or S4 back to S0).
-2. Memory has been refreshed and the kernel has re-established its own state.
-3. The parent bus has been resumed. For `myfirst`, that means the PCI bus driver has already handled the host bridge and the PCIe root complex.
-4. The PCI layer has called `pci_set_powerstate(dev, PCI_POWERSTATE_D0)` on the device, transitioning it from whatever low-power state it was in (typically D3hot) back to full power.
-5. The PCI layer has called `pci_cfg_restore(dev, dinfo)`, which writes the cached configuration space values (BARs, command register, cache-line size, etc.) back into the device.
-6. The PCI layer has called `pci_clear_pme(dev)` to clear any pending power-management event bits.
-7. The MSI or MSI-X configuration, which is part of the cached state, has been restored. The driver's interrupt vectors are usable again.
+1. CPU已退出S状态（从S3或S4恢复到S0）。
+2. 内存已刷新，内核已重新建立自己的状态。
+3. 父总线已恢复。对于`myfirst`，这意味着PCI总线驱动已经处理了主机桥和PCIe根复合体。
+4. PCI层已在设备上调用`pci_set_powerstate(dev, PCI_POWERSTATE_D0)`，将其从任何低功耗状态（通常是D3hot）转回全功率。
+5. PCI层已调用`pci_cfg_restore(dev, dinfo)`，将缓存的配置空间值（BAR、命令寄存器、缓存行大小等）写回设备。
+6. PCI层已调用`pci_clear_pme(dev)`以清除任何待处理的电源管理事件位。
+7. MSI或MSI-X配置（作为缓存状态的一部分）已恢复。驱动的中断向量可再次使用。
 
-At this point the PCI bus driver calls into `myfirst`'s `DEVICE_RESUME`. The device is in D0, with its BARs mapped, its MSI/MSI-X table restored, and its generic PCI state intact. What the driver has to restore is the device-specific state that the PCI layer did not know about: the BAR-local registers the driver wrote during or after attach.
+此时PCI总线驱动调用`myfirst`的`DEVICE_RESUME`。设备处于D0，其BAR已映射，其MSI/MSI-X表已恢复，其通用PCI状态完好。驱动需要恢复的是PCI层不知道的设备特定状态：驱动在挂载期间或之后写入的BAR局部寄存器。
 
-For the `myfirst` simulation, the relevant BAR-local registers are the interrupt mask (which the suspend path deliberately set to all-masked) and the DMA registers (which may have been left in an aborted state). The driver needs to put them back to values that reflect normal operation.
+对于`myfirst`模拟，相关的BAR局部寄存器是中断掩码（挂起路径特意设置为全掩码）和DMA寄存器（可能已处于中止状态）。驱动需要将它们恢复为反映正常操作的值。
 
-### The Resume Discipline
+### 恢复纪律
 
-A correct resume path does four things, in order:
+正确的恢复路径按顺序做四件事：
 
-1. **Re-enable bus-mastering**, in case the configuration-space restore did not do so or the PCI layer's automatic restore was disabled. This is `pci_enable_busmaster(dev)`. On modern FreeBSD it is usually redundant but harmless; older code paths or buggy BIOSes sometimes leave bus-mastering disabled. Calling it defensively is cheap.
+1. **重新启用总线主控**，以防配置空间恢复未这样做或PCI层的自动恢复被禁用。这是`pci_enable_busmaster(dev)`。在现代FreeBSD上通常是冗余的但无害；旧代码路径或有缺陷的BIOS有时会让总线主控保持禁用。防御性调用成本低。
 
-2. **Restore any device-specific state** the driver saved during suspend. For `myfirst`, that means writing `saved_intr_mask` back to the INTR_MASK register. A real driver would also restore things like vendor-specific configuration bits, DMA engine programming, hardware timers, etc.
+2. **恢复驱动在挂起期间保存的任何设备特定状态**。对于`myfirst`，这意味着将`saved_intr_mask`写回INTR_MASK寄存器。真实驱动还会恢复供应商特定配置位、DMA引擎编程、硬件定时器等。
 
-3. **Unmask interrupts and clear the suspended flag**, so the device can resume activity. This is the pivot point: before it, the device is still quiet; after it, the device can raise interrupts and accept work.
+3. **取消掩码中断并清除挂起标志**，使设备可以恢复活动。这是转折点：在此之前，设备仍然安静；在此之后，设备可以引发中断并接受工作。
 
-4. **Log the transition and update counters**, for observability and regression testing.
+4. **记录转换并更新计数器**，用于可观测性和回归测试。
 
-Here is what the pattern looks like in code:
+以下是代码中的模式：
 
 ```c
 static int
@@ -1099,33 +1099,33 @@ myfirst_pci_resume(device_t dev)
 }
 ```
 
-The helper `myfirst_restore` does the three real steps:
+助手`myfirst_restore`执行三个实际步骤：
 
 ```c
 static int
 myfirst_restore(struct myfirst_softc *sc)
 {
-        /* Step 1: re-enable bus-master (defensive). */
+        /* 步骤1：重新启用总线主控（防御性）。 */
         pci_enable_busmaster(sc->dev);
 
-        /* Step 2: restore device-specific state.
+        /* 步骤2：恢复设备特定状态。
          *
-         * For myfirst, this is just the interrupt mask. A real driver
-         * would restore more: DMA engine programming, hardware timers,
-         * vendor-specific configuration, etc.
+         * 对于myfirst，这只是中断掩码。真实驱动
+         * 会恢复更多：DMA引擎编程、硬件定时器、
+         * 供应商特定配置等。
          */
         if (sc->saved_intr_mask == 0xFFFFFFFF) {
                 /*
-                 * Suspend saved a fully-masked mask, which means the
-                 * driver had no idea what the mask should be. Use the
-                 * default: enable DMA completion, disable everything
-                 * else.
+                 * 挂起保存了一个全掩码的掩码，这意味着
+                 * 驱动不知道掩码应该是什么。使用
+                 * 默认值：启用DMA完成，禁用其他
+                 * 所有内容。
                  */
                 sc->saved_intr_mask = ~MYFIRST_INTR_COMPLETE;
         }
         CSR_WRITE_4(sc->dev, MYFIRST_REG_INTR_MASK, sc->saved_intr_mask);
 
-        /* Step 3: clear the suspended flag and unmask the device. */
+        /* 步骤3：清除挂起标志并取消掩码设备。 */
         MYFIRST_LOCK(sc);
         sc->suspended = false;
         MYFIRST_UNLOCK(sc);
@@ -1134,41 +1134,41 @@ myfirst_restore(struct myfirst_softc *sc)
 }
 ```
 
-The function returns 0 because no step above can fail in the `myfirst` simulation. A real driver would check the return values of its hardware initialisation calls and propagate any errors.
+该函数返回0，因为上述步骤在`myfirst`模拟中不会失败。真实驱动会检查其硬件初始化调用的返回值并传播任何错误。
 
-### Why pci_enable_busmaster Matters
+### 为什么pci_enable_busmaster很重要
 
-Bus-mastering is a bit in the PCI command register that controls whether the device can issue DMA transactions. Without it, the device cannot read or write host memory; any DMA trigger would be silently ignored by the PCI host bridge.
+总线主控是PCI命令寄存器中的一个位，控制设备是否可以发起DMA事务。没有它，设备无法读写主机内存；任何DMA触发都会被PCI主机桥静默忽略。
 
-Chapter 18 enabled bus-mastering during attach. The PCI layer's automatic config-space restore writes the command register back to its saved value, which includes the bus-master bit. So in principle the driver does not need to call `pci_enable_busmaster` again on resume. In practice, several things can go wrong:
+第18章在挂载期间启用了总线主控。PCI层的自动配置空间恢复将命令寄存器写回其保存的值，其中包括总线主控位。因此原则上驱动不需要在恢复时再次调用`pci_enable_busmaster`。实际上，可能出几件事：
 
-- The platform firmware may reset the command register as part of waking the device.
-- The `hw.pci.do_power_suspend` sysctl may be 0, in which case the PCI layer does not save and restore the config space.
-- A device-specific quirk might clear bus-mastering as a side effect of the D3-to-D0 transition.
+- 平台固件可能在唤醒设备时重置命令寄存器。
+- `hw.pci.do_power_suspend` sysctl可能为0，此时PCI层不保存和恢复配置空间。
+- 设备特定的怪癖可能在D3到D0转换时清除总线主控作为副作用。
 
-Calling `pci_enable_busmaster` unconditionally defensively in resume is a low-cost safety net. Several production FreeBSD drivers follow this pattern; `if_re.c`'s resume path is one example. The call is idempotent: if bus-mastering is already on, the call just re-asserts it.
+在恢复中无条件防御性地调用`pci_enable_busmaster`是低成本的安全网。几个生产FreeBSD驱动遵循此模式；`if_re.c`的恢复路径是一个例子。该调用是幂等的：如果总线主控已开启，调用只是重新断言它。
 
-### Restoring Device-Specific State
+### 恢复设备特定状态
 
-The `myfirst` simulation does not have much state the driver needs to restore manually. The BAR-local registers are:
+`myfirst`模拟没有太多驱动需要手动恢复的状态。BAR局部寄存器有：
 
-- The interrupt mask (restored from `saved_intr_mask`).
-- The interrupt status bits (were cleared in suspend; they should stay cleared until new activity arrives).
-- The DMA engine registers (DMA_ADDR_LOW, DMA_ADDR_HIGH, DMA_LEN, DMA_DIR, DMA_CTRL, DMA_STATUS). These are transient: they hold the parameters of the current transfer. After resume, no transfer is in progress, so the values do not matter; the next transfer will overwrite them.
+- 中断掩码（从`saved_intr_mask`恢复）。
+- 中断状态位（在挂起期间已清除；它们应保持清除直到新活动到达）。
+- DMA引擎寄存器（DMA_ADDR_LOW、DMA_ADDR_HIGH、DMA_LEN、DMA_DIR、DMA_CTRL、DMA_STATUS）。这些是瞬态的：它们持有当前传输的参数。恢复后没有传输在进行中，所以值不重要；下一次传输会覆盖它们。
 
-A real driver would have more. Consider a few examples:
+真实驱动会更多。考虑几个例子：
 
-- A storage driver might have a DMA descriptor ring whose base address the device learned during attach. After resume, the BAR-level register holding that base address may have been reset; the driver needs to reprogram it.
-- A network driver might have filter tables (MAC addresses, multicast lists, VLAN tags) programmed into device registers. After resume, those tables may be empty; the driver rebuilds them from softc-side copies.
-- A GPU driver might have register state for display timing, colour tables, hardware cursors. After resume, the driver restores the active mode.
+- 存储驱动可能有一个DMA描述符环，其基址是设备在挂载期间学到的。恢复后，持有该基址的BAR级寄存器可能已被重置；驱动需要重新编程它。
+- 网络驱动可能有编程到设备寄存器中的过滤表（MAC地址、多播列表、VLAN标签）。恢复后，这些表可能为空；驱动从softc侧副本重建它们。
+- GPU驱动可能有显示定时、色彩表、硬件光标的寄存器状态。恢复后，驱动恢复活动模式。
 
-For `myfirst`, the interrupt mask is the only BAR-local state that needs restoring. The pattern shown above is the template a real driver would adapt to its device.
+对于`myfirst`，中断掩码是需要恢复的唯一BAR局部状态。上面展示的模式是真实驱动会针对其设备调整的模板。
 
-### Validating Device Identity After Resume
+### 恢复后验证设备身份
 
-Some devices are reset completely across a suspend-to-D3-cold cycle. The device that comes back is functionally the same, but its entire state has been reinitialised as if it had just powered on. A driver that assumed nothing changed would silently get wrong behaviour.
+有些设备在挂起到D3cold的周期中完全重置。回来的设备功能上相同，但其整个状态已像刚上电一样重新初始化。假设什么都没改变的驱动会静默产生错误行为。
 
-A defensive resume path can detect this by reading a known register value and comparing to what it read at attach time. For a PCI device, the vendor ID and device ID in configuration space are always the same (the PCI layer restored them), but some device-private register (a revision ID, a self-test register, a firmware version) can be checked:
+防御性的恢复路径可以通过读取已知寄存器值并与挂载时读取的值比较来检测这一点。对于PCI设备，配置空间中的供应商ID和设备ID始终相同（PCI层已恢复它们），但可以检查某些设备私有寄存器（修订ID、自检寄存器、固件版本）：
 
 ```c
 static int
@@ -1187,13 +1187,13 @@ myfirst_validate_device(struct myfirst_softc *sc)
 }
 ```
 
-For the `myfirst` simulation, there is no magic register (the simulation was not built with post-resume validation in mind). A reader who wants to add one as a challenge can extend the simulation backend's register map with a read-only `MAGIC` register, and have the driver check it. The chapter's Lab 3 includes this as an option.
+对于`myfirst`模拟，没有魔术寄存器（模拟在构建时未考虑恢复后验证）。想要作为挑战添加一个的读者可以扩展模拟后端的寄存器映射，添加一个只读`MAGIC`寄存器，并让驱动检查它。本章的实验3将其作为选项包含。
 
-A real driver whose device truly does reset across D3cold needs this check, because without it a subtle failure can occur: the driver assumes the device's internal state machine is in state `IDLE`, but after the reset the state machine is actually in state `RESETTING`. Any command the driver sends is rejected, the driver interprets the rejection as a hardware fault, and the device is marked broken. Catching the reset explicitly and rebuilding state is cleaner.
+真正在D3cold中重置的设备的真实驱动需要此检查，因为没有它可能发生微妙的故障：驱动假设设备的内部状态机处于`IDLE`状态，但重置后状态机实际处于`RESETTING`状态。驱动发送的任何命令都被拒绝，驱动将拒绝解释为硬件故障，设备被标记为损坏。显式捕获重置并重建状态更干净。
 
-### Detecting and Recovering from a Device Reset
+### 检测和恢复设备重置
 
-If the validation finds a mismatch, the driver's recovery options depend on the hardware. For the `myfirst` simulation, the simplest response is to log, mark the device broken, and fail subsequent operations:
+如果验证发现不匹配，驱动的恢复选项取决于硬件。对于`myfirst`模拟，最简单的响应是记录日志、标记设备为损坏、并使后续操作失败：
 
 ```c
 if (myfirst_validate_device(sc) != 0) {
@@ -1204,43 +1204,43 @@ if (myfirst_validate_device(sc) != 0) {
 }
 ```
 
-The softc grows a `broken` flag, and any user-facing request checks the flag and fails with an error. The detach path still works (detach always succeeds, even on a broken device), so the user can unload the driver and reload it.
+softc增加一个`broken`标志，任何面向用户的请求检查该标志并以错误失败。分离路径仍然有效（分离总是成功，即使设备损坏），所以用户可以卸载驱动并重新加载。
 
-A real driver that detects a reset has more options. A network driver might re-run its attach sequence from the point after `pci_alloc_msi` (which has been restored by the PCI layer). A storage driver might re-initialise its controller using the same code path attach used. The implementation depends heavily on the device; the pattern is "detect, then do whatever attach-time initialisation is still required".
+检测到重置的真实驱动有更多选项。网络驱动可能从`pci_alloc_msi`之后的点重新运行其挂载序列（该序列已被PCI层恢复）。存储驱动可能使用挂载使用的相同代码路径重新初始化其控制器。实现严重依赖于设备；模式是"检测，然后执行仍然需要的任何挂载时初始化"。
 
-The chapter's `myfirst` driver takes the simpler approach: it does not implement reset detection for the simulation, and the resume path does not include the validation call by default. The code above is provided as reference for a reader who wants to extend the driver as an exercise.
+本章的`myfirst`驱动采取更简单的方法：它不为模拟实现重置检测，恢复路径默认不包含验证调用。上面的代码作为参考提供给想要作为练习扩展驱动的读者。
 
-### Restoring DMA State
+### 恢复DMA状态
 
-The Chapter 21 DMA setup allocates a tag, allocates memory, loads the map, and retains the bus address in the softc. None of that is visible in the BAR-local register map; the DMA engine learns the bus address only when the driver writes it to `DMA_ADDR_LOW` and `DMA_ADDR_HIGH` as part of starting a transfer.
+第21章的DMA设置分配标签、分配内存、加载映射，并在softc中保留总线地址。这些都不在BAR局部寄存器映射中可见；DMA引擎仅在驱动作为启动传输的一部分将总线地址写入`DMA_ADDR_LOW`和`DMA_ADDR_HIGH`时才学习到它。
 
-This means the DMA state does not need restoration in the sense of "write registers". The tag, map, and memory are all kernel-side data structures; they survive suspend intact. The next transfer will program the DMA registers as part of its normal submission.
+这意味着DMA状态不需要以"写入寄存器"的意义进行恢复。标签、映射和内存都是内核侧数据结构；它们在挂起中完好无损。下一次传输将作为正常提交的一部分编程DMA寄存器。
 
-What might need restoration on a real device is:
+在真实设备上可能需要恢复的是：
 
-- **The DMA descriptor ring base address**, if the device keeps a persistent pointer. A real NIC writes a base-address register once at attach and points the device at a ring of descriptors; after D3cold, that register may have been reset and the driver must reprogram it.
-- **The DMA engine's enable bit**, if it is separate from individual transfers.
-- **Any per-channel configuration** (burst size, priority, etc.) that is held in registers the PCI layer did not cache.
+- **DMA描述符环基址**，如果设备保持持久指针。真实NIC在挂载时写入一次基址寄存器并将设备指向描述符环；D3cold后，该寄存器可能已被重置，驱动必须重新编程它。
+- **DMA引擎的启用位**，如果它与单个传输分开。
+- **任何PCI层未缓存的每通道配置**（突发大小、优先级等）。
 
-For `myfirst`, none of this applies. The DMA engine is programmed per transfer. Resume does not need any DMA-specific restoration beyond what the generic state restoration already covered.
+对于`myfirst`，这些都不适用。DMA引擎是按传输编程的。恢复不需要任何DMA特定的恢复，除了通用状态恢复已覆盖的内容。
 
-### Re-Arming Interrupts
+### 重新装备中断
 
-Masking interrupts was step 2 of suspend. Unmasking them is step 3 of resume. The Stage 3 resume writes `saved_intr_mask` back to the `INTR_MASK` register, which (by convention) writes 0 to the bits corresponding to enabled vectors and 1 to the bits for disabled vectors. After the write, the device is ready to assert interrupts on the enabled vectors as soon as there is reason to.
+掩码中断是挂起的第2步。取消掩码是恢复的第3步。第3阶段恢复将`saved_intr_mask`写回`INTR_MASK`寄存器，它（按约定）将0写入对应启用向量的位，将1写入对应禁用向量的位。写入后，设备准备在有理由时在启用的向量上断言中断。
 
-There is a subtlety around ordering. The resume path unmasks interrupts before it clears the `suspended` flag. That means a very unfortunate interrupt could arrive, call the filter, and find `suspended == true`. The filter would refuse to handle it and return `FILTER_STRAY`, which would leave the interrupt asserted.
+关于顺序有一个微妙之处。恢复路径在清除`suspended`标志之前取消掩码中断。这意味着一个非常不幸的中断可能在掩码清除后到达、调用过滤器、并发现`suspended == true`。过滤器会拒绝处理并返回`FILTER_STRAY`，这会使中断保持断言状态。
 
-To avoid that, the resume path takes the softc lock around the state change and does the unmask and the flag clear in the opposite order: clear `suspended` first, then unmask. That way any interrupt the device raises after the mask clears sees `suspended == false` and is handled normally.
+为避免这种情况，恢复路径在状态更改周围获取softc锁，并以相反顺序执行取消掩码和标志清除：先清除`suspended`，然后取消掩码。这样设备在掩码清除后引发的任何中断都会看到`suspended == false`并被正常处理。
 
-The code in the previous snippet does this correctly: `myfirst_restore` writes the mask, then acquires the lock, clears the flag, and releases the lock. The order is important; reversing it creates a narrow window where interrupts could be lost.
+前面代码片段中的代码正确执行了这一点：`myfirst_restore`写入掩码，然后获取锁、清除标志、释放锁。顺序很重要；反转它会创建一个可能丢失中断的狭窄窗口。
 
-### Wake Source Cleanup
+### 唤醒源清理
 
-If the driver enabled a wake source during suspend (`pci_enable_pme`), the resume path should clear any pending wake event (`pci_clear_pme`). The PCI layer's `pci_resume_child` helper already calls `pci_clear_pme(child)` before the driver's `DEVICE_RESUME`, so the driver does not usually need to call it again.
+如果驱动在挂起期间启用了唤醒源（`pci_enable_pme`），恢复路径应清除任何待处理的唤醒事件（`pci_clear_pme`）。PCI层的`pci_resume_child`助手已在驱动的`DEVICE_RESUME`之前调用`pci_clear_pme(child)`，所以驱动通常不需要再次调用它。
 
-The one case where the driver might want to call `pci_clear_pme` explicitly is in a runtime-PM context where the driver is resuming the device while the system stays in S0. In that case `pci_resume_child` was not involved, and the driver is responsible for clearing the PME status itself.
+驱动可能想显式调用`pci_clear_pme`的一种情况是在运行时PM上下文中，驱动在系统保持S0时恢复设备。在这种情况下`pci_resume_child`未参与，驱动负责自己清除PME状态。
 
-A hypothetical sketch for a driver with wake-on-X:
+支持wake-on-X的驱动的假设草图：
 
 ```c
 static int
@@ -1249,37 +1249,37 @@ myfirst_pci_resume(device_t dev)
         struct myfirst_softc *sc = device_get_softc(dev);
 
         if (pci_has_pm(dev))
-                pci_clear_pme(dev);  /* defensive; PCI layer already did this */
+                pci_clear_pme(dev);  /* 防御性；PCI层已经做了 */
 
-        /* ... rest of the resume path ... */
+        /* ... 恢复路径的其余部分 ... */
 }
 ```
 
-For `myfirst`, there is no wake source, so the call does nothing useful; the chapter omits it from the main code and mentions the pattern here for completeness.
+对于`myfirst`，没有唤醒源，所以调用没有实际用途；本章从主代码中省略它并在此处提及模式以供完整性。
 
-### Updating the Stage 3 Driver
+### 更新第3阶段驱动
 
-Stage 3 brings together everything above into a single working resume. The diff against Stage 2 is:
+第3阶段将上述所有内容整合到单个可工作的恢复中。与第2阶段的差异是：
 
-- `myfirst.h` grows a `saved_intr_mask` field (added for Stage 2) and a `broken` flag.
-- `myfirst_pci.c` gets a `myfirst_restore` helper and a rewritten `myfirst_pci_resume`.
-- The Makefile version bumps to `1.5-power-stage3`.
+- `myfirst.h`增加`saved_intr_mask`字段（为第2阶段添加）和`broken`标志。
+- `myfirst_pci.c`获得`myfirst_restore`助手和重写的`myfirst_pci_resume`。
+- Makefile版本升级到`1.5-power-stage3`。
 
-Build and test:
+构建并测试：
 
 ```sh
 cd /path/to/driver
 make clean && make
-sudo kldunload myfirst     # unload any previous version
+sudo kldunload myfirst     # 卸载任何先前版本
 sudo kldload ./myfirst.ko
 
-# Quiet baseline.
+# 安静基线。
 sysctl dev.myfirst.0.dma_transfers_read
 # 0
 sysctl dev.myfirst.0.suspended
 # 0
 
-# Full cycle.
+# 完整周期。
 sudo devctl suspend myfirst0
 sysctl dev.myfirst.0.suspended
 # 1
@@ -1288,12 +1288,12 @@ sudo devctl resume myfirst0
 sysctl dev.myfirst.0.suspended
 # 0
 
-# A transfer after resume should work.
+# 恢复后的传输应正常工作。
 sudo sysctl dev.myfirst.0.dma_test_read=1
 sysctl dev.myfirst.0.dma_transfers_read
 # 1
 
-# Do it several times to make sure the path is stable.
+# 多次执行以确保路径稳定。
 for i in 1 2 3 4 5; do
   sudo devctl suspend myfirst0
   sudo devctl resume myfirst0
@@ -1303,46 +1303,46 @@ sysctl dev.myfirst.0.dma_transfers_read
 # 6 (1 + 5)
 
 sysctl dev.myfirst.0.power_suspend_count dev.myfirst.0.power_resume_count
-# should be equal, around 6 each
+# 应相等，各约6
 ```
 
-If the counters drift (suspend count not equal to resume count) or if `dma_test_read` starts failing after a suspend, something in the restore path is not putting the device back into a usable state. The first debugging step is to read the INTR_MASK and compare against `saved_intr_mask`; the second is to trace the DMA engine's status register and see if it is reporting an error.
+如果计数器漂移（挂起计数不等于恢复计数）或如果`dma_test_read`在挂起后开始失败，恢复路径中的某些东西没有将设备放回可用状态。第一个调试步骤是读取INTR_MASK并与`saved_intr_mask`比较；第二个是跟踪DMA引擎的状态寄存器看它是否报告错误。
 
-### Interaction with the Chapter 20 MSI-X Setup
+### 与第20章MSI-X设置的交互
 
-The `myfirst` driver from Chapter 20 uses MSI-X when available, with a three-vector layout (admin, rx, tx). The MSI-X configuration lives in the device's MSI-X capability registers and in a kernel-side table. The PCI layer's config-space save-and-restore covers the capability registers; the kernel-side state is not affected by the D-state transition.
+第20章的`myfirst`驱动在可用时使用MSI-X，采用三向量布局（admin、rx、tx）。MSI-X配置存在于设备的MSI-X能力寄存器和内核侧表中。PCI层的配置空间保存恢复覆盖能力寄存器；内核侧状态不受D状态转换影响。
 
-This means the `myfirst` driver does not need to do anything special to restore its MSI-X vectors. The interrupt resources (`irq_res`) remain allocated, the cookies remain registered, the CPU bindings remain in place. When the device raises an MSI-X vector on resume, the kernel delivers it to the filter that was registered at attach time.
+这意味着`myfirst`驱动不需要做任何特殊操作来恢复其MSI-X向量。中断资源（`irq_res`）保持分配，cookie保持注册，CPU绑定保持不变。当设备在恢复时引发MSI-X向量时，内核将其传递给在挂载时注册的过滤器。
 
-A reader who wants to verify this can write to one of the simulate sysctls after resume and observe that the corresponding per-vector counter increments:
+想要验证这一点的读者可以在恢复后写入一个模拟sysctl并观察相应的每向量计数器递增：
 
 ```sh
 sudo devctl suspend myfirst0
 sudo devctl resume myfirst0
 sudo sysctl dev.myfirst.0.intr_simulate_admin=1
 sysctl dev.myfirst.0.vec0_fire_count
-# should be incremented
+# 应已递增
 ```
 
-If the counter does not increment, the MSI-X path has been disturbed. The most likely cause is a bug in the driver's own state management (the `suspended` flag was not cleared, or the filter is rejecting the interrupt for a different reason). The chapter's troubleshooting section has more detail.
+如果计数器未递增，MSI-X路径已被干扰。最可能的原因是驱动自身状态管理中的错误（`suspended`标志未清除，或过滤器因不同原因拒绝中断）。本章的故障排除部分有更多细节。
 
-### Handling a Failed Resume Gracefully
+### 优雅处理恢复失败
 
-If some step of the resume fails, the driver has limited options. It cannot veto the resume (the kernel has no unwind path at this point). It cannot usually retry (the hardware state is uncertain). The best it can do is:
+如果恢复的某个步骤失败，驱动选项有限。它不能否决恢复（内核此时没有展开路径）。通常不能重试（硬件状态不确定）。它能做的最好是：
 
-1. Log the failure prominently with `device_printf` so the user sees it in dmesg.
-2. Increment a counter (`power_resume_errors`) that a regression script or an observability tool can check.
-3. Mark the device broken so that subsequent requests fail cleanly rather than silently corrupting data.
-4. Keep the driver attached, so the device-tree state stays consistent and the user can eventually unload and reload the driver.
-5. Return 0 from `DEVICE_RESUME`, because the kernel expects it to succeed.
+1. 用`device_printf`显眼地记录失败，以便用户在dmesg中看到。
+2. 递增计数器（`power_resume_errors`），回归脚本或可观测性工具可以检查。
+3. 标记设备为损坏，以便后续请求干净地失败而非静默损坏数据。
+4. 保持驱动挂载，使设备树状态保持一致，用户最终可以卸载并重新加载驱动。
+5. 从`DEVICE_RESUME`返回0，因为内核期望它成功。
 
-The "mark broken, keep attached" pattern is common in production drivers. It moves the failure from "mysterious later corruption" to "immediate user-visible error", which is a better debugging experience.
+"标记损坏、保持挂载"模式在生产驱动中常见。它将失败从"神秘的后续损坏"移动到"立即可见的用户错误"，这是更好的调试体验。
 
-### A Short Detour: pci_save_state / pci_restore_state in Runtime PM
+### 短暂弯路：运行时PM中的pci_save_state / pci_restore_state
 
-Section 2 mentioned that `pci_save_state` and `pci_restore_state` are sometimes called by the driver itself, typically in a runtime power-management helper. This is worth a concrete sketch before Section 5 builds it out.
+第2节提到`pci_save_state`和`pci_restore_state`有时由驱动自身调用，通常在运行时电源管理助手中。在第5节构建它之前，值得做一个具体的草图。
 
-A runtime PM helper that puts an idle device into D3 looks like:
+将空闲设备放入D3的运行时PM助手如下：
 
 ```c
 static int
@@ -1357,7 +1357,7 @@ myfirst_runtime_suspend(struct myfirst_softc *sc)
         pci_save_state(sc->dev);
         err = pci_set_powerstate(sc->dev, PCI_POWERSTATE_D3);
         if (err != 0) {
-                /* roll back */
+                /* 回滚 */
                 pci_restore_state(sc->dev);
                 myfirst_restore(sc);
                 return (err);
@@ -1380,59 +1380,59 @@ myfirst_runtime_resume(struct myfirst_softc *sc)
 }
 ```
 
-The pattern is similar to the system suspend/resume but uses the explicit PCI helpers because the PCI layer is not in the loop. Section 5 will turn this sketch into a real implementation and wire it to an idle-detection policy.
+模式与系统挂起/恢复类似，但使用显式PCI助手，因为PCI层不在循环中。第5节将把这个草图变为真实实现并连接到空闲检测策略。
 
-### A Reality Check Against a Real Driver
+### 与真实驱动的现实检验
 
-Before moving on, it is worth pausing and looking at a real driver's resume path. `/usr/src/sys/dev/re/if_re.c`'s `re_resume` function is about thirty lines. Its structure is:
+继续之前，值得停下来看看真实驱动的恢复路径。`/usr/src/sys/dev/re/if_re.c`的`re_resume`函数大约三十行。其结构为：
 
-1. Lock the softc.
-2. If a MAC-sleep flag is set, take the chip out of sleep mode by writing a GPIO register.
-3. Clear any wake-on-LAN patterns so normal receive filtering is not interfered with.
-4. If the interface is administratively up, re-initialise it via `re_init_locked`.
-5. Clear the `suspended` flag.
-6. Unlock the softc.
-7. Return 0.
+1. 锁定softc。
+2. 如果MAC睡眠标志已设置，通过写GPIO寄存器将芯片从睡眠模式取出。
+3. 清除任何网络唤醒模式，以免正常接收过滤不被干扰。
+4. 如果接口在管理上已启动，通过`re_init_locked`重新初始化。
+5. 清除`suspended`标志。
+6. 解锁softc。
+7. 返回0。
 
-The `re_init_locked` call is the substantive work: it reprograms the MAC address, resets the receive and transmit descriptor rings, re-enables interrupts on the NIC, and starts the DMA engines. For `myfirst`, the equivalent work is much shorter because the device is much simpler, but the shape is the same: acquire state, do hardware-specific reinitialisation, unlock, return.
+`re_init_locked`调用是实质工作：它重新编程MAC地址，重置接收和发送描述符环，重新启用NIC上的中断，并启动DMA引擎。对于`myfirst`，等效工作短得多因为设备简单得多，但形状相同：获取状态、执行硬件特定重新初始化、解锁、返回。
 
-A reader who reads `re_resume` after implementing `myfirst`'s resume will recognise the structure immediately. The vocabulary is the same; only the details differ.
+在实现`myfirst`的恢复后阅读`re_resume`的读者会立即识别出结构。词汇相同；只有细节不同。
 
-### Wrapping Up Section 4
+### 第4节收尾
 
-Section 4 completed the resume path. It showed what the PCI layer has already done by the time `DEVICE_RESUME` is called (D0 transition, config-space restore, PME# clear, MSI-X restore), what the driver still has to do (re-enable bus-master, restore device-specific registers, clear the suspended flag, unmask interrupts), and why each step is important. The Stage 3 driver can now do a full suspend-resume cycle and continue operating normally; the regression test can run several cycles in a row and verify the counters are consistent.
+第4节完成了恢复路径。它展示了到`DEVICE_RESUME`被调用时PCI层已经做了什么（D0转换、配置空间恢复、PME#清除、MSI-X恢复），驱动仍然需要做什么（重新启用总线主控、恢复设备特定寄存器、清除挂起标志、取消掩码中断），以及每个步骤为何重要。第3阶段驱动现在可以完成完整的挂起-恢复周期并继续正常操作；回归测试可以连续运行多个周期并验证计数器一致。
 
-With Sections 3 and 4 together, the driver is power-aware in the system-suspend sense: it handles S3 and S4 transitions cleanly. What it still does not do is any device-level power saving while the system is running. That is runtime power management, and Section 5 teaches it.
+第3节和第4节一起，驱动在系统挂起意义上是电源感知的：它干净地处理S3和S4转换。它仍然不做的是系统运行时的任何设备级节能。那就是运行时电源管理，第5节教授它。
 
 
 
-## Section 5: 处理运行时电源管理
+## 第5节：处理运行时电源管理
 
-System suspend is a big, visible transition: the lid closes, the screen goes dark, the battery saves power for hours. Runtime power management is the opposite: dozens of small, invisible transitions a second, each saving a little, together saving much of the idle power a modern system draws. The user never notices them; the platform engineer lives or dies by their correctness.
+系统挂起是一个大的、可见的转换：盖子关闭，屏幕变暗，电池节能数小时。运行时电源管理正好相反：每秒数十次小的、不可见的转换，每次节省一点，一起节省现代系统空闲功耗的大部分。用户从不注意它们；平台工程师因其正确性而生或死。
 
-This section is marked optional in the chapter outline because not every driver needs runtime PM. A driver for a device that is always active (a NIC on a busy server, a disk controller for the root filesystem) does not save power by attempting to suspend its device; the device is busy, and trying to suspend it wastes cycles setting up transitions that never complete. A driver for a device that is frequently idle (a webcam, a fingerprint reader, a WLAN card on a laptop) does benefit. Whether to add runtime PM is a policy decision driven by the device's usage profile.
+本节在章节大纲中标记为可选，因为并非每个驱动都需要运行时PM。始终活跃的设备的驱动（繁忙服务器上的NIC、根文件系统的磁盘控制器）不通过尝试挂起其设备来节能；设备正忙，尝试挂起它浪费设置从不完成的转换的周期。经常空闲的设备的驱动（网络摄像头、指纹读取器、笔记本上的WLAN卡）确实受益。是否添加运行时PM是由设备使用配置文件驱动的策略决策。
 
-For Chapter 22, we implement runtime PM on the `myfirst` driver as a learning exercise. The device is already simulated; we can pretend it is idle whenever no sysctl has been written in the last few seconds, and watch the driver go through the motions. The implementation is short, and it teaches the PCI-level primitives that a real runtime-PM driver uses.
+对于第22章，我们在`myfirst`驱动上实现运行时PM作为学习练习。设备已经是模拟的；我们可以假装它在最近几秒内没有sysctl写入时是空闲的，并观察驱动完成这些操作。实现很短，它教授真实运行时PM驱动使用的PCI级原语。
 
-### What Runtime PM Means in FreeBSD
+### FreeBSD中运行时PM意味着什么
 
-FreeBSD does not currently have a centralised runtime-PM framework the way Linux does. There is no kernel-side "if the device has been idle for N milliseconds, call its idle hook" machinery. Instead, runtime PM is driver-local: the driver decides when to suspend and resume its device, using the same PCI-layer primitives (`pci_set_powerstate`, `pci_save_state`, `pci_restore_state`) it would use inside `DEVICE_SUSPEND` and `DEVICE_RESUME`.
+FreeBSD目前没有像Linux那样的集中式运行时PM框架。没有内核侧的"如果设备已空闲N毫秒，调用其空闲钩子"机制。相反，运行时PM是驱动本地的：驱动决定何时挂起和恢复其设备，使用它在`DEVICE_SUSPEND`和`DEVICE_RESUME`内部会使用的相同PCI层原语（`pci_set_powerstate`、`pci_save_state`、`pci_restore_state`）。
 
-This has two consequences. First, every driver that wants runtime PM implements its own policy: how long the device must be idle before suspending, what counts as idle, how quickly the device must wake on demand. Second, the driver must integrate its runtime PM with its system PM; the two paths share a lot of code and must not step on each other.
+这有两个后果。首先，每个想要运行时PM的驱动实现自己的策略：设备必须空闲多长时间才挂起、什么算空闲、设备按需求唤醒必须多快。其次，驱动必须将运行时PM与其系统PM集成；两条路径共享大量代码且不能互相冲突。
 
-The pattern Chapter 22 uses is straightforward:
+第22章使用的模式很简单：
 
-1. The driver adds a small state machine with states `RUNNING` and `RUNTIME_SUSPENDED`.
-2. When the driver observes idleness (Section 5 uses a callout-based "no requests in the last 5 seconds" policy), it calls `myfirst_runtime_suspend`.
-3. When the driver observes a new request while in `RUNTIME_SUSPENDED`, it calls `myfirst_runtime_resume` before processing the request.
-4. On system suspend, if the device is in `RUNTIME_SUSPENDED`, the system-suspend path adjusts for it (the device is already quiesced; the system-suspend quiesce is a no-op, but the system resume has to bring the device back to D0).
-5. On system resume, the driver returns to `RUNNING` unless it was explicitly runtime-suspended and wants to stay that way.
+1. 驱动添加一个具有`RUNNING`和`RUNTIME_SUSPENDED`状态的小状态机。
+2. 当驱动观察到空闲（第5节使用基于callout的"最近5秒没有请求"策略）时，它调用`myfirst_runtime_suspend`。
+3. 当驱动在`RUNTIME_SUSPENDED`中观察到新请求时，它在处理请求之前调用`myfirst_runtime_resume`。
+4. 在系统挂起时，如果设备处于`RUNTIME_SUSPENDED`，系统挂起路径对其进行调整（设备已静默；系统挂起的静默是无操作，但系统恢复必须将设备带回D0）。
+5. 在系统恢复时，驱动返回`RUNNING`，除非它被显式运行时挂起并想保持那样。
 
-This is simpler than Linux's runtime PM framework, which has richer concepts (parent/child ref-counting, autosuspend timers, barriers). For a single driver on simple hardware, the FreeBSD approach is enough.
+这比Linux的运行时PM框架更简单，后者有更丰富的概念（父/子引用计数、自动挂起定时器、屏障）。对于简单硬件上的单个驱动，FreeBSD方法足够了。
 
 ### 运行时PM状态机
 
-The softc gains a state variable and a timestamp:
+softc增加一个状态变量和一个时间戳：
 
 ```c
 enum myfirst_runtime_state {
@@ -1451,13 +1451,13 @@ struct myfirst_softc {
 };
 ```
 
-The `idle_threshold_seconds` is a policy knob exposed through a sysctl; defaulting to five seconds gives quick observability without being so aggressive as to cause unnecessary wake-ups during normal use. A production driver would tune this per-device; five seconds is a learning-friendly value that makes the transitions visible without requiring hours of waiting.
+`idle_threshold_seconds`是通过sysctl暴露的策略旋钮；默认为五秒提供快速可观测性而不至于在正常使用中因过于激进导致不必要的唤醒。生产驱动会按设备调整此值；五秒是一个学习友好的值，使转换可见而不需要等待数小时。
 
-The `idle_watcher` callout fires once a second to check the idle time. If the device has been idle longer than `idle_threshold_seconds` and is currently in `RUNNING`, the callout triggers `myfirst_runtime_suspend`.
+`idle_watcher` callout每秒触发一次检查空闲时间。如果设备空闲时间超过`idle_threshold_seconds`且当前处于`RUNNING`，callout触发`myfirst_runtime_suspend`。
 
-### Implementation
+### 实现
 
-The attach path starts the idle watcher:
+挂载路径启动空闲监视器：
 
 ```c
 static void
@@ -1470,9 +1470,9 @@ myfirst_start_idle_watcher(struct myfirst_softc *sc)
 }
 ```
 
-The callout is initialised with the softc mutex, so it acquires the mutex automatically when firing. That simplifies the callback: it runs under the lock.
+callout用softc互斥锁初始化，所以触发时自动获取互斥锁。这简化了回调：它在锁下运行。
 
-The callback checks the time since the last activity and suspends if needed:
+回调检查自上次活动以来的时间并在需要时挂起：
 
 ```c
 static void
@@ -1489,9 +1489,8 @@ myfirst_idle_watcher_cb(void *arg)
 
                 if (diff.tv_sec >= sc->idle_threshold_seconds) {
                         /*
-                         * Release the lock while suspending. The
-                         * runtime_suspend helper acquires it again as
-                         * needed.
+                         * 在挂起期间释放锁。运行时挂起助手
+                         * 根需要再次获取它。
                          */
                         MYFIRST_UNLOCK(sc);
                         (void)myfirst_runtime_suspend(sc);
@@ -1499,37 +1498,37 @@ myfirst_idle_watcher_cb(void *arg)
                 }
         }
 
-        /* Reschedule. */
+        /* 重新调度。 */
         callout_reset(&sc->idle_watcher, hz, myfirst_idle_watcher_cb, sc);
 }
 ```
 
-Note the lock-drop around `myfirst_runtime_suspend`. The suspend helper calls `myfirst_quiesce`, which acquires the lock itself. Holding the lock across it would deadlock.
+注意`myfirst_runtime_suspend`周围的锁释放。挂起助手调用`myfirst_quiesce`，它自己获取锁。跨它持有锁会死锁。
 
-Activity is recorded whenever the driver services a request. The Chapter 21 DMA path is a good hook: every time a user writes to `dma_test_read` or `dma_test_write`, the sysctl handler records activity:
+活动在驱动服务请求时记录。第21章的DMA路径是一个好的钩子：每次用户写入`dma_test_read`或`dma_test_write`时，sysctl处理器记录活动：
 
 ```c
 static int
 myfirst_dma_sysctl_test_write(SYSCTL_HANDLER_ARGS)
 {
         struct myfirst_softc *sc = arg1;
-        /* ... existing code ... */
+        /* ... 现有代码 ... */
 
-        /* Mark the device active before processing. */
+        /* 处理前标记设备为活跃。 */
         myfirst_mark_active(sc);
 
-        /* If runtime-suspended, bring the device back before running. */
+        /* 如果运行时已挂起，在运行前将设备带回。 */
         if (sc->runtime_state == MYFIRST_RT_SUSPENDED) {
                 int err = myfirst_runtime_resume(sc);
                 if (err != 0)
                         return (err);
         }
 
-        /* ... proceed with the transfer ... */
+        /* ... 继续传输 ... */
 }
 ```
 
-The `myfirst_mark_active` helper is a one-liner:
+`myfirst_mark_active`助手是一行代码：
 
 ```c
 static void
@@ -1541,9 +1540,9 @@ myfirst_mark_active(struct myfirst_softc *sc)
 }
 ```
 
-### The Runtime-Suspend and Runtime-Resume Helpers
+### 运行时挂起和运行时恢复助手
 
-These were sketched in Section 4. Here are the fleshed-out versions:
+这些在第4节中已做草图。以下是完整版本：
 
 ```c
 static int
@@ -1624,26 +1623,26 @@ myfirst_runtime_resume(struct myfirst_softc *sc)
 }
 ```
 
-The shape is identical to system suspend/resume except that the driver explicitly calls `pci_set_powerstate` and `pci_save_state`/`pci_restore_state`. The PCI layer's automatic transitions are not in the loop for runtime PM because the kernel is not coordinating a system-wide power change; the driver is on its own.
+形状与系统挂起/恢复相同，只是驱动显式调用`pci_set_powerstate`和`pci_save_state`/`pci_restore_state`。PCI层的自动转换不参与运行时PM，因为内核没有协调系统范围的电源更改；驱动独自处理。
 
-### Interaction Between Runtime PM and System PM
+### 运行时PM和系统PM之间的交互
 
-The two paths have to cooperate. Consider what happens if the device is runtime-suspended (in D3) when the user closes the laptop lid:
+两条路径必须协作。考虑当用户合上笔记本盖子时设备已运行时挂起（在D3中）会发生什么：
 
-1. The kernel starts system suspend.
-2. The PCI bus calls `myfirst_pci_suspend`.
-3. Inside `myfirst_pci_suspend`, the driver notices that the device is already runtime-suspended. The quiesce is a no-op (nothing is happening). The PCI layer's automatic config-space save runs; it reads the config space (which is still accessible in D3) and caches it.
-4. The PCI layer transitions the device from D3 to... wait, it is already in D3. The transition to D3 is a no-op.
-5. The system sleeps.
-6. On wake, the PCI layer transitions the device back to D0. The driver's `myfirst_pci_resume` runs. It restores state. But now the driver thinks the device is `RUNNING` (because system resume cleared the `suspended` flag), while conceptually it was runtime-suspended before. The next activity will use the device normally and set `last_activity`; the idle watcher will eventually re-suspend it if still idle.
+1. 内核开始系统挂起。
+2. PCI总线调用`myfirst_pci_suspend`。
+3. 在`myfirst_pci_suspend`内部，驱动注意到设备已运行时挂起。静默是无操作（没有事情在发生）。PCI层的自动配置空间保存运行；它读取配置空间（在D3中仍可访问）并缓存它。
+4. PCI层将设备从D3转换到……等等，它已经在D3中。到D3的转换是无操作。
+5. 系统睡眠。
+6. 唤醒时，PCI层将设备转回D0。驱动的`myfirst_pci_resume`运行。它恢复状态。但现在驱动认为设备是`RUNNING`（因为系统恢复清除了`suspended`标志），而概念上它之前是运行时挂起的。下一个活动会正常使用设备并设置`last_activity`；空闲监视器最终会重新挂起它如果仍然空闲。
 
-The interaction is mostly benign; the worst that happens is that the device gets one extra trip through D0 before the idle watcher re-suspends it. A more polished implementation would remember the runtime-suspended state across the system suspend and restore it, but for a learning driver the simple approach is enough.
+交互大多是良性的；最坏情况是设备在空闲监视器重新挂起它之前多经历一次D0。更完善的实现会在系统挂起间记住运行时挂起状态并恢复它，但对于学习驱动简单方法就足够了。
 
-The reverse (system-suspending a device that is already runtime-suspended) is already correct in our implementation because `myfirst_quiesce` checks `suspended` and returns 0 if already set. The runtime-suspended path set `suspended = true` as part of its quiesce, so the system suspend's quiesce sees the flag and skips.
+反向（系统挂起已运行时挂起的设备）在我们的实现中已经正确，因为`myfirst_quiesce`检查`suspended`并在已设置时返回0。运行时挂起路径作为其静默的一部分设置了`suspended = true`，所以系统挂起的静默看到标志并跳过。
 
-### Exposing Runtime-PM Controls Through Sysctl
+### 通过Sysctl暴露运行时PM控制
 
-The driver's runtime-PM policy can be controlled and observed through sysctls:
+驱动的运行时PM策略可以通过sysctl控制和观察：
 
 ```c
 SYSCTL_ADD_INT(ctx, kids, OID_AUTO, "idle_threshold_seconds",
@@ -1660,101 +1659,101 @@ SYSCTL_ADD_INT(ctx, kids, OID_AUTO, "runtime_state",
     "Runtime state: 0=running, 1=suspended");
 ```
 
-A reader can now do this:
+读者现在可以这样做：
 
 ```sh
-# Watch the device idle out.
+# 观察设备空闲。
 while :; do
         sysctl dev.myfirst.0.runtime_state dev.myfirst.0.runtime_suspend_count
         sleep 1
 done &
 ```
 
-After five seconds of inactivity, `runtime_state` flips from 0 to 1 and `runtime_suspend_count` increments. A write to any active sysctl triggers a resume and flips the state back:
+五秒不活动后，`runtime_state`从0翻转到1，`runtime_suspend_count`递增。写入任何活动sysctl触发恢复并将状态翻转回来：
 
 ```sh
 sudo sysctl dev.myfirst.0.dma_test_read=1
-# The log shows: runtime resume, then the test read
+# 日志显示：运行时恢复，然后测试读取
 ```
 
-### Tradeoffs
+### 权衡
 
-Runtime PM trades wake-up latency for idle power. Every D3-to-D0 transition costs time (tens of microseconds on a PCIe link, including the ASPM exit), and on some devices costs energy (the transition itself draws current). For a device that is idle most of the time with rare bursts of activity, the trade is favorable. For a device that is active most of the time with rare idle periods, the cost of the transitions dominates.
+运行时PM用唤醒延迟换取空闲功耗。每次D3到D0转换花费时间（PCIe链路上数十微秒，包括ASPM退出），在某些设备上还花费能量（转换本身消耗电流）。对于大部分时间空闲、偶尔有活动突发的设备，交换是有利的。对于大部分时间活跃、偶尔有空闲期的设备，转换成本占主导。
 
-The `idle_threshold_seconds` knob lets the platform tune this. A value of 0 or 1 is aggressive and suitable for a webcam that is used for seconds at a time and idle for minutes. A value of 60 is conservative and suitable for a NIC whose idle periods are short but frequent. A value of 0 (if allowed) would disable runtime PM entirely, which is appropriate for devices that should stay on at all times.
+`idle_threshold_seconds`旋钮让平台调整这一点。值为0或1是激进的，适合每次使用几秒、空闲几分钟的网络摄像头。值为60是保守的，适合空闲期短但频繁的NIC。值为0（如果允许）会完全禁用运行时PM，适合应始终保持开启的设备。
 
-A second tradeoff is in code complexity. Runtime PM adds a state machine, a callout, an idle watcher, two more kobj-like helpers, and additional ordering concerns between the runtime and system PM paths. Each of those is small, but together they increase the surface area for bugs. Many FreeBSD drivers deliberately omit runtime PM for this reason; they let the device stay in D0 and rely on the device's internal low-power states (clock gating, PCIe ASPM) to save power. That is a defensible choice, and for drivers where correctness matters more than milliwatts, it is the right one.
+第二个权衡在代码复杂性方面。运行时PM添加状态机、callout、空闲监视器、两个额外类kobj助手，以及运行时和系统PM路径之间的额外排序关注。每个都很小，但它们一起增加了错误的攻击面。许多FreeBSD驱动因此故意省略运行时PM；它们让设备保持在D0并依赖设备自身的内部低功耗状态（时钟门控、PCIe ASPM）来节能。这是一个可辩护的选择，对于正确性比毫瓦更重要的驱动，这是正确的选择。
 
-Chapter 22's `myfirst` driver keeps runtime PM as an optional feature, gated by a build-time flag:
+第22章的`myfirst`驱动将运行时PM保持为可选功能，由构建时标志控制：
 
 ```make
 CFLAGS+= -DMYFIRST_ENABLE_RUNTIME_PM
 ```
 
-A reader can build with or without the flag; the Section 5 code is only compiled in when the flag is defined. The default for Stage 3 is to leave runtime PM off; Stage 4 enables it in the consolidated driver.
+读者可以在有或没有该标志的情况下构建；第5节代码仅在定义标志时编译。第3阶段的默认是关闭运行时PM；第4阶段在合并驱动中启用它。
 
-### A Word on Platform Runtime PM
+### 关于平台运行时PM的说明
 
-Some platforms provide their own runtime-PM mechanism alongside the driver-local one. On arm64 and RISC-V embedded systems, the device tree may describe `power-domains` and `clocks` properties that the driver uses to turn off power domains and gate clocks. FreeBSD's `ext_resources/clk`, `ext_resources/regulator`, and `ext_resources/power` subsystems handle these.
+一些平台在驱动本地的运行时PM之外提供自己的运行时PM机制。在arm64和RISC-V嵌入式系统上，设备树可能描述`power-domains`和`clocks`属性，驱动使用它们关闭电源域和门控时钟。FreeBSD的`ext_resources/clk`、`ext_resources/regulator`和`ext_resources/power`子系统处理这些。
 
-Runtime PM on such a platform is more capable than PCI-only runtime PM because the platform can turn off entire SoC blocks (a USB controller, a display engine, a GPU) rather than just moving the PCI device to D3. The driver uses the same pattern (mark idle, turn off resources on idle, turn back on for activity) but through different APIs.
+此类平台上的运行时PM比仅PCI的运行时PM更强大，因为平台可以关闭整个SoC块（USB控制器、显示引擎、GPU）而不仅仅是将PCI设备移到D3。驱动使用相同的模式（标记空闲、空闲时关闭资源、活动时重新开启）但通过不同的API。
 
-Chapter 22 stays with the PCI path because that is where the `myfirst` driver lives. A reader who later works on an embedded platform will find the same conceptual structure with platform-specific APIs. The chapter mentions the distinction here so the reader knows the territory exists.
+第22章停留在PCI路径上，因为那是`myfirst`驱动所在。之后在嵌入式平台上工作的读者会发现相同的概念结构和平台特定API。本章在此提及区别，以便读者知道该领域存在。
 
-### Wrapping Up Section 5
+### 第5节收尾
 
-Section 5 added runtime power management to the driver. It defined a two-state machine (`RUNNING`, `RUNTIME_SUSPENDED`), a callout-based idle watcher, a pair of helpers (`myfirst_runtime_suspend`, `myfirst_runtime_resume`) that use the PCI layer's explicit power-state and state-save APIs, the activity-recording hooks in the DMA sysctl handlers, and the sysctl knobs that expose the policy to user space. It also discussed the interaction between runtime PM and system PM, the latency-vs-power tradeoff, and the alternative of platform-level runtime PM on embedded systems.
+第5节为驱动添加了运行时电源管理。它定义了两状态机（`RUNNING`、`RUNTIME_SUSPENDED`）、基于callout的空闲监视器、使用PCI层显式电源状态和状态保存API的一对助手（`myfirst_runtime_suspend`、`myfirst_runtime_resume`）、DMA sysctl处理器中的活动记录钩子，以及向用户空间暴露策略的sysctl旋钮。它还讨论了运行时PM和系统PM之间的交互、延迟与功耗的权衡，以及嵌入式系统上平台级运行时PM的替代方案。
 
-With Sections 2 through 5 in place, the driver now handles system suspend, system resume, system shutdown, runtime suspend, and runtime resume. What it does not yet do cleanly is explain how the reader tests all of these from user space. Section 6 turns to the user-space interface: `acpiconf`, `zzz`, `devctl suspend`, `devctl resume`, `devinfo -v`, and the regression test that wraps them together.
+第2到5节就位后，驱动现在处理系统挂起、系统恢复、系统关机、运行时挂起和运行时恢复。它尚未干净地解释的是读者如何从用户空间测试所有这些。第6节转向用户空间接口：`acpiconf`、`zzz`、`devctl suspend`、`devctl resume`、`devinfo -v`，以及将它们组合在一起的回归测试。
 
 
 
-## Section 6: 与电源框架交互
+## 第6节：与电源框架交互
 
-A driver that handles suspend and resume correctly is only half of the story. The other half is being able to *test* that correctness, repeatedly and deliberately, from user space. Section 6 surveys the tools FreeBSD provides for that purpose, explains how each fits the driver's state model, and shows how to combine them into a regression script that exercises every path Sections 2 through 5 built.
+正确处理挂起和恢复的驱动只是故事的一半。另一半是能够从用户空间*测试*这种正确性，重复地、有目的地。第6节调查FreeBSD为此目的提供的工具，解释每个如何适合驱动的状态模型，并展示如何将它们组合成回归脚本，练习第2到5节构建的每条路径。
 
-### The Four User-Space Entry Points
+### 四个用户空间入口点
 
-Four commands cover almost everything a driver developer needs:
+四个命令几乎覆盖驱动开发者需要的一切：
 
-- **`acpiconf -s 3`** (and its variants) asks ACPI to put the whole system into sleep state S3. This is the most realistic test; it exercises the full path from user space through the kernel's suspend machinery through the PCI layer to the driver's methods.
-- **`zzz`** is a thin wrapper around `acpiconf -s 3`. It reads `hw.acpi.suspend_state` (defaulting to S3) and enters the corresponding sleep state. For most users it is the most convenient way to suspend from a shell.
-- **`devctl suspend myfirst0`** and **`devctl resume myfirst0`** trigger per-device suspend and resume through the `DEV_SUSPEND` and `DEV_RESUME` ioctls on `/dev/devctl2`. These only call the driver's methods; the rest of the system stays in S0. This is the fastest iteration target and what Chapter 22 uses for most development.
-- **`devinfo -v`** lists all devices in the device tree with their current state. It shows whether a device is attached, suspended, or detached.
+- **`acpiconf -s 3`**（及其变体）请求ACPI将整个系统置入睡眠状态S3。这是最真实的测试；它练习从用户空间通过内核挂起机制通过PCI层到驱动方法的完整路径。
+- **`zzz`**是`acpiconf -s 3`的薄包装器。它读取`hw.acpi.suspend_state`（默认为S3）并进入相应的睡眠状态。对于大多数用户，它是从shell挂起最方便的方式。
+- **`devctl suspend myfirst0`**和**`devctl resume myfirst0`**通过`/dev/devctl2`上的`DEV_SUSPEND`和`DEV_RESUME` ioctl触发每设备挂起和恢复。这些仅调用驱动的方法；系统其余部分保持在S0。这是最快的迭代目标，也是第22章大部分开发使用的。
+- **`devinfo -v`**列出设备树中所有设备及其当前状态。它显示设备是已挂载、已挂起还是已分离。
 
-Each has strengths and weaknesses. `acpiconf` is realistic but slow (one to three seconds per cycle on typical hardware) and disruptive (the system actually sleeps). `devctl` is fast (milliseconds per cycle) but exercises only the driver, not the ACPI or platform code. `devinfo -v` is passive and cheap; it observes without changing state.
+每个都有优缺点。`acpiconf`真实但慢（典型硬件上每个周期一到三秒）且具有破坏性（系统实际睡眠）。`devctl`快（每个周期毫秒）但仅练习驱动，不练习ACPI或平台代码。`devinfo -v`是被动的且廉价的；它观察而不改变状态。
 
-A good regression strategy uses all three: `devctl` for unit testing of the driver's methods, `acpiconf` for integration testing of the full suspend path, and `devinfo -v` as a quick sanity check.
+好的回归策略使用所有三个：`devctl`用于驱动方法的单元测试，`acpiconf`用于完整挂起路径的集成测试，`devinfo -v`用于快速健全性检查。
 
-### Using acpiconf to Suspend the System
+### 使用acpiconf挂起系统
 
-On a machine with working ACPI, `acpiconf -s 3` is what Section 1 called a full system suspend. The command:
+在有正常ACPI的机器上，`acpiconf -s 3`是第1节所称的完整系统挂起。命令：
 
 ```sh
 sudo acpiconf -s 3
 ```
 
-does the following:
+执行以下步骤：
 
-1. It opens `/dev/acpi` and checks that the platform supports S3 via the `ACPIIO_ACKSLPSTATE` ioctl.
-2. It sends the `ACPIIO_REQSLPSTATE` ioctl to request S3.
-3. The kernel begins the suspend sequence: paused userland, frozen threads, device tree traversal with `DEVICE_SUSPEND` on each device.
-4. Assuming no driver vetoes, the kernel enters S3. The machine sleeps.
-5. A wake event (the lid opens, the power button is pressed, a USB device sends a remote-wakeup signal) wakes the platform.
-6. The kernel runs the resume sequence: `DEVICE_RESUME` on each device, unfreezing threads, resuming userland.
-7. The shell prompt returns. The machine is back in S0.
+1. 打开`/dev/acpi`并通过`ACPIIO_ACKSLPSTATE` ioctl检查平台是否支持S3。
+2. 发送`ACPIIO_REQSLPSTATE` ioctl请求S3。
+3. 内核开始挂起序列：暂停用户态、冻结线程、以`DEVICE_SUSPEND`遍历设备树的每个设备。
+4. 假设没有驱动否决，内核进入S3。机器睡眠。
+5. 唤醒事件（盖子打开、电源按钮按下、USB设备发送远程唤醒信号）唤醒平台。
+6. 内核运行恢复序列：在每个设备上`DEVICE_RESUME`，解冻线程，恢复用户态。
+7. shell提示符返回。机器回到S0。
 
-For the `myfirst` driver to be exercised, the driver must be loaded before the suspend. The entire sequence from user perspective looks like:
+要使`myfirst`驱动被测试，驱动必须在挂起之前加载。从用户角度看完整序列如下：
 
 ```sh
 sudo kldload ./myfirst.ko
-sudo sysctl dev.myfirst.0.dma_test_read=1  # exercise it a bit
+sudo sysctl dev.myfirst.0.dma_test_read=1  # 稍微锻炼一下
 sudo acpiconf -s 3
-# [laptop sleeps; user opens lid]
+# [笔记本睡眠；用户打开盖子]
 dmesg | grep myfirst
 ```
 
-The `dmesg` output should show two lines from Chapter 22's logging:
+`dmesg`输出应显示第22章日志记录的两行：
 
 ```text
 myfirst0: suspend: starting
@@ -1763,64 +1762,64 @@ myfirst0: resume: starting
 myfirst0: resume: complete
 ```
 
-If those lines are present and in that order, the driver's methods were called correctly by the full system path.
+如果这些行存在且按此顺序，驱动的方法已被完整系统路径正确调用。
 
-If the machine does not come back, the suspend path broke at some layer below `myfirst`. If the machine comes back but the driver is in a strange state (the sysctls return errors, the counters have strange values, DMA transfers fail), the problem is in `myfirst`'s suspend or resume implementation.
+如果机器未回来，挂起路径在`myfirst`之下的某层中断。如果机器回来了但驱动处于奇怪状态（sysctl返回错误、计数器有奇怪值、DMA传输失败），问题在`myfirst`的挂起或恢复实现中。
 
-### Using zzz
+### 使用zzz
 
-On FreeBSD, `zzz` is a small shell script that reads `hw.acpi.suspend_state` and calls `acpiconf -s <state>`. It is not a binary; it is usually installed at `/usr/sbin/zzz` and is a few lines long. A typical invocation is:
+在FreeBSD上，`zzz`是一个小型shell脚本，读取`hw.acpi.suspend_state`并调用`acpiconf -s <state>`。它不是二进制文件；通常安装在`/usr/sbin/zzz`，只有几行长。典型调用是：
 
 ```sh
 sudo zzz
 ```
 
-The default `hw.acpi.suspend_state` is `S3` on machines that support it. A reader who wants to test S4 (hibernate) can:
+在支持S3的机器上，默认`hw.acpi.suspend_state`是`S3`。想要测试S4（休眠）的读者可以：
 
 ```sh
 sudo sysctl hw.acpi.suspend_state=S4
 sudo zzz
 ```
 
-S4 support on FreeBSD has historically been partial; whether it works depends on the platform firmware and the filesystem layout. For Chapter 22's purposes, S3 is sufficient, and `zzz` is the convenient shorthand.
+FreeBSD上的S4支持历史上一直不完整；是否工作取决于平台固件和文件系统布局。对于第22章的目的，S3足够了，`zzz`是方便的简写。
 
-### Using devctl for Per-Device Suspend
+### 使用devctl进行每设备挂起
 
-The `devctl(8)` command was built to let a user manipulate the device tree from user space. It supports attach, detach, enable, disable, suspend, resume, and more. For Chapter 22, `suspend` and `resume` are the two that matter.
+`devctl(8)`命令是为了让用户从用户空间操作设备树而构建的。它支持挂载、分离、启用、禁用、挂起、恢复等。对于第22章，`suspend`和`resume`是两个重要的。
 
 ```sh
 sudo devctl suspend myfirst0
 sudo devctl resume myfirst0
 ```
 
-The first command issues `DEV_SUSPEND` through `/dev/devctl2`; the kernel translates that into a call to `BUS_SUSPEND_CHILD` on the parent bus, which for a PCI device ends up calling `pci_suspend_child`, which saves config space, puts the device in D3, and calls the driver's `DEVICE_SUSPEND`. The reverse happens for resume.
+第一个命令通过`/dev/devctl2`发出`DEV_SUSPEND`；内核将其转换为在父总线上调用`BUS_SUSPEND_CHILD`，对于PCI设备最终调用`pci_suspend_child`，它保存配置空间、将设备放入D3、并调用驱动的`DEVICE_SUSPEND`。恢复时反向发生。
 
-The key differences from `acpiconf`:
+与`acpiconf`的主要区别：
 
-- Only the target device and its children go through the transition. The rest of the system stays in S0.
-- The CPU does not park. Userland does not freeze. The kernel does not sleep.
-- The PCI device actually goes to D3hot (assuming `hw.pci.do_power_suspend` is 1). The reader can verify with `pciconf`:
+- 只有目标设备及其子设备经历转换。系统其余部分保持在S0。
+- CPU不停车。用户态不冻结。内核不睡眠。
+- PCI设备实际进入D3hot（假设`hw.pci.do_power_suspend`为1）。读者可以用`pciconf`验证：
 
 ```sh
-# Before suspend: device should be in D0
+# 挂起前：设备应在D0
 pciconf -lvbc | grep -A 2 myfirst
 
-# After devctl suspend myfirst0: device should be in D3
+# devctl suspend myfirst0后：设备应在D3
 sudo devctl suspend myfirst0
 pciconf -lvbc | grep -A 2 myfirst
 ```
 
-The power state is usually shown in the `powerspec` line of `pciconf -lvbc`. Moving from `D0` to `D3` is the observable signal that the transition really happened.
+电源状态通常在`pciconf -lvbc`的`powerspec`行中显示。从`D0`到`D3`的变化是转换真正发生的可观察信号。
 
-### Using devinfo to Inspect Device State
+### 使用devinfo检查设备状态
 
-The `devinfo(8)` utility lists the device tree with various levels of detail. The `-v` flag shows verbose information, including the device state (attached, suspended, or not present).
+`devinfo(8)`工具以各种详细程度列出设备树。`-v`标志显示详细信息，包括设备状态（已挂载、已挂起或不存在）。
 
 ```sh
 devinfo -v | grep -A 5 myfirst
 ```
 
-Typical output:
+典型输出：
 
 ```text
 myfirst0 pnpinfo vendor=0x1af4 device=0x1005 subvendor=0x1af4 subdevice=0x0004 class=0x008880 at slot=5 function=0 dbsf=pci0:0:5:0
@@ -1830,22 +1829,22 @@ myfirst0 pnpinfo vendor=0x1af4 device=0x1005 subvendor=0x1af4 subdevice=0x0004 c
         0xfeb80000-0xfeb80fff
 ```
 
-The state is implicit in the output: if the device is suspended, the line shows the device and its resources without the "active" marker. An explicit state query can be done through the softc sysctl; the `dev.myfirst.0.%parent` and `dev.myfirst.0.%desc` keys tell the user where the device sits.
+状态在输出中是隐含的：如果设备已挂起，该行显示设备及其资源但没有"active"标记。显式状态查询可以通过softc sysctl完成；`dev.myfirst.0.%parent`和`dev.myfirst.0.%desc`键告诉用户设备在哪里。
 
-For Chapter 22, `devinfo -v` is most useful as a sanity check after a failed transition: if the device is missing from the output, the detach path ran; if the device is present but the resources are wrong, the attach or resume path left the device in an inconsistent state.
+对于第22章，`devinfo -v`作为失败转换后的健全性检查最有用：如果设备从输出中缺失，分离路径已运行；如果设备存在但资源错误，挂载或恢复路径将设备留在了不一致状态。
 
-### Inspecting Power States Through sysctl
+### 通过sysctl检查电源状态
 
-The PCI layer exposes power-state information through `sysctl` under `hw.pci`. Two variables are most relevant:
+PCI层通过`hw.pci`下的`sysctl`暴露电源状态信息。两个变量最相关：
 
 ```sh
 sysctl hw.pci.do_power_suspend
 sysctl hw.pci.do_power_resume
 ```
 
-Both default to 1, meaning the PCI layer transitions devices to D3 on suspend and back to D0 on resume. Setting either to 0 disables the automatic transition for debugging.
+两者默认为1，意味着PCI层在挂起时将设备转换到D3，在恢复时转回D0。将任一设为0可禁用自动转换用于调试。
 
-The ACPI layer exposes system-state information:
+ACPI层暴露系统状态信息：
 
 ```sh
 sysctl hw.acpi.supported_sleep_state
@@ -1853,36 +1852,36 @@ sysctl hw.acpi.suspend_state
 sysctl hw.acpi.s4bios
 ```
 
-The first lists which sleep states the platform supports (typically something like `S3 S4 S5`). The second is the state `zzz` enters (usually `S3`). The third says whether S4 is implemented through BIOS assistance.
+第一个列出平台支持哪些睡眠状态（通常类似`S3 S4 S5`）。第二个是`zzz`进入的状态（通常是`S3`）。第三个表明S4是否通过BIOS辅助实现。
 
-For per-device observation, the driver exposes its own state through `dev.myfirst.N.*`. The Chapter 22 driver adds:
+对于每设备观察，驱动通过`dev.myfirst.N.*`暴露自己的状态。第22章驱动添加：
 
-- `dev.myfirst.N.suspended`: 1 if the driver considers itself suspended, 0 otherwise.
-- `dev.myfirst.N.power_suspend_count`: number of times `DEVICE_SUSPEND` has been called.
-- `dev.myfirst.N.power_resume_count`: number of times `DEVICE_RESUME` has been called.
-- `dev.myfirst.N.power_shutdown_count`: number of times `DEVICE_SHUTDOWN` has been called.
-- `dev.myfirst.N.runtime_state`: 0 for `RUNNING`, 1 for `RUNTIME_SUSPENDED`.
-- `dev.myfirst.N.runtime_suspend_count`, `dev.myfirst.N.runtime_resume_count`: runtime-PM counters.
-- `dev.myfirst.N.idle_threshold_seconds`: runtime-PM idle threshold.
+- `dev.myfirst.N.suspended`：如果驱动认为自身已挂起则为1，否则为0。
+- `dev.myfirst.N.power_suspend_count`：`DEVICE_SUSPEND`被调用的次数。
+- `dev.myfirst.N.power_resume_count`：`DEVICE_RESUME`被调用的次数。
+- `dev.myfirst.N.power_shutdown_count`：`DEVICE_SHUTDOWN`被调用的次数。
+- `dev.myfirst.N.runtime_state`：0表示`RUNNING`，1表示`RUNTIME_SUSPENDED`。
+- `dev.myfirst.N.runtime_suspend_count`、`dev.myfirst.N.runtime_resume_count`：运行时PM计数器。
+- `dev.myfirst.N.idle_threshold_seconds`：运行时PM空闲阈值。
 
-Between these sysctls and `dmesg`, a reader can see in full detail what the driver did during any transition.
+在这些sysctl和`dmesg`之间，读者可以完全详细地看到驱动在任何转换期间做了什么。
 
-### A Regression Script
+### 回归脚本
 
-The labs directory grows a new script: `ch22-suspend-resume-cycle.sh`. The script:
+labs目录新增一个脚本：`ch22-suspend-resume-cycle.sh`。该脚本：
 
-1. Records the baseline values of every counter.
-2. Runs one DMA transfer to confirm the device is working.
-3. Calls `devctl suspend myfirst0`.
-4. Verifies `dev.myfirst.0.suspended` is 1.
-5. Verifies `dev.myfirst.0.power_suspend_count` has incremented by 1.
-6. Calls `devctl resume myfirst0`.
-7. Verifies `dev.myfirst.0.suspended` is 0.
-8. Verifies `dev.myfirst.0.power_resume_count` has incremented by 1.
-9. Runs one more DMA transfer to confirm the device still works.
-10. Prints a PASS/FAIL summary.
+1. 记录每个计数器的基线值。
+2. 运行一次DMA传输确认设备正常工作。
+3. 调用`devctl suspend myfirst0`。
+4. 验证`dev.myfirst.0.suspended`为1。
+5. 验证`dev.myfirst.0.power_suspend_count`增加了1。
+6. 调用`devctl resume myfirst0`。
+7. 验证`dev.myfirst.0.suspended`为0。
+8. 验证`dev.myfirst.0.power_resume_count`增加了1。
+9. 再运行一次DMA传输确认设备仍然正常工作。
+10. 打印PASS/FAIL摘要。
 
-The full script is in the examples directory; a short outline of the logic:
+完整脚本在examples目录中；逻辑的简要大纲：
 
 ```sh
 #!/bin/sh
@@ -1939,11 +1938,11 @@ fi
 echo "PASS: one suspend-resume cycle completed cleanly"
 ```
 
-Running the script repeatedly (say a hundred times in a tight loop) is a good stress test. A driver that passes one cycle but fails on the fiftieth usually has a resource leak or an edge case that only shows up under repetition. That class of bug is exactly what a regression script is meant to find.
+重复运行脚本（比如在紧凑循环中运行一百次）是很好的压力测试。通过一次循环但在第五十次失败的驱动通常有资源泄漏或仅在重复下才出现的边缘情况。这类错误正是回归脚本要发现的。
 
-### Running the Stress Test
+### 运行压力测试
 
-The chapter's `labs/` directory also includes `ch22-suspend-stress.sh`, which runs the cycle script a hundred times:
+本章的`labs/`目录还包括`ch22-suspend-stress.sh`，它将循环脚本运行一百次：
 
 ```sh
 #!/bin/sh
@@ -1959,11 +1958,11 @@ done
 echo "PASS: $N cycles"
 ```
 
-On a modern machine with the simulation-only myfirst driver, a hundred cycles takes about a second. If any iteration fails, the script stops and reports the iteration number. Running this after each change during development catches regressions immediately.
+在带仅模拟myfirst驱动的现代机器上，一百次循环大约需要一秒。如果任何迭代失败，脚本停止并报告迭代号。在开发期间每次更改后运行它可以立即捕获回归。
 
-### Combining Runtime PM and User-Space Testing
+### 结合运行时PM和用户空间测试
 
-The runtime-PM path needs a different test, because it is not triggered by user commands; it is triggered by idleness. The test looks like:
+运行时PM路径需要不同的测试，因为它不是由用户命令触发的；它是由空闲触发的。测试如下：
 
 ```sh
 # Ensure runtime_state is running.
@@ -1990,96 +1989,96 @@ sysctl dev.myfirst.0.runtime_resume_count
 # 1
 ```
 
-A reader watching `dmesg` during this will see the "runtime suspend: starting" and "runtime suspend: device in D3" lines after about five seconds of inactivity, then "runtime resume: starting" when the sysctl write arrives.
+在此期间观察`dmesg`的读者会在大约五秒不活动后看到"runtime suspend: starting"和"runtime suspend: device in D3"行，然后在sysctl写入到达时看到"runtime resume: starting"。
 
-The chapter's lab directory includes `ch22-runtime-pm.sh` to automate this sequence.
+本章的lab目录包含`ch22-runtime-pm.sh`来自动化此序列。
 
-### Interpreting Failure Modes
+### 解释失败模式
 
-When a user-space test fails, the diagnostic path depends on which layer failed:
+当用户空间测试失败时，诊断路径取决于哪一层失败：
 
-- **If `devctl suspend` returns a non-zero exit code**: the driver's `DEVICE_SUSPEND` returned a non-zero value, vetoing the suspend. Check `dmesg` for the driver's log output; the suspend method should be logging what went wrong.
-- **If `devctl suspend` succeeds but `dev.myfirst.0.suspended` is 0 afterwards**: the driver's quiesce set the flag briefly but something cleared it. This usually means the quiesce is re-entering itself, or the detach path is racing the suspend.
-- **If `devctl resume` succeeds but the next transfer fails**: the restore path did not fully reinitialise the device. Most commonly, an interrupt mask or a DMA register was not written; check the per-vector fire counters before and after resume to see whether interrupts are reaching the driver.
-- **If `acpiconf -s 3` succeeds but the system does not come back**: a driver below `myfirst` in the tree is blocking resume. This is unusual in a test VM; it is the classic failure mode on real hardware with new drivers.
-- **If `acpiconf -s 3` returns `EOPNOTSUPP`**: the platform does not support S3. Check `sysctl hw.acpi.supported_sleep_state`.
+- **如果`devctl suspend`返回非零退出码**：驱动的`DEVICE_SUSPEND`返回了非零值，否决了挂起。检查`dmesg`中驱动的日志输出；挂起方法应该记录了出了什么问题。
+- **如果`devctl suspend`成功但之后`dev.myfirst.0.suspended`为0**：驱动的静默短暂设置了标志但某物清除了它。这通常意味着静默正在重入自身，或分离路径在与挂起竞争。
+- **如果`devctl resume`成功但下一次传输失败**：恢复路径没有完全重新初始化设备。最常见的是中断掩码或DMA寄存器未被写入；检查恢复前后的每向量触发计数器以查看中断是否到达驱动。
+- **如果`acpiconf -s 3`成功但系统没有回来**：设备树中`myfirst`下面的某个驱动阻止了恢复。这在测试VM中不常见；这是真实硬件上新驱动的典型故障模式。
+- **如果`acpiconf -s 3`返回`EOPNOTSUPP`**：平台不支持S3。检查`sysctl hw.acpi.supported_sleep_state`。
 
-In all cases, the first source of information is `dmesg`. The Chapter 22 driver logs every transition; if the log lines do not appear, the method was not called, and the problem is at a layer below the driver.
+在所有情况下，第一个信息来源是`dmesg`。第22章驱动记录每个转换；如果日志行未出现，方法未被调用，问题在驱动以下的层。
 
-### A Minimal Troubleshooting Flow
+### 最小故障排除流程
 
-A compact flowchart for a failed suspend-resume cycle:
+失败挂起-恢复周期的紧凑流程图：
 
-1. Is the driver loaded? `kldstat | grep myfirst`.
-2. Is the device attached? `sysctl dev.myfirst.0.%driver`.
-3. Do the suspend and resume methods log? `dmesg | tail`.
-4. Did `dev.myfirst.0.suspended` toggle correctly? `sysctl dev.myfirst.0.suspended`.
-5. Do the counters increment? `sysctl dev.myfirst.0.power_suspend_count dev.myfirst.0.power_resume_count`.
-6. Does a post-resume transfer succeed? `sudo sysctl dev.myfirst.0.dma_test_read=1; dmesg | tail -2`.
-7. Do the per-vector interrupt counters increment? `sysctl dev.myfirst.0.vec0_fire_count dev.myfirst.0.vec1_fire_count dev.myfirst.0.vec2_fire_count`.
+1. 驱动已加载吗？`kldstat | grep myfirst`。
+2. 设备已挂载吗？`sysctl dev.myfirst.0.%driver`。
+3. 挂起和恢复方法有日志吗？`dmesg | tail`。
+4. `dev.myfirst.0.suspended`正确切换了吗？`sysctl dev.myfirst.0.suspended`。
+5. 计数器增加了吗？`sysctl dev.myfirst.0.power_suspend_count dev.myfirst.0.power_resume_count`。
+6. 恢复后传输成功吗？`sudo sysctl dev.myfirst.0.dma_test_read=1; dmesg | tail -2`。
+7. 每向量中断计数器增加了吗？`sysctl dev.myfirst.0.vec0_fire_count dev.myfirst.0.vec1_fire_count dev.myfirst.0.vec2_fire_count`。
 
-Any "no" answer points to a specific layer of the implementation. Section 7 goes deeper into the common failure modes and how to debug them.
+任何"否"答案指向实现的特定层。第7节更深入地讨论常见故障模式及如何调试它们。
 
-### Wrapping Up Section 6
+### 第6节收尾
 
-Section 6 surveyed the user-space interface to the kernel's power-management machinery: `acpiconf`, `zzz`, `devctl suspend`, `devctl resume`, `devinfo -v`, and the relevant `sysctl` variables. It showed how to combine these tools into a regression script that exercises one suspend-resume cycle, and a stress script that runs a hundred cycles in a row. It discussed the runtime-PM test flow, the interpretation of the most common failure modes, and the minimal troubleshooting flowchart a reader can follow when a test fails.
+第6节调查了内核电源管理机制的用户空间接口：`acpiconf`、`zzz`、`devctl suspend`、`devctl resume`、`devinfo -v`和相关`sysctl`变量。它展示了如何将这些工具组合成练习一次挂起-恢复周期的回归脚本，以及连续运行一百个周期的压力脚本。它讨论了运行时PM测试流程、最常见故障模式的解释，以及测试失败时读者可以遵循的最小故障排除流程图。
 
-With the user-space tools in hand, the next section dives into the characteristic failure modes the reader is likely to encounter while writing power-aware code, and how to debug each one.
+有了用户空间工具，下一节深入探讨读者在编写电源感知代码时可能遇到的典型故障模式，以及如何调试每种故障。
 
 
 
-## Section 7: 调试电源管理问题
+## 第7节：调试电源管理问题
 
-Power management code has a special class of bugs. The machine sleeps; the machine wakes; the bug shows up an unknown time after the wake and looks like a generic malfunction rather than anything related to the power transition. The chain of cause and effect is longer than with most driver bugs, the reproduction is slower, and the user's bug report is usually "my laptop doesn't wake up sometimes", which contains almost no information the driver developer can use.
+电源管理代码有一类特殊的错误。机器睡眠；机器唤醒；错误在唤醒后未知时间出现，看起来像通用故障而非与电源转换相关的任何东西。因果链比大多数驱动错误更长，重现更慢，用户的错误报告通常是"我的笔记本有时无法唤醒"，其中几乎不包含驱动开发者可以使用的信息。
 
-Section 7 is about recognising the characteristic symptoms, tracing them back to their likely causes, and applying the matching debugging patterns. It draws on the Chapter 22 `myfirst` driver for concrete examples, but the patterns apply to any FreeBSD driver.
+第7节关于识别典型症状、将其追溯到可能原因，并应用匹配的调试模式。它以第22章`myfirst`驱动为例，但模式适用于任何FreeBSD驱动。
 
 ### Symptom 1: 恢复后设备冻结
 
-The most common power-management bug, both in learning drivers and in production ones, is a device that stops responding after resume. The driver attaches correctly at boot, works normally in S0, handles a suspend-resume cycle without visible error, and then on the next command it is silent. Interrupts do not fire. DMA transfers do not complete. Any read from a device register returns stale values or zeros.
+最常见的电源管理错误，无论在学习驱动还是生产驱动中，都是恢复后设备停止响应。驱动在启动时正确挂载，在S0中正常工作，处理挂起-恢复周期没有可见错误，然后在下一个命令时沉默。中断不触发。DMA传输不完成。从设备寄存器读取返回陈旧值或零。
 
-The usual cause is that the device's registers were not written after resume. The device came back in a default state (interrupt mask all-masked, DMA engine disabled, whatever registers the hardware resets on D0 entry), the driver did not reprogram them, and so from the device's perspective nothing is configured to run.
+通常原因是恢复后设备寄存器未被写入。设备以默认状态回来（中断掩码全掩码、DMA引擎禁用、硬件在D0入口时重置的任何寄存器），驱动未重新编程它们，所以从设备角度看没有配置运行的东西。
 
-**Debugging pattern.** Compare the device's register values before and after suspend. The `myfirst` driver exposes several of its registers through sysctls (if the reader adds them); otherwise, the reader can write a short kernel-space helper that reads each register and prints it. After a suspend-resume cycle:
+**调试模式。** 比较挂起前后的设备寄存器值。`myfirst`驱动通过sysctl暴露几个寄存器（如果读者添加了它们）；否则，读者可以写一个短内核空间助手读取每个寄存器并打印。在挂起-恢复周期后：
 
-1. Read the interrupt mask register. If it is `0xFFFFFFFF` (all masked), the resume path did not restore the mask.
-2. Read the DMA control register. If it has the ABORT bit set, the abort from the quiesce never cleared.
-3. Read the device's configuration space via `pciconf -lvbc`. The command register should have the bus-master bit set; if not, `pci_enable_busmaster` was missed in the resume path.
+1. 读取中断掩码寄存器。如果是`0xFFFFFFFF`（全掩码），恢复路径未恢复掩码。
+2. 读取DMA控制寄存器。如果ABORT位已设置，静默的中止从未清除。
+3. 通过`pciconf -lvbc`读取设备的配置空间。命令寄存器应有总线主控位设置；如果没有，恢复路径遗漏了`pci_enable_busmaster`。
 
-**Fix pattern.** The resume path should include an unconditional reprogram of every device-specific register the driver's normal operation depends on. Saving them at suspend time into the softc and restoring them at resume time is one approach; re-deriving them from softc state (the approach `re_resume` takes) is another. Either works; the choice depends on which is easier to prove correct for the specific device.
+**修复模式。** 恢复路径应包括驱动正常操作依赖的每个设备特定寄存器的无条件重编程。在挂起时将它们保存到softc并在恢复时恢复是一种方法；从softc状态重新派生（`re_resume`采取的方法）是另一种。两者都有效；选择取决于哪个更容易为特定设备证明正确。
 
-### Symptom 2: Lost Interrupts
+### 症状2：丢失中断
 
-A subtler variant of the frozen-device problem is lost interrupts: the device is responding to some calls, but its interrupts are not reaching the driver. The DMA engine accepts a START command, performs the transfer, raises the completion interrupt... and the interrupt count does not increment. The task queue does not get an entry. The CV does not broadcast. The transfer eventually times out, and the driver reports EIO.
+冻结设备问题的更微妙变体是丢失中断：设备响应某些调用，但其中断未到达驱动。DMA引擎接受START命令，执行传输，引发完成中断……而中断计数不递增。任务队列未获得条目。CV不广播。传输最终超时，驱动报告EIO。
 
-Several things can cause this:
+几种事情可能导致这个：
 
-- The **interrupt mask** at the device is still all-masked. The device wants to raise the interrupt but the mask suppresses it. (Resume path bug.)
-- The **MSI or MSI-X configuration** was not restored. The device is raising the interrupt, but the kernel does not route it to the driver's handler. (Unusual; the PCI layer should handle this automatically.)
-- The **filter function pointer** was corrupted. Extremely unusual; usually indicates memory corruption somewhere else in the driver.
-- The **suspended flag** is still true, and the filter is returning early. (Resume path bug: flag not cleared.)
+- 设备处的**中断掩码**仍然全掩码。设备想要引发中断但掩码抑制了它。（恢复路径错误。）
+- **MSI或MSI-X配置**未被恢复。设备正在引发中断，但内核未将其路由到驱动的处理器。（不常见；PCI层应自动处理。）
+- **过滤器函数指针**被损坏。极不常见；通常指示驱动中其他地方的内存损坏。
+- **suspended标志**仍为true，过滤器提前返回。（恢复路径错误：标志未清除。）
 
-**Debugging pattern.** Read the per-vector fire counters before and after the suspend-resume cycle. If the counter does not increment, the interrupt is not reaching the filter. Then check, in order:
+**调试模式。** 读取挂起-恢复周期前后的每向量触发计数器。如果计数器未递增，中断未到达过滤器。然后按顺序检查：
 
-1. Is the suspended flag cleared? `sysctl dev.myfirst.0.suspended`.
-2. Is the interrupt mask at the device correct? Read the register.
-3. Is the MSI-X table in the device correct? `pciconf -c` dumps the capability registers.
-4. Is the kernel's MSI dispatch state consistent? `procstat -t` shows the interrupt threads.
+1. 挂起标志是否已清除？`sysctl dev.myfirst.0.suspended`。
+2. 设备处的中断掩码是否正确？读取寄存器。
+3. 设备中的MSI-X表是否正确？`pciconf -c`转储能力寄存器。
+4. 内核的MSI调度状态是否一致？`procstat -t`显示中断线程。
 
-**Fix pattern.** Make sure the resume path (a) clears the suspended flag under the lock, (b) unmasks the device's interrupt register after clearing the flag, (c) does not rely on MSI-X restoration the driver must do itself (unless specifically disabled via sysctl).
+**修复模式。** 确保恢复路径（a）在锁下清除挂起标志，（b）在清除标志后取消掩码设备的中断寄存器，（c）不依赖驱动必须自己做的MSI-X恢复（除非通过sysctl显式禁用）。
 
 ### Symptom 3: 恢复后DMA错误
 
-A more dangerous class of bug is DMA that appears to work but produces wrong data. The driver programs the engine, the engine runs, the completion interrupt fires, the task runs, the sync is called, the driver reads the buffer... and the bytes are wrong. Not zeros, not garbage, just subtly incorrect: the pattern written previously, or the pattern from two cycles ago, or a pattern that indicates the DMA addressed the wrong page.
+更危险的一类错误是DMA看起来正常工作但产生错误数据。驱动编程引擎，引擎运行，完成中断触发，任务运行，同步被调用，驱动读取缓冲区……但字节是错误的。不是零，不是垃圾，只是微妙地不正确：之前写入的模式，或两个周期前的模式，或指示DMA寻址错误页面的模式。
 
-Causes:
+原因：
 
-- The **bus address cached in the softc** is stale. This is unusual for a static allocation (the address is set once at attach and should not change), but it can happen if the driver re-allocates the DMA buffer at resume time (a bad idea; see below).
-- The **DMA engine's base-address register** was not reprogrammed after resume, and it has a stale value that points elsewhere.
-- The **`bus_dmamap_sync` calls are missing or mis-ordered**. This is the classic DMA-correctness bug, and it is worth being alert for in resume paths because the driver-side code adjacent to the sync calls is often edited during a refactor.
-- The **IOMMU translation table** was not restored. Very rare on FreeBSD because the IOMMU configuration is per-session and survives suspend on most platforms; but if the driver is running on a system where `DEV_IOMMU` is unusual, this can bite.
+- **softc中缓存的总线地址**过时了。这对于静态分配不常见（地址在挂载时设置一次不应改变），但如果驱动在恢复时重新分配DMA缓冲区（一个坏主意；见下文），可能发生。
+- 恢复后**DMA引擎的基址寄存器**未被重编程，它有过时值指向其他地方。
+- **`bus_dmamap_sync`调用缺失或顺序错误**。这是经典的DMA正确性错误，在恢复路径中值得警惕，因为同步调用附近的驱动侧代码在重构期间经常被编辑。
+- **IOMMU转换表**未被恢复。在FreeBSD上非常罕见，因为IOMMU配置是每会话的，在大多数平台上在挂起中存活；但如果驱动运行在`DEV_IOMMU`不常见的系统上，这可能发生。
 
-**Debugging pattern.** Add a known-pattern write before each DMA, a verify after each DMA, and log both. Reducing the cycle to "write 0xAA, sync, read, expect 0xAA" makes data-corruption bugs visible immediately.
+**调试模式。** 在每次DMA前添加已知模式写入，在每次DMA后验证，并记录两者。将周期简化为"写0xAA、同步、读、期望0xAA"使数据损坏错误立即可见。
 
 ```c
 memset(sc->dma_vaddr, 0xAA, MYFIRST_DMA_BUFFER_SIZE);
@@ -2092,9 +2091,9 @@ if (((uint8_t *)sc->dma_vaddr)[0] != 0xAA) {
 }
 ```
 
-For the simulation, this should always succeed because the simulation does not modify the buffer on a write transfer. On real hardware, the pattern depends on the device. A reader debugging a real-hardware bug adapts the test.
+对于模拟，这应始终成功因为模拟在写传输时不修改缓冲区。在真实硬件上，模式取决于设备。调试真实硬件错误的读者调整测试。
 
-**Fix pattern.** If the bus address is the problem, rebuild it on resume:
+**修复模式。** 如果总线地址是问题，在恢复时重建它：
 
 ```c
 /* In resume, after PCI restore is complete. */
@@ -2104,24 +2103,24 @@ err = bus_dmamap_load(sc->dma_tag, sc->dma_map,
     BUS_DMA_NOWAIT);
 ```
 
-Only do this if the bus address actually changed, which is rare. More commonly, the fix is to write the base-address register at the start of every transfer (rather than relying on a persistent value) and to make sure the sync calls are in the right order.
+只在总线地址实际改变时才这样做，这很罕见。更常见的是，修复是在每次传输开始时写入基址寄存器（而非依赖持久值）并确保同步调用顺序正确。
 
 ### Symptom 4: Lost PME# Wake Events
 
-On a device that supports wake-on-X, the symptom is "the device should have woken the system but did not". The driver reported a successful suspend; the system went to S3; the expected event (magic packet, button press, timer) happened; and the system stayed asleep.
+在支持wake-on-X的设备上，症状是"设备应该唤醒系统但没有"。驱动报告了成功挂起；系统进入S3；预期事件（魔法数据包、按钮按下、定时器）发生了；系统保持睡眠。
 
-Causes:
+原因：
 
-- **`pci_enable_pme` was not called** in the suspend path. The device's PME_En bit is 0, so even when the device would normally assert PME#, the bit is suppressed.
-- **The device's own wake logic is not configured**. For a NIC, the wake-on-LAN registers must be programmed before suspend. For a USB host controller, the remote-wakeup capability must be enabled per-port.
-- **The platform's wake GPE is not enabled**. This is usually a firmware matter; the ACPI `_PRW` method should have registered the GPE, but on some machines the BIOS disables it by default.
-- **The PME status bit is set at the time of suspend**, and a stale PME# is what triggers the wake (instead of the expected event). The system appears to wake immediately after sleeping.
+- 挂起路径中**未调用`pci_enable_pme`**。设备的PME_En位为0，所以即使设备通常会断言PME#，该位也被抑制。
+- **设备自身的唤醒逻辑未配置**。对于NIC，网络唤醒寄存器必须在挂起前编程。对于USB主机控制器，远程唤醒能力必须按端口启用。
+- **平台的唤醒GPE未启用**。这通常是固件事务；ACPI `_PRW`方法应已注册GPE，但在某些机器上BIOS默认禁用它。
+- **挂起时PME状态位已设置**，陈旧的PME#是触发唤醒的东西（而非预期事件）。系统看起来在睡眠后立即唤醒。
 
-**Debugging pattern.** Read the PCI configuration space via `pciconf -lvbc`. The power-management capability's status/control register shows PME_En and the PME_Status bit. Before suspending, PME_Status should be 0 (no pending wake). After suspending with wake enabled, PME_En should be 1.
+**调试模式。** 通过`pciconf -lvbc`读取PCI配置空间。电源管理能力的状态/控制寄存器显示PME_En和PME_Status位。挂起前，PME_Status应为0（无待处理唤醒）。启用唤醒挂起后，PME_En应为1。
 
-On a machine where the wake does not happen, check the BIOS settings for "wake on LAN", "wake on USB", etc. The driver can be perfect and the system still not wake if the platform is not configured.
+在唤醒未发生的机器上，检查BIOS设置中的"网络唤醒"、"USB唤醒"等。驱动可以完美但如果平台未配置系统仍不会唤醒。
 
-**Fix pattern.** In the suspend path of a wake-capable driver:
+**修复模式。** 在支持唤醒的驱动的挂起路径中：
 
 ```c
 static int
@@ -2154,63 +2153,63 @@ myfirst_pci_resume(device_t dev)
 }
 ```
 
-The `myfirst` driver in Chapter 22 does not implement wake (the simulation has no wake logic). The pattern above is shown for reference.
+第22章的`myfirst`驱动不实现唤醒（模拟没有唤醒逻辑）。上面的模式作为参考展示。
 
 ### Symptom 5: 挂起期间WITNESS警告
 
-A debug kernel with `WITNESS` enabled often produces messages like:
+启用`WITNESS`的调试内核经常产生如下消息：
 
 ```text
 witness: acquiring sleepable lock foo_mtx @ /path/to/driver.c:123
 witness: sleeping with non-sleepable lock bar_mtx @ /path/to/driver.c:456
 ```
 
-These are lock-order violations or sleep-while-locked violations, and they often show up in suspend code because suspend does things the driver does not normally do: acquire locks, sleep, and coordinate multiple threads.
+这些是锁顺序违规或持锁睡眠违规，它们经常在挂起代码中出现因为挂起做驱动通常不做的事情：获取锁、睡眠、协调多个线程。
 
-Causes:
+原因：
 
-- The suspend path acquires a lock and then calls a function that sleeps without explicit tolerance for sleeping-with-that-lock-held.
-- The suspend path acquires locks in a different order than the rest of the driver, and `WITNESS` notices the reversal.
-- The suspend path calls `taskqueue_drain` or `callout_drain` while holding the softc lock, which causes a deadlock if the task or callout tries to acquire the same lock.
+- 挂起路径获取锁然后调用在未显式容忍持该锁睡眠的情况下睡眠的函数。
+- 挂起路径以与驱动其余部分不同的顺序获取锁，`WITNESS`注意到逆转。
+- 挂起路径在持有softc锁时调用`taskqueue_drain`或`callout_drain`，如果任务或callout尝试获取同一个锁则导致死锁。
 
-**Debugging pattern.** Read the `WITNESS` message carefully. It includes the lock names and the source-line numbers where each was acquired. Trace the path from the acquisition to the sleep or lock reversal.
+**调试模式。** 仔细阅读`WITNESS`消息。它包括锁名称和每个被获取的源代码行号。跟踪从获取到睡眠或锁逆转的路径。
 
-**Fix pattern.** The Chapter 22 `myfirst_quiesce` drops the softc lock before calling `myfirst_drain_workers` for exactly this reason. When extending the driver:
+**修复模式。** 第22章的`myfirst_quiesce`正是因此原因在调用`myfirst_drain_workers`之前释放softc锁。扩展驱动时：
 
-- Do not call `taskqueue_drain` with any driver lock held.
-- Do not call `callout_drain` with the lock that the callout acquires.
-- Sleep primitives (`pause`, `cv_wait`) must be called with only sleep-mutexes held (not spin-mutexes).
-- If you need to drop a lock for a sleep, do so explicitly and reacquire after.
+- 不要在持有任何驱动锁时调用`taskqueue_drain`。
+- 不要在持有callout获取的锁时调用`callout_drain`。
+- 睡眠原语（`pause`、`cv_wait`）必须在仅持有睡眠互斥锁时调用（不是自旋互斥锁）。
+- 如果需要为睡眠释放锁，显式这样做并在之后重新获取。
 
-### Symptom 6: Counters That Do Not Match
+### 症状6：计数器不匹配
 
-The chapter's regression script expects `power_suspend_count == power_resume_count` after each cycle. When they drift, something is wrong.
+本章的回归脚本期望每个周期后`power_suspend_count == power_resume_count`。当它们漂移时，出了问题。
 
-Causes:
+原因：
 
-- The driver's `DEVICE_SUSPEND` was called but the driver returned early before incrementing the counter. (Often because of a sanity check that fired.)
-- The driver's `DEVICE_RESUME` was not called, because `DEVICE_SUSPEND` returned non-zero and the kernel unwound.
-- The counters are not atomic and a concurrent update lost an increment. (Unlikely if the code uses `atomic_add_64`.)
-- The driver was unloaded and reloaded between counts, resetting them.
+- 驱动的`DEVICE_SUSPEND`被调用但驱动在递增计数器之前提前返回。（通常是因为健全性检查触发了。）
+- 驱动的`DEVICE_RESUME`未被调用，因为`DEVICE_SUSPEND`返回非零且内核展开了。
+- 计数器不是原子的，并发更新丢失了一次递增。（如果代码使用`atomic_add_64`则不太可能。）
+- 驱动在计数之间被卸载并重新加载，重置了它们。
 
-**Debugging pattern.** Run the regression script with `dmesg -c` cleared beforehand, and `dmesg` after each cycle. The log shows every method invocation; counting the log lines is an alternative to counting the counters, and any difference indicates a bug.
+**调试模式。** 在运行回归脚本前清除`dmesg -c`，在每个周期后运行`dmesg`。日志显示每个方法调用；计数日志行是计数计数器的替代方案，任何差异指示错误。
 
-### Symptom 7: Hangs During Suspend
+### 症状7：挂起期间挂起
 
-A hang during suspend is the worst diagnostic: the kernel is still running (the console still responds to break-to-DDB), but the suspend sequence is stuck in some driver's `DEVICE_SUSPEND`. Break into DDB and `ps` to see which thread is where:
+挂起期间的挂起是最差的诊断：内核仍在运行（控制台仍响应break-to-DDB），但挂起序列卡在某个驱动的`DEVICE_SUSPEND`中。中断进入DDB并`ps`查看哪个线程在哪里：
 
 ```text
 db> ps
 ...  0 myfirst_drain_dma+0x42 myfirst_pci_suspend+0x80 ...
 ```
 
-**Debugging pattern.** Identify the hanging thread and the function it is stuck in. Usually it is a `cv_wait` or `cv_timedwait` that never completed, or a `taskqueue_drain` waiting on a task that will not finish.
+**调试模式。** 识别挂起的线程及其卡在的函数。通常是`cv_wait`或`cv_timedwait`从未完成，或`taskqueue_drain`等待不会完成的任务。
 
-**Fix pattern.** Add a timeout to any wait the suspend path does. The `myfirst_drain_dma` function uses `cv_timedwait` with a one-second timeout; a variant that uses `cv_wait` (no timeout) can hang indefinitely. The chapter's implementation always uses timed variants for this reason.
+**修复模式。** 为挂起路径的任何等待添加超时。`myfirst_drain_dma`函数使用带一秒超时的`cv_timedwait`；使用`cv_wait`（无超时）的变体可能无限期挂起。本章的实现始终使用定时变体因此原因。
 
-### Using DTrace to Trace Suspend and Resume
+### 使用DTrace跟踪挂起和恢复
 
-DTrace is an excellent tool for observing the power-management path at fine granularity without adding print statements. A simple D script that times each call:
+DTrace是以细粒度观察电源管理路径而不添加打印语句的优秀工具。一个计时每次调用的简单D脚本：
 
 ```d
 fbt::device_suspend:entry,
@@ -2233,9 +2232,9 @@ fbt::device_resume:return
 }
 ```
 
-Save this as `trace-devpower.d` and run with `dtrace -s trace-devpower.d`. Any `devctl suspend` or `acpiconf -s 3` will produce output showing each device's suspend and resume times, and their return values.
+将此保存为`trace-devpower.d`并用`dtrace -s trace-devpower.d`运行。任何`devctl suspend`或`acpiconf -s 3`都会产生显示每个设备挂起和恢复时间及其返回值的输出。
 
-For the `myfirst` driver specifically, `fbt::myfirst_pci_suspend:entry` and `fbt::myfirst_pci_resume:entry` are the probes. A D script focused on the driver:
+对于`myfirst`驱动，`fbt::myfirst_pci_suspend:entry`和`fbt::myfirst_pci_resume:entry`是探针。专注于驱动的D脚本：
 
 ```d
 fbt::myfirst_pci_suspend:entry {
@@ -2252,13 +2251,13 @@ fbt::myfirst_pci_suspend:return
 }
 ```
 
-The `stack()` call prints the call stack at entry, which is useful to confirm that the method is being called from where you expect (the PCI bus's `bus_suspend_child`, for example).
+`stack()`调用在入口打印调用栈，这对于确认方法是否从您期望的位置被调用很有用（例如PCI总线的`bus_suspend_child`）。
 
-### A Note on Logging Discipline
+### 关于日志纪律的说明
 
-The Chapter 22 code logs generously during suspend and resume: every method logs entry and exit, and each helper logs its own events. That verbosity is helpful during development but annoying in production (every laptop suspend prints half a dozen lines to dmesg).
+第22章代码在挂起和恢复期间慷慨地记录日志：每个方法记录入口和出口，每个助手记录自己的事件。这种详细程度在开发期间有帮助但在生产中烦人（每次笔记本挂起向dmesg打印半打行）。
 
-A good production driver exposes a sysctl that controls log verbosity:
+好的生产驱动暴露控制日志详细程度的sysctl：
 
 ```c
 static int myfirst_power_verbose = 1;
@@ -2267,18 +2266,18 @@ SYSCTL_INT(_dev_myfirst, OID_AUTO, power_verbose,
     "Verbose power-management logging (0=off, 1=on, 2=debug)");
 ```
 
-And the logging becomes conditional:
+日志记录变得有条件：
 
 ```c
 if (myfirst_power_verbose >= 1)
         device_printf(dev, "suspend: starting\n");
 ```
 
-A reader who wants to enable debugging on a production system can set `dev.myfirst.power_verbose=2` temporarily, trigger the problem, and reset the variable. The Chapter 22 driver does not implement this tiering; the learning driver logs everything and accepts the noise.
+想要在生产系统上启用调试的读者可以临时设置`dev.myfirst.power_verbose=2`，触发问题，然后重置变量。第22章驱动不实现这种分层；学习驱动记录一切并接受噪音。
 
-### Using the INVARIANTS Kernel for Assertion Coverage
+### 使用INVARIANTS内核进行断言覆盖
 
-A debug kernel with `INVARIANTS` compiled in causes `KASSERT` macros to actually evaluate their conditions and panic on failure. The `myfirst_dma.c` and `myfirst_pci.c` code uses several KASSERTs; the power-management code adds more. For example, the quiesce invariant:
+编译了`INVARIANTS`的调试内核使`KASSERT`宏实际评估其条件并在失败时恐慌。`myfirst_dma.c`和`myfirst_pci.c`代码使用多个KASSERT；电源管理代码添加更多。例如，静默不变量：
 
 ```c
 static int
@@ -2293,20 +2292,20 @@ myfirst_quiesce(struct myfirst_softc *sc)
 }
 ```
 
-On an `INVARIANTS` kernel, a bug that leaves `dma_in_flight` true causes an immediate panic with a useful message. On a production kernel, the assertion is compiled out and nothing happens. The learning driver deliberately runs on an `INVARIANTS` kernel to catch this class of bug.
+在`INVARIANTS`内核上，让`dma_in_flight`为true的错误会导致立即恐慌并带有有用消息。在生产内核上，断言被编译掉，什么也不发生。学习驱动故意在`INVARIANTS`内核上运行以捕获这类错误。
 
-Similarly, the resume path can assert:
+类似地，恢复路径可以断言：
 
 ```c
 KASSERT(sc->suspended == true,
     ("myfirst: resume called but not suspended"));
 ```
 
-This catches a bug where the driver somehow gets resume called without the matching suspend having happened (usually a bug in a parent bus driver, not in the `myfirst` driver itself).
+这捕获驱动某种方式在匹配挂起未发生时被调用恢复的错误（通常是父总线驱动中的错误，不是`myfirst`驱动本身的）。
 
-### A Debugging Case Study
+### 调试案例研究
 
-To bring the patterns together, consider a concrete scenario. The reader writes the Stage 2 suspend, runs a regression cycle, and sees:
+将模式结合在一起，考虑一个具体场景。读者编写第2阶段挂起，运行回归周期，并看到：
 
 ```text
 myfirst0: suspend: starting
@@ -2323,11 +2322,11 @@ sudo sysctl dev.myfirst.0.dma_test_read=1
 # Returns EBUSY after a long delay
 ```
 
-The user-visible symptom is that the post-resume transfer does not work. The log shows a drain timeout during suspend, which is the first anomaly.
+用户可见的症状是恢复后的传输不工作。日志显示挂起期间的排空超时，这是第一个异常。
 
-**Hypothesis.** The DMA engine did not honor the ABORT bit. The driver force-cleared `dma_in_flight`, but the engine is still running; when the user triggers a new transfer, the engine is not ready.
+**假设。** DMA引擎未遵守ABORT位。驱动强制清除`dma_in_flight`，但引擎仍在运行；当用户触发新传输时，引擎未准备好。
 
-**Test.** Check the engine's status register before and after the abort:
+**测试。** 检查中止前后的引擎状态寄存器：
 
 ```c
 /* In myfirst_drain_dma, after writing ABORT: */
@@ -2337,19 +2336,19 @@ uint32_t post_status = CSR_READ_4(sc->dev, MYFIRST_REG_DMA_STATUS);
 device_printf(sc->dev, "drain: status %#x -> %#x\n", pre_status, post_status);
 ```
 
-Running the cycle again produces:
+再次运行周期产生：
 
 ```text
 myfirst0: drain: status 0x4 -> 0x4
 ```
 
-Status 0x4 is RUNNING. The engine ignored the ABORT. That points to the simulation backend: the simulated engine might not implement abort, or might do so only when the simulation callout fires.
+状态0x4是RUNNING。引擎忽略了ABORT。这指向模拟后端：模拟引擎可能未实现中止，或仅在模拟callout触发时才这样做。
 
-**Fix.** Look at the simulation's DMA engine code and verify the abort semantics. In this case, the simulation's engine handles the abort in its callout callback, which does not fire for a few milliseconds. Extend the drain timeout from 1 second (plenty) to... wait, 1 second is plenty for a callout that fires every few milliseconds. The real issue is elsewhere.
+**修复。** 查看模拟的DMA引擎代码并验证中止语义。在这种情况下，模拟引擎在其callout回调中处理中止，回调几毫秒才触发一次。将排空超时从1秒（宽裕）扩展到……等等，1秒对于每几毫秒触发的callout已经宽裕。真正的问题在别处。
 
-Further investigation reveals that the simulation's callout was drained *before* the DMA drain completed. The order in `myfirst_drain_workers` (task first, callout second) was wrong; it should be callout first, task second, because the callout is what drives the abort completion.
+进一步调查揭示模拟的callout在DMA排空完成*之前*就被排空了。`myfirst_drain_workers`中的顺序（先任务后callout）是错误的；应该是先callout后任务，因为callout驱动中止完成。
 
-**Resolution.** Reorder the drain:
+**解决方案。** 重新排序排空：
 
 ```c
 static void
@@ -2376,43 +2375,43 @@ myfirst_drain_workers(struct myfirst_softc *sc)
 }
 ```
 
-But wait: by the time `myfirst_drain_workers` is called from `myfirst_quiesce`, `myfirst_drain_dma` has already completed. The drain-dma wait is inside the drain-dma call; the drain-workers call only cleans up residual state. The order inside drain-workers is mostly aesthetic for suspend.
+但是等等：到`myfirst_drain_workers`从`myfirst_quiesce`被调用时，`myfirst_drain_dma`已完成。排空DMA等待在排空DMA调用内部；排空工作者调用仅清理残余状态。排空工作者内部的顺序对挂起主要是美观的。
 
-The real fix is earlier: `myfirst_drain_dma` itself should not have timed out. The 1-second timeout should have been plenty. The actual cause is different: perhaps the simulation's callout was not firing because the driver held a sysctl lock that blocked it. Or the writing of the ABORT bit did not reach the simulation because the simulation's MMIO handler was also blocked.
+真正的修复更早：`myfirst_drain_dma`本身不应超时。一秒超时应已宽裕。实际原因不同：也许模拟的callout未触发因为驱动持有阻塞它的sysctl锁。或ABORT位的写入未到达模拟因为模拟的MMIO处理器也被阻塞。
 
-**Lesson.** Debugging power management issues is iterative. Each symptom suggests a hypothesis; each test narrows it down; the fix is often in a different layer than the one the symptom pointed to. The patience to follow the chain is what distinguishes good power-aware code from code that mostly works.
+**教训。** 调试电源管理问题是迭代的。每个症状提出假设；每个测试缩小范围；修复通常在症状指向的不同层中。遵循链条的耐心是区分好的电源感知代码和勉强工作的代码的关键。
 
 ### Wrapping Up Section 7
 
-Section 7 walked through the characteristic failure modes of power-aware drivers: frozen devices, lost interrupts, bad DMA, missed wake events, WITNESS complaints, counter drift, and outright hangs. For each, it showed the typical cause, a debugging pattern that narrows the problem down, and the fix pattern that removes it. It also introduced DTrace for measurement, discussed log discipline, and showed how `INVARIANTS` and `WITNESS` catch the class of bug that only shows up under specific conditions.
+第7节遍历了电源感知驱动的典型故障模式：冻结设备、丢失中断、错误DMA、错过唤醒事件、WITNESS抱怨、计数器漂移和完全挂起。对于每种，它展示了典型原因、缩小问题范围的调试模式，以及消除问题的修复模式。它还介绍了DTrace用于测量，讨论了日志纪律，并展示了`INVARIANTS`和`WITNESS`如何捕获仅在特定条件下出现的错误类。
 
-The debugging discipline in Section 7, like the quiesce discipline in Section 3 and the restore discipline in Section 4, is meant to stay with the reader beyond the `myfirst` driver. Every power-aware driver has some variation of these bugs lurking in its implementation; the patterns above are how to find them before they reach the user.
+第7节的调试纪律，像第3节的静默纪律和第4节的恢复纪律一样，旨在留在读者身上超越`myfirst`驱动。每个电源感知驱动的实现中都潜伏着这些错误的某种变体；上面的模式是如何在它们到达用户之前找到它们。
 
-Section 8 brings Chapter 22 to a close by consolidating the Sections 2 through 7 code into a refactored `myfirst_power.c` file, bumping the version to `1.5-power`, adding a `POWER.md` document, and wiring up a final integration test.
+第8节通过将第2到7节的代码整合到重构的`myfirst_power.c`文件中，将版本升级到`1.5-power`，添加`POWER.md`文档，并连接最终集成测试来结束第22章。
 
 
 
-## Section 8: 重构和版本化电源感知驱动程序
+## 第8节：重构和版本化电源感知驱动
 
-Stages 1 through 3 added the power-management code inline in `myfirst_pci.c`. That was convenient for teaching, because every change appeared next to the attach and detach code the reader already knew. It is less convenient for readability: `myfirst_pci.c` now has attach, detach, three power methods, and several helpers, and the file is long enough that a first-time reader has to scroll to find things.
+第1到3阶段在`myfirst_pci.c`中内联添加了电源管理代码。这对教学方便，因为每个更改出现在读者已知的挂载和分离代码旁边。但对可读性不太方便：`myfirst_pci.c`现在有挂载、分离、三个电源方法和几个助手，文件足够长，首次读者需要滚动来找到东西。
 
-Stage 4, the final version of the Chapter 22 driver, pulls all of the power-management code out of `myfirst_pci.c` and into a new file pair, `myfirst_power.c` and `myfirst_power.h`. This follows the same pattern as Chapter 20's `myfirst_msix.c` split and Chapter 21's `myfirst_dma.c` split: the new file has a narrow, well-documented API, and the caller in `myfirst_pci.c` uses only that API.
+第4阶段，第22章驱动的最终版本，将所有电源管理代码从`myfirst_pci.c`中拉出到新的文件对`myfirst_power.c`和`myfirst_power.h`中。这遵循与第20章`myfirst_msix.c`拆分和第21章`myfirst_dma.c`拆分相同的模式：新文件有狭窄的、良好文档化的API，`myfirst_pci.c`中的调用者仅使用该API。
 
-### The Target Layout
+### 目标布局
 
-After Stage 4, the driver's source files are:
+第4阶段后，驱动的源文件为：
 
-- `myfirst.c` - top-level glue, shared state, sysctl tree.
-- `myfirst_hw.c`, `myfirst_hw_pci.c` - register-access helpers.
-- `myfirst_sim.c` - simulation backend.
-- `myfirst_pci.c` - PCI attach, detach, method table, and thin forwarding to subsystem modules.
-- `myfirst_intr.c` - single-vector interrupt (Chapter 19 legacy path).
-- `myfirst_msix.c` - multi-vector interrupt setup (Chapter 20).
-- `myfirst_dma.c` - DMA setup, teardown, transfer (Chapter 21).
-- `myfirst_power.c` - power management (Chapter 22, new).
-- `cbuf.c` - circular-buffer support.
+- `myfirst.c` - 顶层粘合、共享状态、sysctl树。
+- `myfirst_hw.c`、`myfirst_hw_pci.c` - 寄存器访问助手。
+- `myfirst_sim.c` - 模拟后端。
+- `myfirst_pci.c` - PCI挂载、分离、方法表，以及到子系统的薄转发。
+- `myfirst_intr.c` - 单向量中断（第19章遗留路径）。
+- `myfirst_msix.c` - 多向量中断设置（第20章）。
+- `myfirst_dma.c` - DMA设置、拆除、传输（第21章）。
+- `myfirst_power.c` - 电源管理（第22章，新增）。
+- `cbuf.c` - 循环缓冲区支持。
 
-The new `myfirst_power.h` declares the public API of the power subsystem:
+新的`myfirst_power.h`声明电源子系统的公共API：
 
 ```c
 #ifndef _MYFIRST_POWER_H_
@@ -2438,32 +2437,32 @@ void myfirst_power_add_sysctls(struct myfirst_softc *sc);
 #endif /* _MYFIRST_POWER_H_ */
 ```
 
-The `_setup` and `_teardown` pair initialise and tear down the subsystem-level state (the callout, the sysctls). The per-transition functions wrap the same logic the Section 3 through Section 5 code built. The runtime-PM functions are compiled only when the build-time flag is defined.
+`_setup`和`_teardown`对初始化和拆除子系统级状态（callout、sysctl）。每转换函数包装第3到5节代码构建的相同逻辑。运行时PM函数仅在定义构建时标志时编译。
 
-### The myfirst_power.c File
+### myfirst_power.c文件
 
-The new file is about three hundred lines. Its structure mirrors `myfirst_dma.c`: header includes, static helpers, public functions, sysctl handlers, and `_add_sysctls`.
+新文件大约三百行。其结构镜像`myfirst_dma.c`：头文件包含、静态助手、公共函数、sysctl处理器和`_add_sysctls`。
 
-The helpers are the three from Section 3:
+助手是第3节的三个：
 
 - `myfirst_mask_interrupts`
 - `myfirst_drain_dma`
 - `myfirst_drain_workers`
 
-Plus one from Section 4:
+加上第4节的一个：
 
 - `myfirst_restore`
 
-And, if runtime PM is enabled, two from Section 5:
+以及，如果启用了运行时PM，第5节的两个：
 
 - `myfirst_idle_watcher_cb`
 - `myfirst_start_idle_watcher`
 
-The public functions `myfirst_power_suspend`, `myfirst_power_resume`, and `myfirst_power_shutdown` become thin wrappers that call the helpers in the right order and update counters. The sysctl handlers expose the policy knobs and the observability counters.
+公共函数`myfirst_power_suspend`、`myfirst_power_resume`和`myfirst_power_shutdown`成为以正确顺序调用助手并更新计数器的薄包装器。sysctl处理器暴露策略旋钮和可观测性计数器。
 
-### Updating myfirst_pci.c
+### 更新myfirst_pci.c
 
-The `myfirst_pci.c` file is now much shorter. Its three power methods each just forward to the power subsystem:
+`myfirst_pci.c`文件现在短得多。它的三个电源方法每个仅转发到电源子系统：
 
 ```c
 static int
@@ -2485,9 +2484,9 @@ myfirst_pci_shutdown(device_t dev)
 }
 ```
 
-The method table stays the same as Stage 1 set it up. The three prototypes above are now the only power-related code in `myfirst_pci.c`, apart from the call to `myfirst_power_setup` from attach and `myfirst_power_teardown` from detach.
+方法表与第1阶段设置的相同。上面的三个原型现在是`myfirst_pci.c`中唯一的电源相关代码，除了从挂载调用`myfirst_power_setup`和从分离调用`myfirst_power_teardown`。
 
-The attach path grows one call:
+挂载路径增加一个调用：
 
 ```c
 static int
@@ -2510,7 +2509,7 @@ myfirst_pci_attach(device_t dev)
 }
 ```
 
-The detach path grows a matching call:
+分离路径增加一个匹配调用：
 
 ```c
 static int
@@ -2526,11 +2525,11 @@ myfirst_pci_detach(device_t dev)
 }
 ```
 
-`myfirst_power_setup` initialises the `saved_intr_mask`, the `suspended` flag, the counters, and (if runtime PM is enabled) the idle watcher callout. `myfirst_power_teardown` drains the callout and cleans up any subsystem-level state. The teardown must be done before the DMA teardown because the callout may still reference DMA state.
+`myfirst_power_setup`初始化`saved_intr_mask`、`suspended`标志、计数器，以及（如果运行时PM启用）空闲监视器callout。`myfirst_power_teardown`排空callout并清理任何子系统级状态。拆除必须在DMA拆除之前完成，因为callout可能仍引用DMA状态。
 
-### Updating the Makefile
+### 更新Makefile
 
-The new source file goes into the `SRCS` list, and the version bumps:
+新源文件放入`SRCS`列表，版本升级：
 
 ```make
 KMOD=  myfirst
@@ -2552,30 +2551,30 @@ CFLAGS+= -DMYFIRST_VERSION_STRING=\"1.5-power\"
 .include <bsd.kmod.mk>
 ```
 
-The `MYFIRST_ENABLE_RUNTIME_PM` flag is off by default in Stage 4; the runtime-PM code compiles but is wrapped in `#ifdef`. A reader who wants to experiment enables the flag at build time.
+`MYFIRST_ENABLE_RUNTIME_PM`标志在第4阶段默认关闭；运行时PM代码编译但被`#ifdef`包装。想要实验的读者在构建时启用标志。
 
-### Writing POWER.md
+### 编写POWER.md
 
-The Chapter 21 pattern set the precedent: every subsystem gets a markdown document that describes its purpose, its API, its state model, and its testing story. `POWER.md` is next.
+第21章的模式确立了先例：每个子系统获得一个markdown文档描述其目的、API、状态模型和测试故事。`POWER.md`是下一个。
 
-A good `POWER.md` has these sections:
+好的`POWER.md`有这些部分：
 
-1. **Purpose**: a paragraph explaining what the subsystem does.
-2. **Public API**: a table of function prototypes with one-line descriptions.
-3. **State Model**: a diagram or text description of the states and transitions.
-4. **Counters and Sysctls**: the read-only and read-write sysctls the subsystem exposes.
-5. **Transition Flows**: what happens during each of suspend, resume, shutdown.
-6. **Interaction with Other Subsystems**: how power management relates to DMA, interrupts, and the simulation.
-7. **Runtime PM (optional)**: how runtime PM works and when it is enabled.
-8. **Testing**: the regression and stress scripts.
-9. **Known Limitations**: what the subsystem does not do yet.
-10. **See Also**: cross-references to `bus(9)`, `pci(9)`, and the chapter text.
+1. **目的**：一段解释子系统做什么的文字。
+2. **公共API**：函数原型及其一行描述的表格。
+3. **状态模型**：状态和转换的图表或文字描述。
+4. **计数器和Sysctl**：子系统暴露的只读和读写sysctl。
+5. **转换流程**：挂起、恢复、关机各期间发生什么。
+6. **与其他子系统的交互**：电源管理如何与DMA、中断和模拟相关。
+7. **运行时PM（可选）**：运行时PM如何工作以及何时启用。
+8. **测试**：回归和压力脚本。
+9. **已知限制**：子系统尚未做什么。
+10. **另见**：`bus(9)`、`pci(9)`和章节文本的交叉引用。
 
-The full document is in the examples directory (`examples/part-04/ch22-power/stage4-final/POWER.md`); the chapter does not reproduce it inline, but a reader who wants to check the expected structure can open it.
+完整文档在examples目录（`examples/part-04/ch22-power/stage4-final/POWER.md`）；本章不在正文中复制它，但想检查预期结构的读者可以打开它。
 
-### Regression Script
+### 回归脚本
 
-The Stage 4 regression script exercises every path:
+第4阶段回归脚本练习每条路径：
 
 ```sh
 #!/bin/sh
@@ -2606,39 +2605,39 @@ sudo kldunload myfirst
 echo "FULL REGRESSION PASSED"
 ```
 
-Each sub-script is a few dozen lines and tests one thing. Running the full regression after each change catches regressions immediately.
+每个子脚本几十行测试一件事。每次更改后运行完整回归可以立即捕获回归。
 
-### Integration With the Existing Regression Tests
+### 与现有回归测试的集成
 
-The Chapter 21 regression script checked:
+第21章回归脚本检查了：
 
-- `dma_complete_intrs == dma_complete_tasks` (the task always sees every interrupt).
-- `dma_complete_intrs == dma_transfers_write + dma_transfers_read + dma_errors + dma_timeouts`.
+- `dma_complete_intrs == dma_complete_tasks`（任务总是看到每个中断）。
+- `dma_complete_intrs == dma_transfers_write + dma_transfers_read + dma_errors + dma_timeouts`。
 
-The Chapter 22 script adds:
+第22章脚本添加：
 
-- `power_suspend_count == power_resume_count` (every suspend has a matching resume).
-- The `suspended` flag is 0 outside of a transition.
-- After a suspend-resume cycle, the DMA counters still add up to the expected total (no phantom transfers).
+- `power_suspend_count == power_resume_count`（每个挂起有匹配的恢复）。
+- `suspended`标志在转换之外为0。
+- 挂起-恢复周期后，DMA计数器仍加到预期总数（无幻影传输）。
 
-The combined regression is the Chapter 22 full script. It exercises DMA, interrupts, MSI-X, and power management together. A driver that passes it is in good shape.
+组合回归是第22章的完整脚本。它一起练习DMA、中断、MSI-X和电源管理。通过它的驱动状态良好。
 
-### Version History
+### 版本历史
 
-The driver has now evolved through several versions:
+驱动现在已通过多个版本演进：
 
-- `1.0` - Chapter 16: MMIO-only driver, simulation backend.
-- `1.1` - Chapter 18: PCI attach, real BAR.
-- `1.2-intx` - Chapter 19: single-vector interrupt with filter+task.
-- `1.3-msi` - Chapter 20: multi-vector MSI-X with fallback.
-- `1.4-dma` - Chapter 21: `bus_dma` setup, simulated DMA engine, interrupt-driven completion.
-- `1.5-power` - Chapter 22: suspend/resume/shutdown, refactored into `myfirst_power.c`, optional runtime PM.
+- `1.0` - 第16章：仅MMIO驱动、模拟后端。
+- `1.1` - 第18章：PCI挂载、真实BAR。
+- `1.2-intx` - 第19章：带过滤器+任务的单向量中断。
+- `1.3-msi` - 第20章：带回退的多向量MSI-X。
+- `1.4-dma` - 第21章：`bus_dma`设置、模拟DMA引擎、中断驱动完成。
+- `1.5-power` - 第22章：挂起/恢复/关机、重构到`myfirst_power.c`、可选运行时PM。
 
-Each version builds on the previous one. A reader who has the Chapter 21 driver working can apply the Chapter 22 changes incrementally and end up at `1.5-power` without having to rewrite any earlier code.
+每个版本建立在前一个之上。有第21章驱动工作的读者可以增量应用第22章更改并最终达到`1.5-power`而无需重写任何先前代码。
 
-### A Final Integration Test on Real Hardware
+### 真实硬件上的最终集成测试
 
-If the reader has access to real hardware (a machine with a working S3 implementation), the Chapter 22 driver can be exercised through a full system suspend:
+如果读者有真实硬件（有正常S3实现的机器），第22章驱动可以通过完整系统挂起来测试：
 
 ```sh
 sudo kldload ./myfirst.ko
@@ -2649,44 +2648,44 @@ sudo acpiconf -s 3
 sudo sysctl dev.myfirst.0.dma_test_read=1
 ```
 
-On most platforms where ACPI S3 works, the driver survives the full cycle. The `dmesg` output shows the suspend and resume lines just as `devctl` would trigger, confirming that the same method code runs in both contexts.
+在ACPI S3工作的大多数平台上，驱动在完整周期中存活。`dmesg`输出显示挂起和恢复行，正如`devctl`会触发的那样，确认相同方法代码在两个上下文中运行。
 
-If the full-system test fails where the per-device test succeeded, the extra work that system suspend does (ACPI sleep-state transitions, CPU parking, RAM self-refresh) has exposed something the per-device test missed. The usual culprits are device-specific register values that the system's low-power state resets but the per-device D3 does not. A driver that tests only with `devctl` can miss these; a driver that tests with `acpiconf -s 3` at least once before claiming correctness is more reliable.
+如果全系统测试在每设备测试成功的地方失败，系统挂起做的额外工作（ACPI睡眠状态转换、CPU停车、RAM自刷新）暴露了每设备测试遗漏的东西。通常罪魁祸首是系统低功耗状态重置但每设备D3不重置的设备特定寄存器值。仅用`devctl`测试的驱动可能遗漏这些；在声称正确性之前至少用`acpiconf -s 3`测试一次的驱动更可靠。
 
-### The Chapter 22 Code in One Place
+### 第22章代码一览
 
-A compact summary of what the Stage 4 driver added:
+第4阶段驱动添加内容的紧凑摘要：
 
-- **One new file**: `myfirst_power.c`, about three hundred lines.
-- **One new header**: `myfirst_power.h`, about thirty lines.
-- **One new markdown document**: `POWER.md`, about two hundred lines.
-- **Five new softc fields**: `suspended`, `saved_intr_mask`, `power_suspend_count`, `power_resume_count`, `power_shutdown_count`, plus the runtime-PM fields when that feature is enabled.
-- **Three new `DEVMETHOD` lines**: `device_suspend`, `device_resume`, `device_shutdown`.
-- **Three new helper functions**: `myfirst_mask_interrupts`, `myfirst_drain_dma`, `myfirst_drain_workers`.
-- **Two new subsystem entry points**: `myfirst_power_setup`, `myfirst_power_teardown`.
-- **Three new transition functions**: `myfirst_power_suspend`, `myfirst_power_resume`, `myfirst_power_shutdown`.
-- **Six new sysctls**: the counter nodes and the suspended flag.
-- **Several new lab scripts**: cycle, stress, transfer-across-cycle, runtime-PM.
+- **一个新文件**：`myfirst_power.c`，约三百行。
+- **一个新头文件**：`myfirst_power.h`，约三十行。
+- **一个新markdown文档**：`POWER.md`，约二百行。
+- **五个新softc字段**：`suspended`、`saved_intr_mask`、`power_suspend_count`、`power_resume_count`、`power_shutdown_count`，加上启用该功能时的运行时PM字段。
+- **三行新`DEVMETHOD`**：`device_suspend`、`device_resume`、`device_shutdown`。
+- **三个新助手函数**：`myfirst_mask_interrupts`、`myfirst_drain_dma`、`myfirst_drain_workers`。
+- **两个新子系统入口点**：`myfirst_power_setup`、`myfirst_power_teardown`。
+- **三个新转换函数**：`myfirst_power_suspend`、`myfirst_power_resume`、`myfirst_power_shutdown`。
+- **六个新sysctl**：计数器节点和suspended标志。
+- **几个新实验脚本**：cycle、stress、transfer-across-cycle、runtime-PM。
 
-The overall line increment is about seven hundred lines of code, plus a couple of hundred lines of documentation and script. For the capability the chapter added (a driver that correctly handles every power transition the kernel can throw at it), that is a proportionate investment.
+总行增量约为七百行代码，加上几百行文档和脚本。对于本章添加的能力（一个正确处理内核可能抛出的每个电源转换的驱动），这是成比例的投入。
 
 ### Wrapping Up Section 8
 
-Section 8 closed the Chapter 22 driver's construction by splitting the power code into its own file, bumping the version to `1.5-power`, adding a `POWER.md` document, and wiring the final regression test. The pattern was familiar from Chapters 20 and 21: take the inline code, extract it into a subsystem with a small API, document the subsystem, and integrate it into the rest of the driver through function calls rather than direct field access.
+第8节通过将电源代码拆分为自己的文件、将版本升级到`1.5-power`、添加`POWER.md`文档并连接最终回归测试来结束第22章驱动的构建。模式与第20和21章熟悉：取内联代码、用小API将其提取为子系统、文档化子系统，并通过函数调用而非直接字段访问将其集成到驱动其余部分。
 
-The resulting driver is power-aware in every sense the chapter introduced: it handles `DEVICE_SUSPEND`, `DEVICE_RESUME`, and `DEVICE_SHUTDOWN`; it quiesces the device cleanly; it restores state correctly on resume; it optionally implements runtime power management; it exposes its state through sysctls; it has a regression test; and it survives full-system suspend on real hardware when the platform supports it.
+产生的驱动在本章引入的每个意义上都是电源感知的：它处理`DEVICE_SUSPEND`、`DEVICE_RESUME`和`DEVICE_SHUTDOWN`；它干净地静默设备；它在恢复时正确恢复状态；它可选地实现运行时电源管理；它通过sysctl暴露状态；它有回归测试；当平台支持时它在真实硬件上存活完整系统挂起。
 
 
 
-## Deep Look: Power Management in /usr/src/sys/dev/re/if_re.c
+## 深入理解：/usr/src/sys/dev/re/if_re.c中的电源管理
 
-The Realtek 8169 and compatible gigabit NICs are handled by the `re(4)` driver. It is an informative driver to read for Chapter 22 purposes because it implements the full suspend-resume-shutdown trio with wake-on-LAN support, and its code has been stable enough to represent a canonical FreeBSD pattern. A reader who has worked through Chapter 22 can open `/usr/src/sys/dev/re/if_re.c` and recognise the structure immediately.
+Realtek 8169和兼容的千兆NIC由`re(4)`驱动处理。对于第22章目的来说，它是一个值得阅读的信息性驱动，因为它实现了带网络唤醒支持的完整挂起-恢复-关机三重奏，其代码已足够稳定代表规范的FreeBSD模式。完成第22章的读者可以打开`/usr/src/sys/dev/re/if_re.c`并立即识别结构。
 
-> **Reading this walkthrough.** The paired `re_suspend()` and `re_resume()` listings in the subsections below are taken from `/usr/src/sys/dev/re/if_re.c`, and the method-table excerpt abbreviates the full `re_methods[]` array with a `/* ... other methods ... */` comment so the three power-related `DEVMETHOD` entries stand out. We kept the signatures, the lock-acquire and lock-release pattern, and the order of device-specific calls (`re_stop`, `re_setwol`, `re_clrwol`, `re_init_locked`) intact; the real method table has many more entries, and the surrounding file carries the helper implementations. Every symbol the listings name is a real FreeBSD identifier in `if_re.c` that you can find with a symbol search.
+> **阅读本演练。** 下面小节中成对的`re_suspend()`和`re_resume()`清单取自`/usr/src/sys/dev/re/if_re.c`，方法表摘录用`/* ... other methods ... */`注释缩写了完整的`re_methods[]`数组，使三个电源相关的`DEVMETHOD`条目突出。我们保持了签名、锁获取和锁释放模式，以及设备特定调用（`re_stop`、`re_setwol`、`re_clrwol`、`re_init_locked`）的顺序不变；真实方法表有更多条目，周围文件包含助手实现。清单中命名的每个符号都是`if_re.c`中的真实FreeBSD标识符，可以通过符号搜索找到。
 
-### The Method Table
+### 方法表
 
-The `re(4)` driver's method table includes the three power methods near the top:
+`re(4)`驱动的方法表在顶部附近包含三个电源方法：
 
 ```c
 static device_method_t re_methods[] = {
@@ -2700,11 +2699,11 @@ static device_method_t re_methods[] = {
 };
 ```
 
-This is exactly the pattern Chapter 22 teaches. The `myfirst` driver's method table looks the same.
+这正是第22章教授的模式。`myfirst`驱动的方法表看起来一样。
 
 ### re_suspend
 
-The suspend function is about a dozen lines:
+挂起函数大约十几行：
 
 ```c
 static int
@@ -2724,9 +2723,9 @@ re_suspend(device_t dev)
 }
 ```
 
-Three calls do the work: `re_stop` quiesces the NIC (disables interrupts, halts DMA, stops the RX and TX engines), `re_setwol` programs the wake-on-LAN logic and calls `pci_enable_pme` if WoL is enabled, and `sc->suspended = 1` sets the softc flag.
+三个调用完成工作：`re_stop`静默NIC（禁用中断、停止DMA、停止RX和TX引擎），`re_setwol`编程网络唤醒逻辑并在WoL启用时调用`pci_enable_pme`，`sc->suspended = 1`设置softc标志。
 
-Compare to `myfirst_power_suspend`:
+与`myfirst_power_suspend`比较：
 
 ```c
 int
@@ -2742,11 +2741,11 @@ myfirst_power_suspend(struct myfirst_softc *sc)
 }
 ```
 
-The structure is identical. `re_stop` and `re_setwol` together are the equivalent of `myfirst_quiesce`; the chapter's driver does not have wake-on-X, so there is no analogue of `re_setwol`.
+结构是相同的。`re_stop`和`re_setwol`一起等效于`myfirst_quiesce`；本章驱动没有wake-on-X，所以没有`re_setwol`的类似物。
 
 ### re_resume
 
-The resume function is about thirty lines:
+恢复函数大约三十行：
 
 ```c
 static int
@@ -2784,14 +2783,14 @@ re_resume(device_t dev)
 }
 ```
 
-The steps map cleanly to Chapter 22's discipline:
+这些步骤干净地映射到第22章的纪律：
 
-1. **Take the controller out of sleep mode** (MAC sleep bit on some Realtek parts). This is a device-specific restore step.
-2. **Clear any WOL patterns** via `re_clrwol`, which reverses what `re_setwol` did. This also calls `pci_clear_pme` implicitly through the clear.
-3. **Re-initialise the interface** if it was up before suspend. `re_init_locked` is the same function attach calls to bring up the NIC; it reprograms the MAC, resets the descriptor rings, enables interrupts, and starts the DMA engines.
-4. **Clear the suspended flag** under the lock.
+1. **将控制器从睡眠模式取出**（某些Realtek部件上的MAC睡眠位）。这是设备特定的恢复步骤。
+2. **通过`re_clrwol`清除任何WOL模式**，它逆转`re_setwol`所做的。这还通过清除隐式调用`pci_clear_pme`。
+3. **如果挂起前接口已启动，重新初始化接口**。`re_init_locked`与挂载调用以启动NIC的函数相同；它重新编程MAC、重置描述符环、启用中断、启动DMA引擎。
+4. **在锁下清除suspended标志**。
 
-The `myfirst_power_resume` equivalent:
+`myfirst_power_resume`的等效：
 
 ```c
 int
@@ -2807,11 +2806,11 @@ myfirst_power_resume(struct myfirst_softc *sc)
 }
 ```
 
-Again the structure is identical. `myfirst_restore` corresponds to the combination of the MAC-sleep exit, `re_clrwol`, `re_init_locked`, and the flag clear.
+结构再次相同。`myfirst_restore`对应MAC睡眠退出、`re_clrwol`、`re_init_locked`和标志清除的组合。
 
 ### re_shutdown
 
-The shutdown function is:
+关机函数为：
 
 ```c
 static int
@@ -2836,11 +2835,11 @@ re_shutdown(device_t dev)
 }
 ```
 
-Similar to `re_suspend`, plus the interface-flag clear (shutdown is final; marking the interface down prevents spurious activity). The pattern is nearly identical; `re_shutdown` is essentially a more defensive version of `re_suspend`.
+与`re_suspend`类似，加上接口标志清除（关机是最终的；标记接口为down防止虚假活动）。模式几乎相同；`re_shutdown`本质上是`re_suspend`的更具防御性的版本。
 
 ### re_setwol
 
-The wake-on-LAN setup is worth looking at because it shows how a real driver calls the PCI PM APIs:
+网络唤醒设置值得一看，因为它展示了真实驱动如何调用PCI PM API：
 
 ```c
 static void
@@ -2862,13 +2861,13 @@ re_setwol(struct rl_softc *sc)
 }
 ```
 
-Three key patterns appear here that are worth copying into any power-aware driver that supports wake-on-X:
+这里出现三个关键模式，值得复制到任何支持wake-on-X的电源感知驱动中：
 
-1. **`pci_has_pm(dev)` guard.** The function returns early if the device does not support power management. This prevents writes to registers that do not exist.
-2. **Device-specific wake programming.** The bulk of the function writes Realtek-specific registers through `CSR_WRITE_1`. A driver for a different device would write different registers, but the placement (inside the suspend path, before `pci_enable_pme`) is the same.
-3. **Conditional `pci_enable_pme`.** Only enable PME# if the user has actually asked for wake-on-X. If the user has not, the function still sets the relevant configuration bits (for consistency with the driver's interface capabilities) but does not call `pci_enable_pme`.
+1. **`pci_has_pm(dev)`守卫。** 如果设备不支持电源管理，函数提前返回。这防止写入不存在的寄存器。
+2. **设备特定唤醒编程。** 函数主体通过`CSR_WRITE_1`写入Realtek特定寄存器。不同设备的驱动会写入不同寄存器，但位置（在挂起路径内，`pci_enable_pme`之前）相同。
+3. **条件`pci_enable_pme`。** 仅在用户实际请求了wake-on-X时启用PME#。如果用户没有，函数仍设置相关配置位（为与驱动接口能力一致）但不调用`pci_enable_pme`。
 
-The inverse is `re_clrwol`:
+逆向是`re_clrwol`：
 
 ```c
 static void
@@ -2885,23 +2884,23 @@ re_clrwol(struct rl_softc *sc)
 }
 ```
 
-Note that `re_clrwol` does not explicitly call `pci_clear_pme`; the PCI layer's `pci_resume_child` has already called it before the driver's `DEVICE_RESUME`. `re_clrwol` is responsible for undoing the driver-visible side of WoL configuration, not the kernel-visible PME status.
+注意`re_clrwol`不显式调用`pci_clear_pme`；PCI层的`pci_resume_child`已在驱动的`DEVICE_RESUME`之前调用了它。`re_clrwol`负责撤销WoL配置的驱动可见侧，而非内核可见的PME状态。
 
-### What the Deep Look Shows
+### 深入理解展示了什么
 
-The Realtek driver is more complex than `myfirst` by every measure (more registers, more state, more device variants), and yet its power-management discipline is less complex. That is because complexity of the *device* does not map one-to-one to complexity of the *power-management code*. Chapter 22's discipline scales down as well as it scales up: a simple device has a simple power path; a complex device has a modestly more complex power path. The structure is the same.
+Realtek驱动在各方面都比`myfirst`更复杂（更多寄存器、更多状态、更多设备变体），但其电源管理纪律却不太复杂。这是因为*设备*的复杂性不一对一映射到*电源管理代码*的复杂性。第22章的纪律向下扩展和向上扩展一样好：简单设备有简单电源路径；复杂设备有适度更复杂的电源路径。结构是相同的。
 
-A reader who has finished Chapter 22 can now open `if_re.c`, recognise every function and every pattern, and understand why each exists. That comprehension transfers: the same recognition applies to `if_xl.c`, `virtio_blk.c`, and hundreds of other FreeBSD drivers. Chapter 22 is not teaching a `myfirst`-specific API; it is teaching the FreeBSD power-management idiom, and the `myfirst` driver is the vehicle that made it concrete.
+完成第22章的读者现在可以打开`if_re.c`，识别每个函数和每个模式，并理解每个为什么存在。这种理解力可以迁移：相同的识别适用于`if_xl.c`、`virtio_blk.c`和数百个其他FreeBSD驱动。第22章不是在教授`myfirst`特定的API；它在教授FreeBSD电源管理惯用法，`myfirst`驱动是使之具体的载体。
 
 
 
-## Deep Look: Simpler Patterns in if_xl.c and virtio_blk.c
+## 深入理解：if_xl.c和virtio_blk.c中的更简单模式
 
-For contrast, two other FreeBSD drivers implement power management in even simpler ways.
+作为对比，另外两个FreeBSD驱动以更简单的方式实现电源管理。
 
-### if_xl.c: Shutdown Calls Suspend
+### if_xl.c：关机调用挂起
 
-The 3Com EtherLink III driver in `/usr/src/sys/dev/xl/if_xl.c` has the minimal three-method setup:
+/usr/src/sys/dev/xl/if_xl.c`中的3Com EtherLink III驱动有最小的三方法设置：
 
 ```c
 static int
@@ -2947,16 +2946,16 @@ xl_resume(device_t dev)
 }
 ```
 
-Two things stand out:
+两件事引人注目：
 
-1. `xl_shutdown` is one line: it just calls `xl_suspend`. For this driver, shutdown and suspend do the same work, and the code does not need two copies.
-2. There is no `suspended` flag in the softc. The driver assumes the normal lifecycle of attach → run → suspend → resume, and uses the `IFF_DRV_RUNNING` flag (which the TX path already checks) as the equivalent. This is a perfectly valid approach for a NIC whose main user-visible state is the interface's running state.
+1. `xl_shutdown`是一行：它只调用`xl_suspend`。对于此驱动，关机和挂起做相同工作，代码不需要两份副本。
+2. softc中没有`suspended`标志。驱动假设正常的挂载→运行→挂起→恢复生命周期，并使用TX路径已检查的`IFF_DRV_RUNNING`标志作为等效。这对于主要用户可见状态是接口运行状态的NIC是完全有效的方法。
 
-For the `myfirst` driver, the explicit `suspended` flag is preferred because the driver has no natural equivalent of `IFF_DRV_RUNNING`. A NIC driver can reuse what it already has; a learning driver declares what it needs.
+对于`myfirst`驱动，显式`suspended`标志更受偏好因为驱动没有`IFF_DRV_RUNNING`的自然等效。NIC驱动可以重用它已有的；学习驱动声明它需要的。
 
-### virtio_blk.c: Minimal Quiesce
+### virtio_blk.c：最小静默
 
-The virtio block driver in `/usr/src/sys/dev/virtio/block/virtio_blk.c` has an even shorter suspend path:
+/usr/src/sys/dev/virtio/block/virtio_blk.c`中的virtio块驱动有更短的挂起路径：
 
 ```c
 static int
@@ -2994,203 +2993,203 @@ vtblk_resume(device_t dev)
 }
 ```
 
-The comment `/* XXX BMV: virtio_stop(), etc needed here? */` is an honest acknowledgement that the author was not sure how thorough the quiesce should be. The existing code sets a flag, waits for the queue to drain (that is what `vtblk_quiesce` does), and returns. On resume, it clears the flag and restarts I/O.
+注释`/* XXX BMV: virtio_stop(), etc needed here? */`是作者不确定静默应该多彻底的诚实承认。现有代码设置标志、等待队列排空（这就是`vtblk_quiesce`做的），然后返回。恢复时，它清除标志并重启I/O。
 
-For a virtio block device, this is enough because the virtio host (the hypervisor) implements its own quiesce when the guest says it is suspending. The driver only needs to stop submitting new requests; the host deals with the rest.
+对于virtio块设备，这足够了因为virtio主机（虚拟机监控程序）在客户说它正在挂起时实现自己的静默。驱动只需停止提交新请求；主机处理其余。
 
-This shows an important pattern: **the driver's quiesce depth depends on how much of the hardware's state is the driver's responsibility**. A bare-metal driver (like `re(4)`) has to program hardware registers carefully because the hardware has no other ally. A virtio driver has the hypervisor as an ally; the host can handle most of the state for the guest. The `myfirst` driver, running on a simulated backend, is in a similar position: the simulation is an ally, and the driver's quiesce can be correspondingly simpler.
+这展示了一个重要模式：**驱动的静默深度取决于硬件状态有多少是驱动的责任**。裸机驱动（如`re(4)`）必须小心编程硬件寄存器因为硬件没有其他盟友。virtio驱动有虚拟机监控程序作为盟友；主机可以为客户处理大部分状态。`myfirst`驱动运行在模拟后端上，处于类似位置：模拟是盟友，驱动的静默可以相应更简单。
 
 ### 比较显示了什么
 
-Reading multiple drivers' power-management code side by side is one of the best ways to build fluency. Each driver adapts the Chapter 22 pattern to its context: `re(4)` handles wake-on-LAN, `xl(4)` reuses `xl_shutdown = xl_suspend`, `virtio_blk(4)` trusts the hypervisor. The common thread is the structure: stop activity, save state, flag suspended, return 0 from suspend; on resume, clear flag, restore state, restart activity, return 0.
+并排阅读多个驱动的电源管理代码是建立流利度的最佳方式之一。每个驱动将第22章模式适应其上下文：`re(4)`处理网络唤醒，`xl(4)`重用`xl_shutdown = xl_suspend`，`virtio_blk(4)`信任虚拟机监控程序。共同线索是结构：停止活动、保存状态、标记已挂起、从挂起返回0；恢复时，清除标志、恢复状态、重启活动、返回0。
 
-A reader who has Chapter 22 in memory can open any FreeBSD driver, find its `device_suspend` and `device_resume` in the method table, and read the two functions. Within a few minutes the driver's power policy is clear. That skill transfers to every driver the reader will ever work on; it is the single most useful takeaway from the chapter.
+心中有第22章的读者可以打开任何FreeBSD驱动，在方法表中找到其`device_suspend`和`device_resume`，阅读这两个函数。几分钟内驱动的电源策略就清楚了。这项技能迁移到读者将来工作的每个驱动；它是本章最有用的单一收获。
 
 
 
 ## 深入理解：ACPI睡眠状态详解
 
-Section 1 introduced the ACPI S-states as a list. It is worth revisiting them with the driver's point of view in focus, because the driver sees slightly different things depending on which S-state the kernel is entering.
+第1节以列表形式介绍了ACPI S状态。值得以驱动的视角重新审视它们，因为驱动看到的东西略有不同，取决于内核正在进入哪个S状态。
 
 ### S0：工作状态
 
-S0 is the state the reader has worked in throughout Chapters 16 to 21. The CPU is executing, RAM is refreshed, the PCIe links are up. From the driver's point of view, S0 is continuous; everything is normal.
+S0是读者在第16到21章中一直工作的状态。CPU执行中，RAM刷新中，PCIe链路已启动。从驱动角度看，S0是连续的；一切正常。
 
-Within S0, however, there can still be fine-grained power transitions. The CPU may enter idle states (C1, C2, C3, etc.) between scheduler ticks. The PCIe link may enter L0s or L1 based on ASPM. Devices may enter D3 based on runtime PM. None of these require the driver to do anything beyond its own runtime-PM logic; they are transparent.
+然而在S0内，仍可以有细粒度电源转换。CPU可以在调度器节拍之间进入空闲状态（C1、C2、C3等）。PCIe链路可以基于ASPM进入L0s或L1。设备可以基于运行时PM进入D3。这些都不需要驱动做任何超出自身运行时PM逻辑的事情；它们是透明的。
 
 ### S1：待机
 
-S1 is historically the lightest sleep state. The CPU stops executing but its registers are preserved; RAM stays powered; device power stays at D0 or D1. Wake latency is fast (under a second).
+S1历史上是最轻的睡眠状态。CPU停止执行但其寄存器被保留；RAM保持供电；设备电源保持D0或D1。唤醒延迟快（一秒以内）。
 
-On modern hardware, S1 is rarely supported. The platform's BIOS advertises only S3 and deeper. If the platform does advertise S1 and the user enters it, the driver's `DEVICE_SUSPEND` is still called; the driver does its usual quiesce. The difference is that the PCI layer typically does not transition to D3 for S1 (because the bus stays powered), so the device stays in D0 through the transition. The driver's save and restore are largely unused.
+在现代硬件上，S1很少被支持。平台的BIOS只广播S3及更深的状态。如果平台确实广播S1且用户进入它，驱动的`DEVICE_SUSPEND`仍被调用；驱动做其通常的静默。区别是PCI层通常不为S1转换到D3（因为总线保持供电），所以设备在转换期间保持D0。驱动的保存和恢复大部分未使用。
 
-A driver that supports S1 cleanly also supports S3, because the driver-side work is a subset. No driver written for Chapter 22 needs to treat S1 specially.
+干净支持S1的驱动也支持S3，因为驱动侧工作是子集。为第22章编写的驱动不需要特殊处理S1。
 
 ### S2：保留
 
-S2 is defined in the ACPI specification but almost never implemented. A driver can safely ignore it; FreeBSD's ACPI layer treats S2 as S1 or S3 depending on platform support.
+S2在ACPI规范中定义但几乎从未实现。驱动可以安全忽略它；FreeBSD的ACPI层根据平台支持将S2视为S1或S3。
 
 ### S3：挂起到内存
 
-S3 is the canonical sleep state Chapter 22 targets. When the user enters S3:
+S3是第22章瞄准的规范睡眠状态。当用户进入S3时：
 
-1. The kernel's suspend sequence traverses the device tree, calling `DEVICE_SUSPEND` on each driver.
-2. The PCI layer's `pci_suspend_child` caches configuration space for each PCI device.
-3. The PCI layer transitions each PCI device to D3hot.
-4. Higher-level subsystems (ACPI, the CPU's idle machinery) enter their own sleep states.
-5. The CPU's context is saved to RAM; the CPU halts.
-6. RAM enters self-refresh; the memory controller maintains the contents with minimal power.
-7. The platform's wake circuitry is armed: the power button, lid switch, and any configured wake sources.
-8. The system waits for a wake event.
+1. 内核的挂起序列遍历设备树，在每个驱动上调用`DEVICE_SUSPEND`。
+2. PCI层的`pci_suspend_child`为每个PCI设备缓存配置空间。
+3. PCI层将每个PCI设备转换到D3hot。
+4. 更高级子系统（ACPI、CPU的空闲机制）进入自己的睡眠状态。
+5. CPU的上下文保存到RAM；CPU停止。
+6. RAM进入自刷新；内存控制器以最小功率维持内容。
+7. 平台的唤醒电路装备就绪：电源按钮、盖子开关和任何配置的唤醒源。
+8. 系统等待唤醒事件。
 
-When a wake event arrives:
+当唤醒事件到达时：
 
-1. The CPU resumes; its context is restored from RAM.
-2. Higher-level subsystems resume.
-3. The PCI layer walks the device tree and calls `pci_resume_child` for each device.
-4. Each device is transitioned to D0; its configuration is restored; pending PME# is cleared.
-5. Each driver's `DEVICE_RESUME` is called.
-6. User space unfreezes.
+1. CPU恢复；其上下文从RAM恢复。
+2. 更高级子系统恢复。
+3. PCI层遍历设备树并为每个设备调用`pci_resume_child`。
+4. 每个设备转换到D0；其配置恢复；待处理的PME#被清除。
+5. 每个驱动的`DEVICE_RESUME`被调用。
+6. 用户空间解冻。
 
-The driver sees only steps 1 (suspend) and 5 (resume) of each sequence. The rest is kernel and platform machinery.
+驱动只看到每个序列的步骤1（挂起）和步骤5（恢复）。其余是内核和平台机制。
 
-A subtle point: during S3, RAM is refreshed but the kernel is not running. This means any kernel-side state (the softc, the DMA buffer, the pending tasks) survives S3 unchanged. The only thing that may be lost is hardware state: configuration registers in the device may be reset; BAR-mapped registers may return to default values. The driver's job on resume is to re-program the hardware from the preserved kernel state.
+一个微妙的点：在S3期间，RAM被刷新但内核未运行。这意味着任何内核侧状态（softc、DMA缓冲区、待处理任务）在S3中不变地存活。唯一可能丢失的是硬件状态：设备中的配置寄存器可能被重置；BAR映射寄存器可能返回默认值。驱动在恢复时的工作是从保留的内核状态重新编程硬件。
 
 ### S4：挂起到磁盘（休眠）
 
-S4 is the "hibernate" state. The kernel writes the full contents of RAM to a disk image, then enters S5. On wake, the platform boots, the kernel reads the image back, and the system continues from where it left off.
+S4是"休眠"状态。内核将RAM的全部内容写入磁盘映像，然后进入S5。唤醒时，平台启动，内核读取映像回，系统从它离开的地方继续。
 
-On FreeBSD, S4 has historically been partial. The kernel can produce the hibernation image on some platforms, but the restore path is not as mature as Linux's. For driver purposes, S4 is the same as S3: the `DEVICE_SUSPEND` and `DEVICE_RESUME` methods are called; the driver's quiesce and restore paths work without change. The extra platform-level work (writing the image) is transparent.
+在FreeBSD上，S4历史上一直不完整。内核可以在某些平台上产生休眠映像，但恢复路径不如Linux成熟。对于驱动目的，S4与S3相同：`DEVICE_SUSPEND`和`DEVICE_RESUME`方法被调用；驱动的静默和恢复路径无需更改即可工作。额外的平台级工作（写入映像）是透明的。
 
-The one difference the driver might notice is that after S4 resume, the PCI configuration space is always restored from scratch (the platform has fully rebooted), so even if the driver were relying on `hw.pci.do_power_suspend` being 0 to keep the device in D0, after S4 the device will still have been through a full power cycle. This matters only for drivers that do platform-specific tricks during suspend; most drivers are oblivious.
+驱动可能注意到的一个区别是S4恢复后，PCI配置空间始终从头恢复（平台已完全重启），所以即使驱动依赖`hw.pci.do_power_suspend`为0保持设备在D0，S4后设备仍会经历完整电源周期。这仅对在挂起期间做平台特定技巧的驱动有影响；大多数驱动对此无感知。
 
 ### S5：软关机
 
-S5 is system power-off. The power button, the battery (if any), and the wake circuitry still receive power; everything else is off.
+S5是系统断电。电源按钮、电池（如果有）和唤醒电路仍接收电源；其他一切关闭。
 
-From the driver's point of view, S5 looks like a shutdown: `DEVICE_SHUTDOWN` is called (not `DEVICE_SUSPEND`), the driver places the device in a safe state for power-off, and the system halts. There is no resume corresponding to S5; if the user presses the power button, the system boots from scratch.
+从驱动角度看，S5看起来像关机：`DEVICE_SHUTDOWN`被调用（不是`DEVICE_SUSPEND`），驱动将设备置于安全断电状态，系统停止。S5没有对应的恢复；如果用户按电源按钮，系统从头启动。
 
-Shutdown is not a power transition in the reversible sense; it is a termination. The driver's `DEVICE_SHUTDOWN` method is called once, and the driver does not expect to run again until the next boot. The chapter's `myfirst_power_shutdown` handles this correctly by quiescing the device (same as suspend) and not trying to save any state (because there is no resume to save for).
+关机不是可逆意义上的电源转换；它是终止。驱动的`DEVICE_SHUTDOWN`方法被调用一次，驱动不期望在下次启动前再次运行。本章的`myfirst_power_shutdown`通过静默设备（与挂起相同）且不尝试保存任何状态（因为没有恢复需要保存）来正确处理这一点。
 
 ### 观察平台支持的状态
 
-On any FreeBSD 14.3 system with ACPI, the supported states are exposed through a sysctl:
+在任何带ACPI的FreeBSD 14.3系统上，支持的状态通过sysctl暴露：
 
 ```sh
 sysctl hw.acpi.supported_sleep_state
 ```
 
-Typical outputs:
+典型输出：
 
-- A modern laptop: `S3 S4 S5`
-- A server: `S5` (suspend not supported on many server platforms)
-- A VM on bhyve: varies; usually `S5` only
-- A VM on QEMU/KVM with `-machine q35`: often `S3 S4 S5`
+- 现代笔记本：`S3 S4 S5`
+- 服务器：`S5`（许多服务器平台不支持挂起）
+- bhyve上的VM：各不相同；通常只有`S5`
+- 带有`-machine q35`的QEMU/KVM上的VM：通常`S3 S4 S5`
 
-If a driver is meant to work on a specific platform, the supported-state list tells you which transitions you need to test. A driver that only runs on servers does not need S3 testing; a driver meant for laptops does.
+如果驱动要在特定平台上工作，支持状态列表告诉您需要测试哪些转换。仅在服务器上运行的驱动不需要S3测试；为笔记本设计的驱动需要。
 
 ### 测试内容
 
-For Chapter 22's purposes, the minimum test is:
+对于第22章的目的，最低测试是：
 
-- `devctl suspend` / `devctl resume`: always possible; tests the driver-side code path.
-- `acpiconf -s 3` (if supported): tests the full system suspend.
-- System shutdown (`shutdown -p now`): tests the `DEVICE_SHUTDOWN` method.
+- `devctl suspend` / `devctl resume`：始终可能；测试驱动侧代码路径。
+- `acpiconf -s 3`（如果支持）：测试完整系统挂起。
+- 系统关机（`shutdown -p now`）：测试`DEVICE_SHUTDOWN`方法。
 
-S4 and runtime PM are optional; they exercise less-used code paths. A driver that passes the minimum test on a platform that supports S3 is in good shape; extensions are icing.
+S4和运行时PM是可选的；它们练习较少使用的代码路径。在支持S3的平台上通过最低测试的驱动状态良好；扩展是锦上添花。
 
 ### 睡眠状态到驱动程序方法的映射
 
-A compact table of which kobj method is called for each transition:
+每种转换调用哪个kobj方法的紧凑表格：
 
-| Transition          | Method             | Driver Action                                    |
+| 转换                | 方法               | 驱动操作                                         |
 |---------------------|--------------------|--------------------------------------------------|
-| S0 → S1             | DEVICE_SUSPEND     | Quiesce; save state                              |
-| S0 → S3             | DEVICE_SUSPEND     | Quiesce; save state (device likely goes to D3)   |
-| S0 → S4             | DEVICE_SUSPEND     | Quiesce; save state (followed by hibernate)      |
-| S0 → S5 (shutdown)  | DEVICE_SHUTDOWN    | Quiesce; leave in safe state for power-off       |
-| S1/S3 → S0          | DEVICE_RESUME      | Restore state; unmask interrupts                 |
-| S4 → S0 (resume)    | (attach from boot) | Normal attach, because the kernel booted fresh   |
-| devctl suspend      | DEVICE_SUSPEND     | Quiesce; save state (device goes to D3)          |
-| devctl resume       | DEVICE_RESUME      | Restore state; unmask interrupts                 |
+| S0 → S1             | DEVICE_SUSPEND     | 静默；保存状态                                    |
+| S0 → S3             | DEVICE_SUSPEND     | 静默；保存状态（设备可能进入D3）                    |
+| S0 → S4             | DEVICE_SUSPEND     | 静默；保存状态（随后休眠）                          |
+| S0 → S5（关机）      | DEVICE_SHUTDOWN    | 静默；使设备处于断电安全状态                       |
+| S1/S3 → S0          | DEVICE_RESUME      | 恢复状态；取消屏蔽中断                             |
+| S4 → S0（恢复）      | （从启动挂载）       | 正常挂载，因为内核是全新引导的                      |
+| devctl suspend      | DEVICE_SUSPEND     | 静默；保存状态（设备进入D3）                       |
+| devctl resume       | DEVICE_RESUME      | 恢复状态；取消屏蔽中断                             |
 
-The driver does not distinguish S1, S3, and S4 from its own code; it always does the same work. The differences are at the platform and kernel levels. That uniformity is what makes the pattern scalable: one suspend path, one resume path, multiple contexts.
+驱动不从自己的代码中区分S1、S3和S4；它总是做相同的工作。差异在平台和内核层。这种统一性使模式可扩展：一个挂起路径，一个恢复路径，多个上下文。
 
 
 
 ## 深入理解：PCIe链路状态和ASPM实战
 
-Section 1 sketched the PCIe link states (L0, L0s, L1, L1.1, L1.2, L2). It is worth seeing how they behave in practice, because understanding them helps the driver developer interpret latency measurements and power observations.
+第1节概述了PCIe链路状态（L0、L0s、L1、L1.1、L1.2、L2）。值得在实践中看看它们的行为，因为理解它们有助于驱动开发者解释延迟测量和功耗观察。
 
 ### 为什么链路有自己的状态
 
-A PCIe link is a pair of high-speed differential lanes between two endpoints (root complex and device, or root complex and switch). Each lane has a transmitter and a receiver; each lane's transmitter consumes power to keep the channel in a known state. When traffic is low, the transmitters can be turned off in various degrees, and the link can be re-established quickly when traffic resumes. The L-states describe those degrees.
+PCIe链路是两个端点（根复合体和设备，或根复合体和交换器）之间的一对高速差分通道。每个通道有发送器和接收器；每个通道的发送器消耗功率保持通道在已知状态。当流量低时，发送器可以不同程度关闭，链路可以在流量恢复时快速重新建立。L状态描述这些程度。
 
-The link's state is separate from the device's D-state. A device in D0 can have its link in L1 (the link is idle; the device is not transmitting or receiving). A device in D3 has its link in L2 or similar (the link is off). A device in D0 with a busy link is in L0.
+链路的状态独立于设备的D状态。D0中的设备可以使其链路处于L1（链路空闲；设备不在传输或接收）。D3中的设备使其链路处于L2或类似状态（链路关闭）。D0中带繁忙链路的设备处于L0。
 
 ### L0：活动
 
-L0 is the normal operating state. Both sides of the link are active; data can flow in either direction; latency is at its minimum (a few hundred nanoseconds round-trip on a modern PCIe).
+L0是正常操作状态。链路两侧都活跃；数据可以双向流动；延迟最小（现代PCIe上往返几百纳秒）。
 
-When a DMA transfer is running or an MMIO read is pending, the link is in L0. The device's own logic and the PCIe host bridge both require L0 for the transaction.
+当DMA传输正在运行或MMIO读取待处理时，链路处于L0。设备自身的逻辑和PCIe主机桥都需要L0进行事务。
 
 ### L0s：发送器待机
 
-L0s is a low-power state where one side of the link's transmitter is turned off. The receiver stays on; the link can be brought back to L0 in under a microsecond.
+L0s是链路一侧发送器关闭的低功耗状态。接收器保持开启；链路可以在一微秒内回到L0。
 
-L0s is entered automatically by the link logic when no traffic has been sent for a few microseconds. The platform's PCIe host bridge and the device's PCIe interface cooperate: when the transmit FIFO is empty and ASPM is enabled, the transmitter goes off. When new traffic arrives, the transmitter comes back on.
+L0s在几微秒没有发送流量时由链路逻辑自动进入。平台的PCIe主机桥和设备的PCIe接口协作：当发送FIFO为空且ASPM启用时，发送器关闭。当新流量到达时，发送器重新开启。
 
-L0s is "asymmetric": each side independently enters and exits the state. A device's transmitter can be in L0s while the root complex's transmitter is in L0. This is useful because traffic is typically bursty: the CPU sends a DMA trigger, then does not send anything else for a while; the CPU's transmitter enters L0s quickly, while the device's transmitter stays in L0 because it is actively sending the DMA response.
+L0s是"非对称的"：每侧独立进入和退出状态。设备的发送器可以在L0s中而根复合体的发送器在L0中。这很有用因为流量通常是突发的：CPU发送DMA触发，然后一段时间不发送任何东西；CPU的发送器快速进入L0s，而设备的发送器保持在L0因为它正在积极发送DMA响应。
 
 ### L1：双方待机
 
-L1 is a deeper state where both transmitters are off. Neither side can send anything until the link is brought back to L0; the latency is measured in microseconds (5 to 65, depending on platform).
+L1是更深的状态，两侧发送器都关闭。在链路回到L0之前，任何一方都不能发送任何东西；延迟以微秒计（5到65，取决于平台）。
 
-L1 is entered after a longer idle period than L0s. The exact threshold is configurable through ASPM settings; typical values are tens of microseconds of inactivity. L1 saves more power than L0s but costs more to exit.
+L1在比L0s更长的空闲期后进入。确切阈值通过ASPM设置配置；典型值是数十微秒不活动。L1比L0s节省更多功率但退出成本更高。
 
 ### L1.1和L1.2：更深的L1子状态
 
-PCIe 3.0 and later define sub-states of L1 that turn off additional parts of the physical layer. L1.1 (also called "L1 PM Substate 1") keeps the clock running but turns off more circuitry; L1.2 turns off the clock as well. The wake latencies increase (tens of microseconds for L1.1; hundreds for L1.2), but the idle power draws decrease.
+PCIe 3.0及更高版本定义了关闭物理层额外部分的L1子状态。L1.1（也称为"L1 PM子状态1"）保持时钟运行但关闭更多电路；L1.2也关闭时钟。唤醒延迟增加（L1.1数十微秒；L1.2数百微秒），但空闲功耗降低。
 
-Most modern laptops use L1.1 and L1.2 aggressively to extend battery life. A laptop that stays in L1.2 most of the idle time can have PCIe power draw in the single-digit milliwatts, compared to hundreds of milliwatts in L0.
+大多数现代笔记本积极使用L1.1和L1.2以延长电池寿命。大部分空闲时间保持在L1.2的笔记本PCIe功耗可以是个位毫瓦，而L0中是数百毫瓦。
 
 ### L2：近关闭
 
-L2 is the state the link enters when the device is in D3cold. The link is effectively off; re-establishing it requires a full link-training sequence (tens of milliseconds). L2 is entered as part of the full-system suspend sequence; the driver does not manage it directly.
+L2是设备处于D3cold时链路进入的状态。链路实际上关闭；重新建立它需要完整链路训练序列（数十毫秒）。L2作为完整系统挂起序列的一部分进入；驱动不直接管理它。
 
 ### 谁控制ASPM
 
-ASPM is a per-link feature configured through the PCIe Link Capability and Link Control registers in both the root complex and the device. The configuration specifies:
+ASPM是通过根复合体和设备两端的PCIe链路能力和链路控制寄存器配置的每链路特性。配置指定：
 
-- Whether L0s is enabled (one-bit field).
-- Whether L1 is enabled (one-bit field).
-- The exit latency thresholds the platform considers acceptable.
+- 是否启用L0s（一位字段）。
+- 是否启用L1（一位字段）。
+- 平台认为可接受的退出延迟阈值。
 
-On FreeBSD, ASPM is usually controlled by the platform firmware through ACPI's `_OSC` method. The firmware tells the OS which capabilities to manage; if the firmware keeps ASPM control, the OS does not touch it. If the firmware hands over control, the OS may enable or disable ASPM per link based on policy.
+在FreeBSD上，ASPM通常由平台固件通过ACPI的`_OSC`方法控制。固件告诉操作系统管理哪些能力；如果固件保持ASPM控制，操作系统不触碰它。如果固件移交控制，操作系统可以基于策略按链路启用或禁用ASPM。
 
-For Chapter 22's `myfirst` driver, ASPM is the platform's job. The driver does not configure ASPM; it does not need to know whether the link is in L0 or L1 at any moment. The link's state is invisible to the driver from a functional standpoint (latency is the only observable effect).
+对于第22章的`myfirst`驱动，ASPM是平台的工作。驱动不配置ASPM；它不需要知道链路在任何时刻处于L0还是L1。从功能角度看，链路的状态对驱动是不可见的（延迟是唯一可观察的效果）。
 
 ### ASPM何时对驱动程序重要
 
-There are specific situations where a driver does have to worry about ASPM:
+在特定情况下驱动确实需要关注ASPM：
 
-1. **Known errata.** Some PCIe devices have bugs in their ASPM implementation that cause the link to wedge or produce corrupted transactions. The driver may need to explicitly disable ASPM for those devices. The kernel provides the PCIe Link Control register access through `pcie_read_config` and `pcie_write_config` for this purpose.
+1. **已知勘误。** 某些PCIe设备的ASPM实现有缺陷，会导致链路卡死或产生损坏的事务。驱动可能需要为这些设备显式禁用ASPM。内核通过`pcie_read_config`和`pcie_write_config`提供PCIe链路控制寄存器访问用于此目的。
 
-2. **Latency-sensitive devices.** A real-time audio or video device may not tolerate the microsecond-scale latency of L1. The driver may disable L1 while keeping L0s enabled.
+2. **延迟敏感设备。** 实时音频或视频设备可能无法容忍L1的微秒级延迟。驱动可以在保持L0s启用的同时禁用L1。
 
-3. **Power-sensitive devices.** A battery-powered device may want L1.2 always enabled. The driver may force L1.2 if the platform's default is less aggressive.
+3. **功耗敏感设备。** 电池供电的设备可能希望L1.2始终启用。如果平台默认不够激进，驱动可以强制L1.2。
 
-For the `myfirst` driver, none of these apply. The simulated device does not have a link at all; the real PCIe link (if any) is handled by the platform. The chapter mentions ASPM for completeness and moves on.
+对于`myfirst`驱动，这些都不适用。模拟设备根本没有链路；真实PCIe链路（如果有）由平台处理。本章为完整性提及ASPM后继续。
 
 ### 观察链路状态
 
-On a system where the platform supports ASPM observation, the link state is exposed through `pciconf -lvbc`:
+在平台支持ASPM观察的系统上，链路状态通过`pciconf -lvbc`暴露：
 
 ```sh
 pciconf -lvbc | grep -A 20 myfirst
 ```
 
-Look for lines like:
+查找如下行：
 
 ```text
 cap 10[ac] = PCI-Express 2 endpoint max data 128(512) FLR NS
@@ -3200,15 +3199,15 @@ cap 10[ac] = PCI-Express 2 endpoint max data 128(512) FLR NS
              slot 0
 ```
 
-The "ASPM disabled" on this line says ASPM is not currently active. "disabled(L0s/L1)" says the device supports both L0s and L1 but neither is enabled. On a system with aggressive ASPM, the line would read "ASPM L1" or similar.
+此行上的"ASPM disabled"表示ASPM当前不活跃。"disabled(L0s/L1)"表示设备支持L0s和L1但两者都未启用。在有激进ASPM的系统上，该行会显示"ASPM L1"或类似内容。
 
-The exit latencies tell the driver how long the transition back to L0 takes; a latency-sensitive driver can decide whether L1 is tolerable by looking at this number.
+退出延迟告诉驱动回到L0的转换需要多长时间；延迟敏感的驱动可以通过查看此数字决定L1是否可容忍。
 
 ### 链路状态和功耗
 
-A rough table of PCIe power draws (typical values; actual depend on implementation):
+PCIe功耗粗略表格（典型值；实际取决于实现）：
 
-| State | Power (x1 link) | Exit Latency |
+| 状态  | 功耗（x1链路）   | 退出延迟     |
 |-------|-----------------|--------------|
 | L0    | 100-200 mW      | 0            |
 | L0s   | 50-100 mW       | <1 µs        |
@@ -3217,29 +3216,29 @@ A rough table of PCIe power draws (typical values; actual depend on implementati
 | L1.2  | <1 mW           | 50-500 µs    |
 | L2    | near 0          | 1-100 ms     |
 
-For a laptop with a dozen PCIe links all in L1.2 during idle, the aggregate savings relative to all-L0 can be in the watts. For a server with high-throughput links always in L0, ASPM is disabled and the power saving is zero.
+对于空闲时所有12条PCIe链路都在L1.2的笔记本，相对于全L0的总节省可以达到瓦特级别。对于高吞吐量链路始终在L0的服务器，ASPM被禁用，节能为零。
 
-Chapter 22 does not implement ASPM for `myfirst`. The chapter mentions it because understanding the link state machine is part of understanding the full power-management picture. A reader who later works on a driver with known ASPM errata will know where to look.
+第22章不为`myfirst`实现ASPM。本章提及它因为理解链路状态机是理解完整电源管理图景的一部分。之后在有已知ASPM勘误的驱动上工作的读者会知道去哪里查找。
 
 
 
 ## 深入理解：唤醒源详解
 
-Wake sources are the mechanisms that bring a suspended system or device back to active. Chapter 1 mentioned them briefly; this deeper look walks through the most common ones.
+唤醒源是将挂起的系统或设备带回活动状态的机制。第1节简要提及了它们；这个深入理解遍历最常见的几种。
 
 ### PCIe上的PME#
 
-The PCI spec defines the `PME#` signal (Power Management Event). When asserted, it tells the upstream root complex that the device has an event worth waking for. The root complex converts PME# into an ACPI GPE or interrupt, which the kernel handles.
+PCI规范定义`PME#`信号（电源管理事件）。断言时，它告诉上游根复合体设备有值得唤醒的事件。根复合体将PME#转换为ACPI GPE或中断，由内核处理。
 
-A device that supports PME# has a PCI power-management capability (checked via `pci_has_pm`). The capability's control register includes:
+支持PME#的设备有PCI电源管理能力（通过`pci_has_pm`检查）。能力的控制寄存器包括：
 
-- **PME_En** (bit 8): enable PME# generation.
-- **PME_Status** (bit 15): set by the device when PME# is raised, cleared by software.
-- **PME_Support** (read-only, bits 11-15 in PMC register): which D-states the device can raise PME# from (D0, D1, D2, D3hot, D3cold).
+- **PME_En**（位8）：启用PME#生成。
+- **PME_Status**（位15）：设备在PME#被引发时设置，由软件清除。
+- **PME_Support**（只读，PMC寄存器中的位11-15）：设备可以从哪些D状态引发PME#（D0、D1、D2、D3hot、D3cold）。
 
-The driver's job is to set PME_En at the right time (usually before suspend) and to clear PME_Status at the right time (usually after resume). The `pci_enable_pme(dev)` and `pci_clear_pme(dev)` helpers do both jobs.
+驱动的工作是在正确的时间设置PME_En（通常在挂起前）和在正确的时间清除PME_Status（通常在恢复后）。`pci_enable_pme(dev)`和`pci_clear_pme(dev)`助手完成这两个工作。
 
-On a typical laptop, the root complex routes PME# to an ACPI GPE, which the kernel's ACPI driver picks up as a wake event. The chain looks like:
+在典型笔记本上，根复合体将PME#路由到ACPI GPE，内核的ACPI驱动将其作为唤醒事件拾取。链如下：
 
 ```text
 device asserts PME#
@@ -3251,94 +3250,94 @@ device asserts PME#
   → eventually: DEVICE_RESUME on the device that woke
 ```
 
-The whole chain takes one to three seconds. The driver's role is minimal: it enabled PME# before suspend, and it will clear PME_Status after resume. Everything else is platform.
+整个链需要一到三秒。驱动的角色很小：它在挂起前启用PME#，它将在恢复后清除PME_Status。其余是平台的工作。
 
 ### USB远程唤醒
 
-USB has its own wake mechanism called "remote wakeup". A USB device requests wake capability through its standard descriptor; the host controller enables the capability at enumeration time; when the device asserts a resume signal on its upstream port, the host controller propagates it.
+USB有自己的唤醒机制称为"远程唤醒"。USB设备通过其标准描述符请求唤醒能力；主机控制器在枚举时启用该能力；当设备在其上游端口上断言恢复信号时，主机控制器传播它。
 
-From a FreeBSD driver perspective, USB remote wakeup is almost entirely handled by the USB host controller driver (`xhci`, `ohci`, `uhci`). Individual USB device drivers (for keyboards, storage, audio, etc.) participate through the USB framework's suspend and resume callbacks, but they do not deal with PME# directly. The USB host controller's own PME# is what actually wakes the system.
+从FreeBSD驱动角度看，USB远程唤醒几乎完全由USB主机控制器驱动（`xhci`、`ohci`、`uhci`）处理。单个USB设备驱动（用于键盘、存储、音频等）通过USB框架自己的挂起和恢复回调参与，但它们不直接处理PME#。USB主机控制器自身的PME#是实际唤醒系统的东西。
 
-For Chapter 22 purposes, USB wake is a black box that works through the USB host controller driver. A reader who eventually writes a USB device driver will learn the framework's conventions then.
+对于第22章的目的，USB唤醒是通过USB主机控制器驱动工作的黑盒。最终编写USB设备驱动的读者将在那时学习框架的约定。
 
 ### 嵌入式平台上的GPIO唤醒
 
-On embedded platforms (arm64, RISC-V), wake sources are typically GPIO pins connected to the SoC's wake logic. The device tree describes which pins are wake sources via `wakeup-source` properties and `interrupts-extended` pointing to the wake controller.
+在嵌入式平台（arm64、RISC-V）上，唤醒源通常是连接到SoC唤醒逻辑的GPIO引脚。设备树通过`wakeup-source`属性和指向唤醒控制器的`interrupts-extended`描述哪些引脚是唤醒源。
 
-FreeBSD's GPIO intr framework handles these. A device driver whose hardware is wake-capable reads the device-tree `wakeup-source` property during attach, registers the GPIO as a wake source with the framework, and the framework does the rest. The mechanism is very different from PCIe PME#, but the driver-side API (mark wake enabled, clear wake status) is conceptually similar.
+FreeBSD的GPIO intr框架处理这些。硬件具有唤醒能力的设备驱动在挂载期间读取设备树`wakeup-source`属性，用框架将GPIO注册为唤醒源，框架做其余的工作。该机制与PCIe PME#非常不同，但驱动侧API（标记唤醒启用、清除唤醒状态）在概念上相似。
 
-Chapter 22 does not exercise GPIO wake; the `myfirst` driver is a PCI device. Part 7 revisits embedded platforms and covers the GPIO path in detail.
+第22章不练习GPIO唤醒；`myfirst`驱动是PCI设备。第七部分重新审视嵌入式平台并详细覆盖GPIO路径。
 
 ### 局域网唤醒（WoL）
 
-Wake on LAN is a specific implementation pattern for a network controller. The controller watches incoming packets for a "magic packet" (a specific pattern containing the controller's MAC address repeated many times) or for user-configured patterns. When a match is detected, the controller asserts PME# upstream.
+局域网唤醒是网络控制器的特定实现模式。控制器监视传入数据包中的"魔法数据包"（包含控制器MAC地址重复多次的特定模式）或用户配置的模式。当检测到匹配时，控制器向上游断言PME#。
 
-From the driver's perspective, WoL requires:
+从驱动角度看，WoL需要：
 
-1. Configuring the NIC's wake logic (magic-packet filter, pattern filters) before suspend.
-2. Enabling PME# via `pci_enable_pme`.
-3. On resume, disabling the wake logic (because normal packet processing would otherwise be influenced by the filters).
+1. 在挂起前配置NIC的唤醒逻辑（魔法数据包过滤器、模式过滤器）。
+2. 通过`pci_enable_pme`启用PME#。
+3. 在恢复时，禁用唤醒逻辑（因为否则正常数据包处理会被过滤器影响）。
 
-The `re(4)` driver's `re_setwol` is the canonical FreeBSD example. A reader building a NIC driver copies its structure and adapts the device-specific register programming.
+`re(4)`驱动的`re_setwol`是规范的FreeBSD例子。构建NIC驱动的读者复制其结构并适应设备特定的寄存器编程。
 
 ### 盖子、电源按钮等唤醒
 
-The laptop's lid switch, power button, keyboard (in some cases), and other platform inputs are wired to the platform's wake logic through ACPI. The ACPI driver handles the wake; individual device drivers are not involved.
+笔记本的盖子开关、电源按钮、键盘（在某些情况下）和其他平台输入通过ACPI连接到平台的唤醒逻辑。ACPI驱动处理唤醒；单个设备驱动不参与。
 
-The ACPI `_PRW` method on a device's object in the ACPI namespace declares which GPE that device's wake event uses. The OS reads `_PRW` during boot to configure the wake routing. The `myfirst` driver, as a simple PCI endpoint with no platform-specific wake source, does not have a `_PRW` method; its wake capability (if any) is purely through PME#.
+ACPI命名空间中设备对象上的ACPI `_PRW`方法声明该设备的唤醒事件使用哪个GPE。操作系统在启动时读取`_PRW`以配置唤醒路由。`myfirst`驱动作为没有平台特定唤醒源的简单PCI端点，没有`_PRW`方法；其唤醒能力（如果有）纯粹通过PME#。
 
 ### 驱动程序何时必须启用唤醒
 
-A simple heuristic: the driver must enable wake if the user has asked for it (through an interface capability flag like `IFCAP_WOL` for NICs) and the hardware supports it (`pci_has_pm` returns true, the device's own wake logic is operational). Otherwise, the driver leaves wake disabled.
+简单的启发式：驱动必须在用户请求时（通过接口能力标志如NIC的`IFCAP_WOL`）且硬件支持时（`pci_has_pm`返回true，设备自身唤醒逻辑可操作）启用唤醒。否则，驱动保持唤醒禁用。
 
-A driver that enables wake for every device by default wastes platform power; the wake circuitry and PME# routing cost a few milliwatts continuously. A driver that never enables wake frustrates users who want their laptop to wake on a network packet. The policy is "enable only when asked".
+默认为每个设备启用唤醒的驱动浪费平台功率；唤醒电路和PME#路由持续消耗几毫瓦。从不启用唤醒的驱动让希望笔记本在收到网络数据包时唤醒的用户沮丧。策略是"仅在请求时启用"。
 
-FreeBSD's interface capabilities (set via `ifconfig em0 wol wol_magic`) are the standard way users express the desire. The NIC driver reads the flags and configures WoL accordingly.
+FreeBSD的接口能力（通过`ifconfig em0 wol wol_magic`设置）是用户表达愿望的标准方式。NIC驱动读取标志并相应配置WoL。
 
 ### 测试唤醒源
 
-Testing wake is harder than testing suspend and resume, because testing wake requires the system to actually sleep and then an external event to wake it. Common approaches:
+测试唤醒比测试挂起和恢复更难，因为测试唤醒需要系统实际睡眠然后外部事件唤醒它。常见方法：
 
-- **Magic packet from another machine.** Send a WoL magic packet to the suspended machine's MAC address. If WoL is working, the machine wakes in a few seconds.
-- **Lid switch.** Close the lid, wait, open the lid. If the platform's wake routing is working, the machine wakes on open.
-- **Power button.** Press the power button briefly while suspended. The machine should wake.
+- **从另一台机器发送魔法数据包。** 向挂起机器的MAC地址发送WoL魔法数据包。如果WoL工作，机器在几秒内唤醒。
+- **盖子开关。** 关闭盖子、等待、打开盖子。如果平台的唤醒路由工作，机器在打开时唤醒。
+- **电源按钮。** 在挂起时短暂按电源按钮。机器应唤醒。
 
-For a learning driver like `myfirst`, there is no meaningful wake source to test against. The chapter mentions wake mechanics for pedagogical completeness, not because the driver exercises them.
+对于像`myfirst`这样的学习驱动，没有有意义的唤醒源可以测试。本章出于教学完整性提及唤醒机制，不是因为驱动练习它们。
 
 
 
 ## 深入理解：hw.pci.do_power_suspend可调参数
 
-One of the most important tunables for power-management debugging is `hw.pci.do_power_suspend`. It controls whether the PCI layer automatically transitions devices to D3 during system suspend. Understanding what it does and when to change it is worth a dedicated look.
+电源管理调试中最重要的可调参数之一是`hw.pci.do_power_suspend`。它控制PCI层是否在系统挂起期间自动将设备转换到D3。理解它做什么以及何时更改它值得专门看一下。
 
 ### 默认值的作用
 
-With `hw.pci.do_power_suspend=1` (the default), the PCI layer's `pci_suspend_child` helper, after calling the driver's `DEVICE_SUSPEND`, transitions the device to D3hot by calling `pci_set_power_child(dev, child, PCI_POWERSTATE_D3)`. On resume, `pci_resume_child` transitions back to D0.
+`hw.pci.do_power_suspend=1`（默认）时，PCI层的`pci_suspend_child`助手在调用驱动的`DEVICE_SUSPEND`后，通过调用`pci_set_power_child(dev, child, PCI_POWERSTATE_D3)`将设备转换到D3hot。恢复时，`pci_resume_child`转回D0。
 
-This is the "power-save" mode. A device that supports D3 uses its lowest-power idle state during suspend. A laptop benefits because battery life during sleep is extended; a device that can sleep at a few milliwatts instead of a few hundred is worth the extra D-state transition.
+这是"节能"模式。支持D3的设备在挂起期间使用其最低功耗空闲状态。笔记本受益因为睡眠期间电池寿命延长；能以几毫瓦而非几百毫瓦睡眠的设备值得额外的D状态转换。
 
 ### hw.pci.do_power_suspend=0的作用
 
-With the tunable set to 0, the PCI layer does not transition the device to D3. The device stays in D0 throughout the suspend. The driver's `DEVICE_SUSPEND` runs; the driver quiesces activity; the device stays powered.
+可调参数设为0时，PCI层不将设备转换到D3。设备在整个挂起期间保持在D0。驱动的`DEVICE_SUSPEND`运行；驱动静默活动；设备保持供电。
 
-From a power-saving perspective, this is worse: the device continues to draw its D0 power budget during sleep. From a correctness perspective, it can be better for some devices:
+从节能角度看，这更差：设备在睡眠期间继续消耗D0功率预算。从正确性角度看，对某些设备可以更好：
 
-- A device with broken D3 implementation may misbehave when transitioned. Staying in D0 avoids the transition bug.
-- A device whose context is expensive to save and restore may prefer to stay in D0 during a short suspend. If the suspend is only a few seconds, the context-save cost exceeds the power-saving benefit.
-- A device that is critical to the machine's core function (a console keyboard, for example) may need to stay alert even during suspend.
+- 有损坏D3实现的设备在转换时可能行为异常。保持D0避免转换错误。
+- 上下文保存和恢复代价昂贵的设备在短暂挂起期间可能偏好保持D0。如果挂起仅几秒，上下文保存成本超过节能收益。
+- 对机器核心功能关键的设备（例如控制台键盘）可能需要在挂起期间保持警觉。
 
 ### 何时更改
 
-For development and debugging, setting `hw.pci.do_power_suspend=0` can isolate bugs:
+对于开发和调试，设置`hw.pci.do_power_suspend=0`可以隔离错误：
 
-- If a resume bug appears only with the tunable at 1, the bug is in the D3-to-D0 transition (either in the PCI layer's config restore, or in the driver's handling of a device that has been reset).
-- If a resume bug appears with the tunable at 0 as well, the bug is in the driver's `DEVICE_SUSPEND` or `DEVICE_RESUME` code, not in the D-state machinery.
+- 如果恢复错误仅在可调参数为1时出现，错误在D3到D0转换中（在PCI层的配置恢复中，或在驱动处理已重置设备中）。
+- 如果恢复错误在可调参数为0时也出现，错误在驱动的`DEVICE_SUSPEND`或`DEVICE_RESUME`代码中，不在D状态机制中。
 
-For production, the default (1) is almost always right. Changing it globally affects every PCI device on the system; a better approach is a per-device override if one is needed, which typically lives in the driver itself.
+对于生产，默认（1）几乎总是正确的。全局更改它影响系统上的每个PCI设备；更好的方法是如果需要则按设备覆盖，通常位于驱动自身中。
 
 ### 验证可调参数生效
 
-A quick way to verify is to check the device's power state with `pciconf` before and after a suspend:
+快速验证方法是在挂起前后用`pciconf`检查设备的电源状态：
 
 ```sh
 # Before suspend (device should be in D0):
@@ -3361,85 +3360,85 @@ sudo sysctl hw.pci.do_power_suspend=1
 sudo devctl resume myfirst0
 ```
 
-The `powerspec` line in `pciconf -lvbc` output shows the current power state. Watching it change between D0 and D3 confirms the automatic transition is happening.
+`pciconf -lvbc`输出中的`powerspec`行显示当前电源状态。观察它在D0和D3之间变化确认自动转换正在发生。
 
 ### 与pci_save_state的交互
 
-When `hw.pci.do_power_suspend` is 1, the PCI layer automatically calls `pci_cfg_save` before transitioning to D3. When it is 0, the PCI layer does not call `pci_cfg_save`.
+当`hw.pci.do_power_suspend`为1时，PCI层在转换到D3之前自动调用`pci_cfg_save`。当为0时，PCI层不调用`pci_cfg_save`。
 
-This has a subtle implication: if the driver wants to save configuration explicitly in the 0 case, it must call `pci_save_state` itself. The Chapter 22 pattern assumes the default (1) and does not call `pci_save_state` explicitly; a driver that wants to support both modes would need additional logic.
+这有一个微妙的含义：如果驱动想在0情况下显式保存配置，它必须自己调用`pci_save_state`。第22章的模式假设默认（1）并且不显式调用`pci_save_state`；想要支持两种模式的驱动需要额外逻辑。
 
 ### 可调参数影响系统挂起还是devctl挂起？
 
-Both. `pci_suspend_child` is called for both `acpiconf -s 3` and `devctl suspend`, and the tunable gates the D-state transition in both cases. A reader debugging with `devctl suspend` will see the same behavior as with a full system suspend, modulo the other platform work (CPU park, ACPI sleep state entry).
+两者都影响。`pci_suspend_child`既为`acpiconf -s 3`也为`devctl suspend`调用，可调参数在两种情况下都控制D状态转换。用`devctl suspend`调试的读者将看到与完整系统挂起相同的行为，除了其他平台工作（CPU停车、ACPI睡眠状态进入）。
 
 ### 具体调试场景
 
-Suppose the `myfirst` driver's resume fails intermittently: sometimes it works, sometimes `dma_test_read` after resume returns EIO. The counters are consistent (suspend count = resume count), the logs show both methods ran, but the post-resume DMA fails.
+假设`myfirst`驱动的恢复间歇性失败：有时工作，有时恢复后`dma_test_read`返回EIO。计数器一致（挂起计数=恢复计数），日志显示两个方法都运行了，但恢复后DMA失败。
 
-**Hypothesis 1.** The D3-to-D0 transition is producing an inconsistent device state. Verify by setting `hw.pci.do_power_suspend=0` and retrying.
+**假设1。** D3到D0转换产生了不一致的设备状态。通过设置`hw.pci.do_power_suspend=0`并重试验证。
 
-If the bug disappears with the tunable at 0, the D-state machinery is involved. The fix might be in the driver's resume path (add a delay after the transition to let the device stabilise), in the PCI layer's config restore, or in the device itself.
+如果错误在可调参数为0时消失，D状态机制涉及其中。修复可能在驱动的恢复路径中（在转换后添加延迟让设备稳定）、在PCI层的配置恢复中、或在设备本身中。
 
-**Hypothesis 2.** The bug is in the driver's own suspend/resume code, independent of D3. Verify by setting the tunable to 0 and retrying.
+**假设2。** 错误在驱动自己的挂起/恢复代码中，独立于D3。通过设置可调参数为0并重试验证。
 
-If the bug persists with the tunable at 0, the driver's code is the problem. The D3 transition is innocent.
+如果错误在可调参数为0时持续，驱动的代码是问题。D3转换是清白的。
 
-This kind of bisection is common in power-management debugging. The tunable is the tool that lets you isolate the variable.
+这种二分法在电源管理调试中很常见。可调参数是让您隔离变量的工具。
 
 
 
 ## 深入理解：DEVICE_QUIESCE和何时需要它
 
-Section 2 briefly mentioned `DEVICE_QUIESCE` as the third power-management method alongside `DEVICE_SUSPEND` and `DEVICE_SHUTDOWN`. It is rarely implemented explicitly in FreeBSD drivers; a search of `/usr/src/sys/dev/` shows only a handful of drivers define their own `device_quiesce`. Understanding when you do need it and when you do not is worth a short section.
+第2节简要提及`DEVICE_QUIESCE`作为`DEVICE_SUSPEND`和`DEVICE_SHUTDOWN`旁边的第三个电源管理方法。它在FreeBSD驱动中很少被显式实现；搜索`/usr/src/sys/dev/`显示只有少数驱动定义了自己的`device_quiesce`。理解何时需要它何时不需要值得一小节。
 
 ### DEVICE_QUIESCE的用途
 
-The `device_quiesce` wrapper in `/usr/src/sys/kern/subr_bus.c` is called in several places:
+`/usr/src/sys/kern/subr_bus.c`中的`device_quiesce`包装器在几个地方被调用：
 
-- `devclass_driver_deleted`: when a driver is being unloaded, the framework calls `device_quiesce` on every instance before calling `device_detach`.
-- `DEV_DETACH` via devctl: when the user runs `devctl detach myfirst0`, the kernel calls `device_quiesce` before `device_detach` unless the `-f` (force) flag is given.
-- `DEV_DISABLE` via devctl: when the user runs `devctl disable myfirst0`, the kernel calls `device_quiesce` similarly.
+- `devclass_driver_deleted`：当驱动被卸载时，框架在调用`device_detach`之前在每个实例上调用`device_quiesce`。
+- 通过devctl的`DEV_DETACH`：当用户运行`devctl detach myfirst0`时，内核在`device_detach`之前调用`device_quiesce`，除非给出`-f`（强制）标志。
+- 通过devctl的`DEV_DISABLE`：当用户运行`devctl disable myfirst0`时，内核类似地调用`device_quiesce`。
 
-In each case, the quiesce is a pre-check: "can the driver safely stop what it is doing?". A driver that returns EBUSY from `DEVICE_QUIESCE` prevents the subsequent detach or disable. The user gets an error, and the driver stays attached.
+在每种情况下，静默是预检查："驱动能安全停止正在做的事情吗？"。从`DEVICE_QUIESCE`返回EBUSY的驱动阻止后续分离或禁用。用户得到错误，驱动保持挂载。
 
 ### 默认值的作用
 
-If a driver does not implement `DEVICE_QUIESCE`, the default (`null_quiesce` in `device_if.m`) returns 0 unconditionally. The kernel proceeds with detach or disable.
+如果驱动不实现`DEVICE_QUIESCE`，默认（`device_if.m`中的`null_quiesce`）无条件返回0。内核继续分离或禁用。
 
-For most drivers, this is fine. The driver's detach path handles any in-flight work, so there is nothing the quiesce would do that detach does not also do.
+对于大多数驱动，这没问题。驱动的分离路径处理任何进行中的工作，所以静默能做的分离也都做。
 
 ### 何时应该实现它
 
-A driver implements `DEVICE_QUIESCE` explicitly when:
+驱动在以下情况下显式实现`DEVICE_QUIESCE`：
 
-1. **Returning EBUSY is more informative than waiting.** If the driver has a concept of "busy" (a transfer in flight, an open file descriptor count, a filesystem mount), and the user can wait for it to become non-busy, the driver might refuse quiesce until busy is zero. `DEVICE_QUIESCE` returning EBUSY tells the user "the device is busy; wait and retry".
+1. **返回EBUSY比等待更有信息量。** 如果驱动有"忙碌"的概念（传输进行中、打开的文件描述符计数、文件系统挂载），且用户可以等待它变为非忙碌，驱动可以拒绝静默直到忙碌为零。`DEVICE_QUIESCE`返回EBUSY告诉用户"设备正忙；请等待并重试"。
 
-2. **The quiesce can be done faster than a full detach.** If detach is expensive (frees large resource tables, drains slow queues) but the device can be stopped cheaply, `DEVICE_QUIESCE` lets the kernel probe for readiness without paying detach's cost.
+2. **静默可以比完整分离更快完成。** 如果分离代价高昂（释放大型资源表、排空慢速队列）但设备可以廉价停止，`DEVICE_QUIESCE`让内核在不付出分离成本的情况下探测就绪状态。
 
-3. **The driver wants to distinguish quiesce from suspend.** If the driver wants to stop activity but not save state (because no resume is coming), implementing quiesce separately from suspend is a way to express that distinction in code.
+3. **驱动想区分静默和挂起。** 如果驱动想停止活动但不保存状态（因为不会有恢复），将静默与挂起分开实现是在代码中表达这种区别的方式。
 
-For the `myfirst` driver, none of these apply. The Chapter 21 detach path already handles in-flight work; the Chapter 22 suspend path handles quiesce in the power-management sense. Adding a separate `DEVICE_QUIESCE` would be redundant.
+对于`myfirst`驱动，这些都不适用。第21章的分离路径已处理进行中的工作；第22章的挂起路径在电源管理意义上处理静默。添加单独的`DEVICE_QUIESCE`是冗余的。
 
 ### 来自bce(4)的示例
 
-The Broadcom NetXtreme driver in `/usr/src/sys/dev/bce/if_bce.c` has a commented-out `DEVMETHOD(device_quiesce, bce_quiesce)` entry in its method table. The comment suggests the author considered implementing quiesce but did not. This is common: many drivers keep the line commented as a TODO that never gets implemented, because the default handles their use case.
+/usr/src/sys/dev/bce/if_bce.c`中的Broadcom NetXtreme驱动在其方法表中有注释掉的`DEVMETHOD(device_quiesce, bce_quiesce)`条目。注释表明作者考虑了实现静默但没有。这很常见：许多驱动将该行作为TODO注释保留，因为默认处理了它们的用例。
 
-The implementation, if the driver enabled it, would stop the NIC's TX and RX paths without freeing the hardware resources. A subsequent `device_detach` would then do the actual freeing. The split between "stop" and "free" is what `DEVICE_QUIESCE` would express.
+如果驱动启用它，实现会停止NIC的TX和RX路径而不释放硬件资源。后续的`device_detach`然后做实际释放。"停止"和"释放"之间的分割是`DEVICE_QUIESCE`要表达的。
 
 ### 与DEVICE_SUSPEND的关系
 
-`DEVICE_QUIESCE` and `DEVICE_SUSPEND` do similar things: they stop the device's activity. The differences:
+`DEVICE_QUIESCE`和`DEVICE_SUSPEND`做类似的事：它们停止设备的活动。区别：
 
-- **Lifecycle**: quiesce is between run and detach; suspend is between run and eventual resume.
-- **Resources**: quiesce does not require the driver to save any state; suspend does.
-- **Ability to veto**: both can return EBUSY; the consequences differ (quiesce prevents detach; suspend prevents the power transition).
+- **生命周期**：静默在运行和分离之间；挂起在运行和最终恢复之间。
+- **资源**：静默不要求驱动保存任何状态；挂起需要。
+- **否决能力**：两者都可以返回EBUSY；后果不同（静默阻止分离；挂起阻止电源转换）。
 
-A driver that implements both usually shares code: `foo_quiesce` might do "stop activity" and `foo_suspend` might do "call quiesce; save state; return". The `myfirst` driver's `myfirst_quiesce` helper is the shared code; the chapter does not wire it to a `DEVICE_QUIESCE` method, but doing so would be a small addition.
+实现两者的驱动通常共享代码：`foo_quiesce`可能做"停止活动"，`foo_suspend`可能做"调用静默；保存状态；返回"。`myfirst`驱动的`myfirst_quiesce`助手是共享代码；本章不将其连接到`DEVICE_QUIESCE`方法，但这样做是一个小的添加。
 
 ### myfirst的可选添加
 
-As a challenge, the reader can add `DEVICE_QUIESCE` to `myfirst`:
+作为挑战，读者可以向`myfirst`添加`DEVICE_QUIESCE`：
 
 ```c
 static int
@@ -3455,27 +3454,27 @@ myfirst_pci_quiesce(device_t dev)
 }
 ```
 
-And the matching method-table entry:
+以及匹配的方法表条目：
 
 ```c
 DEVMETHOD(device_quiesce, myfirst_pci_quiesce),
 ```
 
-Testing it: `devctl detach myfirst0` calls quiesce before detach; the reader can verify by reading `dev.myfirst.0.power_quiesce_count` immediately before the detach takes effect.
+测试它：`devctl detach myfirst0`在分离前调用静默；读者可以在分离生效前立即读取`dev.myfirst.0.power_quiesce_count`来验证。
 
-The challenge is short and does not change the driver's overall structure; it just wires one more method. Chapter 22's consolidated Stage 4 does not include it by default, but the reader who wants the method can add it in a few lines.
+挑战很短且不改变驱动的整体结构；它只是连接了一个更多方法。第22章的合并第4阶段默认不包含它，但想要该方法的读者可以在几行中添加。
 
 
 
-## Hands-On Labs
+## 动手实验
 
-Chapter 22 includes three hands-on labs that exercise the power-management path in progressively harder ways. Each lab has a script in `examples/part-04/ch22-power/labs/` that the reader can run as-is, plus extension ideas.
+第22章包括三个动手实验，以逐步加难的方式练习电源管理路径。每个实验在`examples/part-04/ch22-power/labs/`中有脚本，读者可以按原样运行，还有扩展想法。
 
 ### 实验1：单周期挂起-恢复
 
-The first lab is the simplest: one clean suspend-resume cycle with counter verification.
+第一个实验最简单：带计数器验证的一次干净挂起-恢复周期。
 
-**Setup.** Load the Chapter 22 Stage 4 driver:
+**设置。** 加载第22章第4阶段驱动：
 
 ```sh
 cd examples/part-04/ch22-power/stage4-final
@@ -3483,7 +3482,7 @@ make clean && make
 sudo kldload ./myfirst.ko
 ```
 
-Verify attach:
+验证挂载：
 
 ```sh
 sysctl dev.myfirst.0.%driver
@@ -3492,19 +3491,19 @@ sysctl dev.myfirst.0.suspended
 # Should return: 0
 ```
 
-**Run.** Execute the cycle script:
+**运行。** 执行周期脚本：
 
 ```sh
 sudo sh ../labs/ch22-suspend-resume-cycle.sh
 ```
 
-Expected output:
+预期输出：
 
 ```text
 PASS: one suspend-resume cycle completed cleanly
 ```
 
-**Verify.** Inspect the counters:
+**验证。** 检查计数器：
 
 ```sh
 sysctl dev.myfirst.0.power_suspend_count
@@ -3513,79 +3512,79 @@ sysctl dev.myfirst.0.power_resume_count
 # Should return: 1
 ```
 
-Check `dmesg`:
+检查`dmesg`：
 
 ```sh
 dmesg | tail -6
 ```
 
-Should show four lines (suspend start, suspend complete, resume start, resume complete) plus the pre-and-post transfer log lines.
+应显示四行（挂起开始、挂起完成、恢复开始、恢复完成）加上前后传输日志行。
 
-**Extension.** Modify the cycle script to run two suspend-resume cycles instead of one, and verify that the counters increment by exactly 2 each.
+**扩展。** 修改周期脚本运行两次挂起-恢复周期而非一次，并验证计数器各精确递增2。
 
 ### 实验2：百周期压力测试
 
-The second lab runs the cycle script one hundred times in a row and checks that nothing drifts.
+第二个实验连续运行周期脚本一百次并检查没有任何漂移。
 
-**Run.**
+**运行。**
 
 ```sh
 sudo sh ../labs/ch22-suspend-stress.sh
 ```
 
-Expected output after a few seconds:
+几秒后的预期输出：
 
 ```text
 PASS: 100 cycles
 ```
 
-**Verify.** After the stress run, the counters should each be 100 (or 100 plus whatever was there before):
+**验证。** 压力运行后，计数器应各为100（或100加上之前已有的）：
 
 ```sh
 sysctl dev.myfirst.0.power_suspend_count
 # 100 (or however many cycles were added)
 ```
 
-**Observations to make.**
+**观察内容。**
 
-- How long does one cycle take? On the simulation, it should be a few milliseconds. On real hardware with D-state transitions, expect a few hundred microseconds to a few milliseconds.
-- Does the system's load average change during the stress? The simulation is cheap; a hundred cycles on a modern machine should barely register.
-- What happens if you run the DMA test during the stress? (`sudo sysctl dev.myfirst.0.dma_test_read=1` concurrently with the cycle loop.) A well-written driver should handle this gracefully; the DMA test succeeds if it happens during a `RUNNING` window and fails with EBUSY or similar if it happens during a transition.
+- 一个周期需要多长时间？在模拟上，应为几毫秒。在带D状态转换的真实硬件上，预期几百微秒到几毫秒。
+- 压力期间系统的负载平均值是否变化？模拟代价低；现代机器上一百个周期几乎不应有影响。
+- 如果在压力期间运行DMA测试会怎样？（`sudo sysctl dev.myfirst.0.dma_test_read=1`与周期循环并发。）编写良好的驱动应优雅处理；DMA测试如果在`RUNNING`窗口期间发生则成功，如果在转换期间发生则以EBUSY或类似方式失败。
 
-**Extension.** Run the stress script with `dmesg -c` before to clear the log, then afterwards:
+**扩展。** 运行压力脚本前用`dmesg -c`清除日志，之后：
 
 ```sh
 dmesg | wc -l
 ```
 
-Should be close to 400 (four log lines per cycle, times 100 cycles). A log-line-per-cycle count lets you verify that every cycle actually executed through the driver.
+应接近400（每个周期四行日志，乘以100个周期）。每周期日志行计数让您验证每个周期实际通过驱动执行了。
 
 ### 实验3：跨周期传输
 
-The third lab is the hardest: it starts a DMA transfer and immediately suspends in the middle of it, then resumes and verifies that the driver recovers.
+第三个实验最难：它启动DMA传输并立即在中间挂起，然后恢复并验证驱动恢复了。
 
-**Setup.** The lab script is `ch22-transfer-across-cycle.sh`. It runs a DMA transfer in the background, sleeps a few milliseconds, calls `devctl suspend`, sleeps, calls `devctl resume`, and then starts another transfer.
+**设置。** 实验脚本是`ch22-transfer-across-cycle.sh`。它在后台运行DMA传输，睡眠几毫秒，调用`devctl suspend`，睡眠，调用`devctl resume`，然后启动另一次传输。
 
-**Run.**
+**运行。**
 
 ```sh
 sudo sh ../labs/ch22-transfer-across-cycle.sh
 ```
 
-**Observations to make.**
+**观察内容。**
 
-- Does the first transfer complete, error out, or time out? The expected behavior is that the quiesce aborts it cleanly; the transfer reports EIO or ETIMEDOUT.
-- Does the counter `dma_errors` or `dma_timeouts` increment? One of them should.
-- Does `dma_in_flight` go back to false after the suspend?
-- Does the post-resume transfer succeed normally? If yes, the driver's state is consistent and the cycle worked.
+- 第一次传输是完成、出错还是超时？预期行为是静默干净地中止它；传输报告EIO或ETIMEDOUT。
+- 计数器`dma_errors`或`dma_timeouts`是否递增？其中之一应该。
+- 挂起后`dma_in_flight`是否回到false？
+- 恢复后传输是否正常成功？如果是，驱动状态一致，周期工作正常。
 
-**Extension.** Reduce the sleep between the transfer start and the suspend to hit the corner case where the transfer is mid-execution at the moment of the suspend. That is where race conditions live; a driver that passes this test under aggressive timing has a solid quiesce implementation.
+**扩展。** 减少传输开始和挂起之间的睡眠以命中传输在挂起时刻正在执行中的角落情况。那是竞态条件存在的地方；在激进时序下通过此测试的驱动有坚实的静默实现。
 
 ### 实验4：运行时PM（可选）
 
-For readers building with `MYFIRST_ENABLE_RUNTIME_PM`, a fourth lab exercises the runtime-PM path.
+对于用`MYFIRST_ENABLE_RUNTIME_PM`构建的读者，第四个实验练习运行时PM路径。
 
-**Setup.** Rebuild with runtime PM enabled:
+**设置。** 启用运行时PM重新构建：
 
 ```sh
 cd examples/part-04/ch22-power/stage4-final
@@ -3595,337 +3594,337 @@ make clean && make
 sudo kldload ./myfirst.ko
 ```
 
-**Run.**
+**运行。**
 
 ```sh
 sudo sh ../labs/ch22-runtime-pm.sh
 ```
 
-The script:
+脚本：
 
-1. Sets the idle threshold to 3 seconds (instead of the default 5).
-2. Records baseline counters.
-3. Waits 5 seconds without any activity.
-4. Verifies `runtime_state` is `RUNTIME_SUSPENDED`.
-5. Triggers a DMA transfer.
-6. Verifies `runtime_state` is back to `RUNNING`.
-7. Prints PASS.
+1. 将空闲阈值设为3秒（而非默认的5）。
+2. 记录基线计数器。
+3. 等待5秒无任何活动。
+4. 验证`runtime_state`为`RUNTIME_SUSPENDED`。
+5. 触发DMA传输。
+6. 验证`runtime_state`回到`RUNNING`。
+7. 打印PASS。
 
-**Observations to make.**
+**观察内容。**
 
-- During the idle wait, `dmesg` should show the "runtime suspend" log line approximately 3 seconds in.
-- The `runtime_suspend_count` and `runtime_resume_count` should each be 1 at the end.
-- The DMA transfer should succeed normally after the runtime resume.
+- 在空闲等待期间，`dmesg`应在大约3秒后显示"runtime suspend"日志行。
+- `runtime_suspend_count`和`runtime_resume_count`在结束时各自应为1。
+- DMA传输在运行时恢复后应正常成功。
 
-**Extension.** Set the idle threshold to 1 second. Run the DMA test repeatedly in a tight loop. You should see no runtime-suspend transitions during the loop (because each test resets the idle timer), but as soon as the loop stops, the runtime suspend fires.
+**扩展。** 将空闲阈值设为1秒。在紧凑循环中重复运行DMA测试。循环期间不应看到运行时挂起转换（因为每次测试重置空闲定时器），但循环一停止，运行时挂起就触发。
 
 ### 实验说明
 
-All of the labs assume the driver is loaded and the system is idle enough that transitions happen on-demand. If another process is actively using the device (unlikely for `myfirst`, but common in real setups), the counters drift by unexpected amounts and the scripts' exact-increment checks fail. The scripts are designed for a quiet test environment, not a noisy one.
+所有实验假设驱动已加载且系统足够空闲使转换按需发生。如果另一个进程正在积极使用设备（对`myfirst`不太可能，但在真实设置中常见），计数器会以意外数量漂移，脚本的精确增量检查失败。脚本是为安静测试环境设计的，不是嘈杂的。
 
-For realistic testing of the `re(4)` driver or other production drivers, the same script structure applies with the device name adjusted. The `devctl suspend`/`devctl resume` dance works for any PCI device the kernel manages.
+对于`re(4)`驱动或其他生产驱动的真实测试，相同的脚本结构适用，只需调整设备名称。`devctl suspend`/`devctl resume`舞蹈适用于内核管理的任何PCI设备。
 
 
 
 ## Challenge Exercises
 
-The Chapter 22 challenge exercises push the reader beyond the baseline driver into territory that real-world drivers eventually have to handle. Each exercise is scoped to be achievable with the chapter's material and a few hours of work.
+第22章的挑战练习将读者推到基线驱动之外，进入现实世界驱动最终必须处理的领域。每个练习的范围都可以通过本章材料和几小时的工作完成。
 
 ### 挑战1：实现sysctl唤醒机制
 
-Extend the `myfirst` driver with a simulated wake source. The simulation already has a callout that can fire; add a new simulation feature that sets a "wake" bit on the device while it is in D3, and have the driver's `DEVICE_RESUME` path log the wake event.
+用模拟的唤醒源扩展`myfirst`驱动。模拟已有可以触发的callout；添加一个新的模拟功能，在设备处于D3时在设备上设置"wake"位，并让驱动的`DEVICE_RESUME`路径记录唤醒事件。
 
 **Hints.**
 
-- Add a `MYFIRST_REG_WAKE_STATUS` register to the simulation backend.
-- Add a `MYFIRST_REG_WAKE_ENABLE` register the driver writes during suspend.
-- Have the simulation callout set the wake status bit after a random delay.
-- On resume, the driver reads the register and logs whether a wake was observed.
+- 向模拟后端添加`MYFIRST_REG_WAKE_STATUS`寄存器。
+- 添加驱动在挂起期间写入的`MYFIRST_REG_WAKE_ENABLE`寄存器。
+- 让模拟callout在随机延迟后设置唤醒状态位。
+- 恢复时，驱动读取寄存器并记录是否观察到唤醒。
 
-**Verification.** After `devctl suspend; sleep 1; devctl resume`, the log should show the wake status. A follow-up `sysctl dev.myfirst.0.wake_events` should increment.
+**验证。** 执行`devctl suspend; sleep 1; devctl resume`后，日志应显示唤醒状态。后续的`sysctl dev.myfirst.0.wake_events`应增加。
 
-**Why this matters.** Wake source handling is one of the trickiest parts of real-hardware power management. Building it into the simulation lets the reader exercise the full contract without needing hardware.
+**为什么重要。** 唤醒源处理是真实硬件电源管理中最棘手的部分之一。将其构建到模拟中让读者在不需要硬件的情况下练习完整的契约。
 
 ### 挑战2：保存和恢复描述符环
 
-The Chapter 21 simulation does not yet use a descriptor ring (transfers are one-at-a-time). Extend the simulation with a small descriptor ring, program its base address through a register at attach, and have the suspend path save the ring's base address into softc state. Have the resume path write the saved base address back.
+第21章的模拟尚不使用描述符环（传输是逐个进行的）。用小型描述符环扩展模拟，在挂载时通过寄存器编程其基地址，让挂起路径将环的基地址保存到softc状态中。让恢复路径将保存的基地址写回。
 
 **Hints.**
 
-- The ring's base address is a `bus_addr_t` held in the softc.
-- The register is `MYFIRST_REG_RING_BASE_LOW`/`_HIGH`.
-- Saving and restoring is trivial; the point is to verify that *not* saving and restoring would break things.
+- 环的基地址是保存在softc中的`bus_addr_t`。
+- 寄存器为`MYFIRST_REG_RING_BASE_LOW`/`_HIGH`。
+- 保存和恢复是微不足道的；关键是要验证*不*保存和恢复会导致问题。
 
-**Verification.** After suspend-resume, the ring base register should hold the same value as before. Without the restore, it should hold zero.
+**验证。** 挂起-恢复后，环基寄存器应保持与之前相同的值。如果不恢复，它应保持为零。
 
-**Why this matters.** Descriptor rings are what real high-throughput drivers use; a power-aware driver with a ring has to restore the base address on every resume. This exercise is a stepping stone to the kind of state management that production drivers like `re(4)` and `em(4)` perform.
+**为什么重要。** 描述符环是真实高吞吐量驱动使用的；带环的电源感知驱动必须在每次恢复时恢复基地址。此练习是通往`re(4)`和`em(4)`等生产驱动执行的状态管理类型的跳板。
 
 ### 挑战3：实现否决策略
 
-Extend the suspend path with a policy knob that lets the user specify whether the driver should veto a suspend when the device is busy. Specifically:
+用策略旋钮扩展挂起路径，让用户指定驱动是否应在设备忙碌时否决挂起。具体来说：
 
-- Add `dev.myfirst.0.suspend_veto_if_busy` as a read-write sysctl.
-- If the sysctl is 1 and a DMA transfer is in flight, `myfirst_power_suspend` returns EBUSY without quiescing.
-- If the sysctl is 0 (default), suspend always succeeds.
+- 添加`dev.myfirst.0.suspend_veto_if_busy`作为读写sysctl。
+- 如果sysctl为1且有DMA传输进行中，`myfirst_power_suspend`返回EBUSY而不静默。
+- 如果sysctl为0（默认），挂起始终成功。
 
-**Hints.** Set `suspend_veto_if_busy` to 1. Start a long DMA transfer (add a `DELAY` to the simulation's engine to make it last a second or two). Call `devctl suspend myfirst0` during the transfer. Verify that the suspend returns an error and `dev.myfirst.0.suspended` stays 0.
+**提示。** 将`suspend_veto_if_busy`设为1。启动一次长DMA传输（向模拟引擎添加`DELAY`使其持续一两秒）。在传输期间调用`devctl suspend myfirst0`。验证挂起返回错误且`dev.myfirst.0.suspended`保持为0。
 
-**Verification.** The kernel's unwind path runs; the driver is still in `RUNNING`; the transfer completes normally.
+**验证。** 内核的展开路径运行；驱动仍处于`RUNNING`；传输正常完成。
 
-**Why this matters.** Vetoing is an effective tool and a dangerous one. Real-world policy decisions about whether to veto are nuanced (storage drivers often veto; NIC drivers usually do not). Implementing the mechanism makes the policy question tangible.
+**为什么重要。** 否决是有效的工具，也是危险的工具。关于是否否决的现实世界策略决策是微妙的（存储驱动通常否决；NIC驱动通常不否决）。实现机制使策略问题变得具体。
 
 ### 挑战4：添加恢复后自检
 
-After resume, do a minimum-viable test of the device: write a known pattern to the DMA buffer, trigger a write transfer, read it back with a read transfer, and verify. If the test fails, mark the device broken and fail subsequent operations.
+恢复后，对设备进行最小可行测试：向DMA缓冲区写入已知模式，触发写传输，用读传输读回并验证。如果测试失败，标记设备为损坏并使后续操作失败。
 
 **Hints.**
 
-- Add the self-test as a helper that runs from `myfirst_power_resume` after `myfirst_restore`.
-- Use a well-known pattern like `0xDEADBEEF`.
-- Use the existing DMA path; the self-test is just one write and one read.
+- 将自检添加为从`myfirst_power_resume`中`myfirst_restore`之后运行的助手。
+- 使用熟知的模式如`0xDEADBEEF`。
+- 使用现有DMA路径；自检只是一次写入和一次读取。
 
-**Verification.** Under normal operation, the self-test always passes. To verify it catches failures, add an artificial "fail once" mechanism to the simulation and trigger it; the driver should log the failure and mark itself broken.
+**验证。** 正常操作下，自检始终通过。要验证它能捕获故障，向模拟添加人为的"fail once"机制并触发它；驱动应记录故障并将自身标记为损坏。
 
-**Why this matters.** Self-tests are a lightweight form of reliability engineering. A driver that catches its own failures at well-defined points is easier to debug than one that silently corrupts data until a user notices.
+**为什么重要。** 自检是可靠性工程的轻量级形式。在定义明确的点捕获自身故障的驱动比静默损坏数据直到用户注意到的驱动更容易调试。
 
 ### 挑战5：实现手动pci_save_state/pci_restore_state
 
-Most drivers let the PCI layer handle config-space save-and-restore automatically. Extend the Chapter 22 driver to optionally do it manually, gated by a sysctl `dev.myfirst.0.manual_pci_save`.
+大多数驱动让PCI层自动处理配置空间的保存和恢复。扩展第22章驱动以可选地手动执行，通过sysctl `dev.myfirst.0.manual_pci_save`控制。
 
 **Hints.**
 
-- Read `hw.pci.do_power_suspend` and `hw.pci.do_power_resume` and set them to 0 when manual mode is enabled.
-- Call `pci_save_state` explicitly in the suspend path, `pci_restore_state` in the resume path.
-- Verify that the device still works after suspend-resume.
+- 读取`hw.pci.do_power_suspend`和`hw.pci.do_power_resume`并在手动模式启用时将它们设为0。
+- 在挂起路径中显式调用`pci_save_state`，在恢复路径中调用`pci_restore_state`。
+- 验证设备在挂起-恢复后仍然正常工作。
 
-**Verification.** The device should function identically whether or not manual mode is enabled. Set the sysctl before a stress test and verify no drift.
+**验证。** 无论是否启用手动模式，设备功能应相同。在压力测试前设置sysctl并验证无漂移。
 
-**Why this matters.** Some real drivers need manual save/restore because the PCI layer's automatic handling interferes with device-specific quirks. Knowing when and how to take over the save/restore is a useful intermediate skill.
+**为什么重要。** 某些真实驱动需要手动保存/恢复，因为PCI层的自动处理会干扰设备特定的怪异行为。了解何时以及如何接管保存/恢复是有用的中级技能。
 
 
 
 ## Troubleshooting Reference
 
-This section collects the common problems a reader may encounter while working through Chapter 22, with a short diagnostic and fix for each. The list is meant to be skimmable; if a problem matches, skip to the corresponding entry.
+本节收集读者在学习第22章时可能遇到的常见问题，每个都有简短的诊断和修复。列表设计为可快速浏览；如果问题匹配，跳到相应条目。
 
 ### "devctl: DEV_SUSPEND failed: Operation not supported"
 
-The driver does not implement `DEVICE_SUSPEND`. Either the method table is missing the `DEVMETHOD(device_suspend, ...)` line, or the driver has not been rebuilt and reloaded.
+驱动未实现`DEVICE_SUSPEND`。要么方法表缺少`DEVMETHOD(device_suspend, ...)`行，要么驱动尚未重新构建和重新加载。
 
-**Fix.** Check the method table. Rebuild with `make clean && make`. Unload and reload.
+**修复。** 检查方法表。用`make clean && make`重新构建。卸载并重新加载。
 
 ### "devctl: DEV_SUSPEND failed: Device busy"
 
-The driver returned `EBUSY` from `DEVICE_SUSPEND`, probably because of the veto logic from Challenge 3, or because the device is genuinely busy (DMA in flight, task running) and the driver chose to veto.
+驱动从`DEVICE_SUSPEND`返回`EBUSY`，可能因为挑战3的否决逻辑，或因为设备确实忙碌（DMA进行中、任务运行中）且驱动选择否决。
 
-**Fix.** Check whether the `suspend_veto_if_busy` knob is set. Check `dma_in_flight`. Wait for activity to complete before suspending.
+**修复。** 检查`suspend_veto_if_busy`旋钮是否已设置。检查`dma_in_flight`。等待活动完成后再挂起。
 
 ### "devctl: DEV_RESUME failed"
 
-`DEVICE_RESUME` returned non-zero. The log should have more detail.
+`DEVICE_RESUME`返回非零。日志应有更多细节。
 
-**Fix.** Check `dmesg | tail`. The resume log line should tell you what failed. Usually it is a hardware-specific init step that did not succeed.
+**修复。** 检查`dmesg | tail`。恢复日志行应告诉您什么失败了。通常是硬件特定的初始化步骤未成功。
 
 ### Device is suspended but `dev.myfirst.0.suspended` reads 0
 
-The driver's flag is out of sync with the kernel's state. Probably a bug in the quiesce path: the flag was never set, or was cleared prematurely.
+驱动的标志与内核状态不同步。可能是静默路径中的错误：标志从未被设置，或被过早清除。
 
-**Fix.** Add a `KASSERT(sc->suspended == true)` at the top of the resume path; run under `INVARIANTS` to catch the bug.
+**修复。** 在恢复路径顶部添加`KASSERT(sc->suspended == true)`；在`INVARIANTS`下运行以捕获错误。
 
 ### `power_suspend_count != power_resume_count`
 
-A cycle got one side but not the other. Check `dmesg` for errors; the log should show where the sequence broke.
+一个周期获得了一侧但没有另一侧。检查`dmesg`中的错误；日志应显示序列在哪里中断。
 
-**Fix.** Fix the code path that is missing. Usually an early return without the counter update.
+**修复。** 修复缺失的代码路径。通常是缺少计数器更新的提前返回。
 
 ### DMA transfers fail after resume
 
-The restore path did not reinitialise the DMA engine. Check the INTR_MASK register, the DMA control registers, the `saved_intr_mask` value. Enable verbose logging to see the resume path's restoration sequence.
+恢复路径没有重新初始化DMA引擎。检查INTR_MASK寄存器、DMA控制寄存器、`saved_intr_mask`值。启用详细日志以查看恢复路径的恢复序列。
 
-**Fix.** Add a missing register write to `myfirst_restore`.
+**修复。** 向`myfirst_restore`添加缺失的寄存器写入。
 
 ### WITNESS complains about a lock held during suspend
 
-The suspend path acquired a lock and then called a function that sleeps or tries to acquire another lock. Read the WITNESS message for the offending lock names.
+挂起路径获取了锁然后调用了睡眠或尝试获取另一个锁的函数。阅读WITNESS消息中的违规锁名称。
 
-**Fix.** Drop the lock before the sleeping call, or restructure the code so the lock is acquired only when needed.
+**修复。** 在睡眠调用之前释放锁，或重构代码使锁仅在需要时获取。
 
 ### System does not wake from S3
 
-A driver below `myfirst` is blocking resume. Unlikely to be `myfirst` itself unless the logs show an error from the driver specifically.
+`myfirst`下面的某个驱动阻止了恢复。不太可能是`myfirst`本身，除非日志特别显示来自驱动的错误。
 
-**Fix.** Boot into single-user mode, or load fewer drivers, and bisect. Check `dmesg` in the live system for the offending driver.
+**修复。** 引导进入单用户模式，或加载更少驱动，并二分查找。在活动系统中检查`dmesg`中的违规驱动。
 
 ### Runtime PM never fires
 
-The idle watcher callout is not running, or the `last_activity` timestamp is being updated too often.
+空闲监视器callout未运行，或`last_activity`时间戳更新太频繁。
 
-**Fix.** Verify `callout_reset` is being called from the attach path. Verify `myfirst_mark_active` is not being called from unexpected code paths. Add logging to the callout callback to confirm it fires.
+**修复。** 验证`callout_reset`正在从挂载路径调用。验证`myfirst_mark_active`未从意外代码路径调用。向callout回调添加日志以确认它触发。
 
 ### Kernel panic during suspend
 
-A KASSERT failed (on an `INVARIANTS` kernel) or a lock is held incorrectly. The panic message identifies the offending file and line.
+KASSERT失败（在`INVARIANTS`内核上）或锁被不正确持有。恐慌消息标识了违规的文件和行号。
 
-**Fix.** Read the panic message. Match the file and line to the code. The fix is usually straightforward once the location is identified.
+**修复。** 阅读恐慌消息。将文件和行号匹配到代码。一旦识别了位置，修复通常很简单。
 
 
 
 ## Wrapping Up
 
-Chapter 22 closes Part 4 by giving the `myfirst` driver the discipline of power management. At the start, `myfirst` at version `1.4-dma` was a capable driver: it attached to a PCI device, handled multi-vector interrupts, moved data through DMA, and cleaned up its resources on detach. What it lacked was the ability to participate in the system's power transitions. It would crash, leak, or silently fail if the user closed the laptop lid or asked the kernel to suspend the device. At the end, `myfirst` at version `1.5-power` handles every power transition the kernel can throw at it: system suspend to S3 or S4, per-device suspend through `devctl`, system shutdown, and optional runtime power management.
+第22章通过赋予`myfirst`驱动电源管理纪律来结束第4部分。开始时，`myfirst`在`1.4-dma`版本已是一个有能力的驱动：它挂载到PCI设备、处理多向量中断、通过DMA移动数据、并在分离时清理资源。它缺少的是参与系统电源转换的能力。如果用户合上笔记本盖子或要求内核挂起设备，它会崩溃、泄漏或静默失败。最终，`myfirst`在`1.5-power`版本处理内核可能抛出的每个电源转换：系统挂起到S3或S4、通过`devctl`的每设备挂起、系统关机和可选的运行时电源管理。
 
-The eight sections walked the full progression. Section 1 established the big picture: why a driver cares about power, what ACPI S-states and PCI D-states are, what PCIe L-states and ASPM add, and what wake sources look like. Section 2 introduced FreeBSD's concrete APIs: the `DEVICE_SUSPEND`, `DEVICE_RESUME`, `DEVICE_SHUTDOWN`, and `DEVICE_QUIESCE` methods, the `bus_generic_suspend` and `bus_generic_resume` helpers, and the PCI layer's automatic config-space save and restore. The Stage 1 skeleton made the methods log and count transitions without doing any real work. Section 3 turned the suspend skeleton into a real quiesce: mask interrupts, drain DMA, drain workers, in that order, with helper functions shared between suspend and detach. Section 4 wrote the matching resume path: re-enable bus-master, restore device-specific state, clear the suspended flag, unmask interrupts. Section 5 added optional runtime power management with an idle-watcher callout and explicit `pci_set_powerstate` transitions. Section 6 surveyed the user-space interface: `acpiconf`, `zzz`, `devctl suspend`, `devctl resume`, `devinfo -v`, and the matching sysctls. Section 7 catalogued the characteristic failure modes and their debugging patterns. Section 8 refactored the code into `myfirst_power.c`, bumped the version to `1.5-power`, added `POWER.md`, and wired the final regression test.
+八个部分走完了完整的进程。第1节建立了全局视图：为什么驱动关心电源、ACPI S状态和PCI D状态是什么、PCIe L状态和ASPM添加了什么、唤醒源长什么样。第2节介绍了FreeBSD的具体API：`DEVICE_SUSPEND`、`DEVICE_RESUME`、`DEVICE_SHUTDOWN`和`DEVICE_QUIESCE`方法，`bus_generic_suspend`和`bus_generic_resume`助手，以及PCI层的自动配置空间保存和恢复。第1阶段骨架让方法记录日志和计数转换而不做任何实际工作。第3节将挂起骨架变成真正的静默：屏蔽中断、排空DMA、排空工作线程，按此顺序，共享挂起和分离之间的助手函数。第4节编写了匹配的恢复路径：重新启用总线主控、恢复设备特定状态、清除挂起标志、取消屏蔽中断。第5节添加了带空闲监视器callout和显式`pci_set_powerstate`转换的可选运行时电源管理。第6节调查了用户空间接口：`acpiconf`、`zzz`、`devctl suspend`、`devctl resume`、`devinfo -v`和匹配的sysctl。第7节编目了特征性故障模式及其调试模式。第8节将代码重构到`myfirst_power.c`，将版本升级到`1.5-power`，添加了`POWER.md`，并连接了最终回归测试。
 
-What Chapter 22 did not do is scatter-gather power management for multi-queue drivers (that is a Part 6 topic, Chapter 28), hotplug and surprise-removal integration (a Part 7 topic), embedded-platform power domains (Part 7 again), or the internals of ACPI's AML interpreter (never covered in this book). Each of those is a natural extension built on Chapter 22's primitives, and each belongs in a later chapter where the scope matches. The foundation is in place; the specialisations add vocabulary without needing a new foundation.
+第22章没有做的是多队列驱动的分散-收集电源管理（那是第6部分第28章的话题）、热插拔和意外移除集成（第7部分话题）、嵌入式平台电源域（也是第7部分）、或ACPI的AML解释器内部机制（本书不涉及）。每一个都是基于第22章原语的自然扩展，每一个都属于范围匹配的后续章节。基础已就位；专业化添加词汇而无需新基础。
 
-The file layout has grown: 16 source files (including `cbuf`), 8 documentation files (`HARDWARE.md`, `LOCKING.md`, `SIMULATION.md`, `PCI.md`, `INTERRUPTS.md`, `MSIX.md`, `DMA.md`, `POWER.md`), and an extended regression suite that covers every subsystem. The driver is structurally parallel to production FreeBSD drivers; a reader who has worked through Chapters 16 through 22 can open `if_re.c`, `if_xl.c`, or `virtio_blk.c` and recognise every architectural part: register accessors, simulation backend, PCI attach, interrupt filter and task, per-vector machinery, DMA setup and teardown, sync discipline, power suspend, power resume, clean detach.
+文件布局已经增长：16个源文件（包括`cbuf`）、8个文档文件（`HARDWARE.md`、`LOCKING.md`、`SIMULATION.md`、`PCI.md`、`INTERRUPTS.md`、`MSIX.md`、`DMA.md`、`POWER.md`），以及覆盖每个子系统的扩展回归套件。驱动在结构上与生产FreeBSD驱动平行；学完第16至22章的读者可以打开`if_re.c`、`if_xl.c`或`virtio_blk.c`并识别每个架构部分：寄存器访问器、模拟后端、PCI挂载、中断过滤器和任务、每向量机制、DMA设置和拆卸、同步纪律、电源挂起、电源恢复、干净分离。
 
 ### A Reflection Before Chapter 23
 
-Chapter 22 is the last chapter of Part 4, and Part 4 is the part that taught the reader how a driver talks to hardware. Chapters 16 through 21 introduced the primitives: MMIO, simulation, PCI, interrupts, multi-vector interrupts, DMA. Chapter 22 introduced the discipline: how those primitives survive power transitions. Together, the seven chapters take the reader from "no idea what a driver is" to "a working multi-subsystem driver that handles every hardware event the kernel can throw at it".
+第22章是第4部分的最后一章，第4部分教授读者驱动如何与硬件对话。第16至21章介绍了原语：MMIO、模拟、PCI、中断、多向量中断、DMA。第22章介绍了纪律：这些原语如何在电源转换中存活。这七章一起将读者从"不知道驱动是什么"带到"一个处理内核可能抛出的每个硬件事件的工作中的多子系统驱动"。
 
-Chapter 22's teaching generalises. A reader who has internalised the suspend-quiesce-save-restore pattern, the interaction between driver and PCI layer, the runtime-PM state machine, and the debugging patterns will find similar shapes in every power-aware FreeBSD driver. The specific hardware differs; the structure does not. A driver for a NIC, a storage controller, a GPU, or a USB host controller applies the same vocabulary to its own hardware.
+第22章的教学是可推广的。内化了挂起-静默-保存-恢复模式、驱动与PCI层的交互、运行时PM状态机和调试模式的读者会在每个电源感知的FreeBSD驱动中找到相似的形状。具体硬件不同；结构不变。NIC、存储控制器、GPU或USB主机控制器的驱动将相同的词汇应用于自己的硬件。
 
-Part 5, which begins with Chapter 23, shifts focus. Part 4 was about the driver-to-hardware direction: how the driver talks to the device. Part 5 is about the driver-to-kernel direction: how the driver is debugged, traced, tooled, and stressed by the humans who maintain it. Chapter 23 starts that shift with debugging and tracing techniques that apply across every driver subsystem.
+从第23章开始的第5部分转移了重点。第4部分是关于驱动到硬件的方向：驱动如何与设备对话。第5部分是关于驱动到内核的方向：驱动如何被维护它的人类调试、追踪、工具化和压力测试。第23章用适用于每个驱动子系统的调试和追踪技术开始这一转变。
 
 ### What to Do If You Are Stuck
 
 Three suggestions.
 
-First, focus on the Stage 2 suspend and Stage 3 resume paths. If `devctl suspend myfirst0` followed by `devctl resume myfirst0` succeeds and a subsequent DMA transfer works, the core of the chapter is working. Every other piece of the chapter is optional in the sense that it decorates the pipeline, but if the pipeline fails, the chapter is not working and Section 3 or Section 4 is the right place to diagnose.
+首先，专注于第2阶段挂起和第3阶段恢复路径。如果`devctl suspend myfirst0`后跟`devctl resume myfirst0`成功且后续DMA传输工作，本章的核心就在工作。本章的其他部分在装饰管道的意义上是可选的，但如果管道失败，本章就不在工作，第3节或第4节是诊断的正确位置。
 
-Second, open `/usr/src/sys/dev/re/if_re.c` and re-read `re_suspend`, `re_resume`, and `re_setwol`. Each function is about thirty lines. Every line maps to a Chapter 22 concept. Reading them once after completing the chapter should feel like familiar territory; the real driver's patterns will look like elaborations of the chapter's simpler ones.
+其次，打开`/usr/src/sys/dev/re/if_re.c`并重读`re_suspend`、`re_resume`和`re_setwol`。每个函数大约三十行。每一行映射到第22章的一个概念。完成本章后阅读它们应该感觉像熟悉的领域；真实驱动的模式看起来像是本章更简单模式的详细阐述。
 
-Third, skip the challenges on the first pass. The labs are calibrated for Chapter 22's pace; the challenges assume the chapter's material is solid. Come back to them after Chapter 23 if they feel out of reach now.
+第三，第一遍跳过挑战。实验为第22章的节奏校准；挑战假设本章的材料已扎实。如果现在觉得难以触及，第23章后再回来。
 
-Chapter 22's goal was to give the driver power-management discipline. If it has, Chapter 23's debugging and tracing machinery becomes a generalisation of what you already do instinctively rather than a new topic.
+第22章的目标是给驱动电源管理纪律。如果做到了，第23章的调试和追踪机制就成为您已本能所做之事的推广，而非新话题。
 
 ## 第4部分检查点
 
-Part 4 has been the longest and densest stretch of the book so far. Seven chapters covered hardware resources, register I/O, PCI attach, interrupts, MSI and MSI-X, DMA, and power management. Before Part 5 changes the mode from "writing drivers" to "debugging and tracing them," confirm that the hardware-facing story is internalized.
+第4部分是本书迄今为止最长最密集的段落。七章涵盖了硬件资源、寄存器I/O、PCI挂载、中断、MSI和MSI-X、DMA和电源管理。在第5部分将模式从"编写驱动"变为"调试和追踪它们"之前，确认硬件面向的故事已内化。
 
-By the end of Part 4 you should be able to do each of the following without searching:
+到第4部分结束时，您应该能够在不查找的情况下完成以下每一项：
 
-- Claim a hardware resource with `bus_alloc_resource_any` or `bus_alloc_resource_anywhere`, access it through the `bus_space(9)` read/write and barrier primitives, and release it cleanly in detach.
-- Read and write device registers through the `bus_space(9)` abstraction rather than raw pointer dereferences, with correct barrier discipline around sequences that must not be reordered.
-- Match a PCI device through vendor, device, subvendor, and subdevice IDs; claim its BARs; and survive a forced detach without leaking resources.
-- Register a top-half filter together with a bottom-half task or ithread via `bus_setup_intr`, in the order the kernel requires, and tear them down in reverse order under detach.
-- Set up MSI or MSI-X vectors with a graceful fallback ladder from MSI-X to MSI to legacy INTx, and bind vectors to specific CPUs when the workload calls for it.
-- Allocate, map, sync, and release DMA buffers using `bus_dma(9)` including the bounce-buffer case.
-- Implement `device_suspend` and `device_resume` with register save and restore, I/O quiescing, and a post-resume self-test.
+- 用`bus_alloc_resource_any`或`bus_alloc_resource_anywhere`声明硬件资源，通过`bus_space(9)`读/写和屏障原语访问它，并在分离时干净地释放。
+- 通过`bus_space(9)`抽象而非原始指针解引用读写设备寄存器，在不得重排序的序列周围有正确的屏障纪律。
+- 通过供应商、设备、子供应商和子设备ID匹配PCI设备；声明其BAR；并在强制分离后存活而不泄漏资源。
+- 通过`bus_setup_intr`注册上半部过滤器连同下半部任务或ithread，按内核要求的顺序，并在分离时以相反顺序拆卸。
+- 设置MSI或MSI-X向量，具有从MSI-X到MSI到传统INTx的优雅回退阶梯，并在工作负载需要时将向量绑定到特定CPU。
+- 使用`bus_dma(9)`分配、映射、同步和释放DMA缓冲区，包括弹跳缓冲区情况。
+- 实现带寄存器保存和恢复、I/O静默和恢复后自检的`device_suspend`和`device_resume`。
 
-If any of those still requires a lookup, the labs to revisit are:
+如果其中任何一项仍需查找，值得重做的实验是：
 
-- Registers and barriers: Lab 1 (Observe the Register Dance) and Lab 8 (The Watchdog-Meets-Register Scenario) in Chapter 16.
-- Simulated hardware under load: Lab 6 (Inject Stuck-Busy and Watch the Driver Wait) and Lab 10 (Inject a Memory-Corruption Attack) in Chapter 17.
-- PCI attach and detach: Lab 4 (Claim the BAR and Read a Register) and Lab 5 (Exercise the cdev and Verify Detach Cleanup) in Chapter 18.
-- Interrupt handling: Lab 3 (Stage 2, Real Filter and Deferred Task) in Chapter 19.
-- MSI and MSI-X: Lab 4 (Stage 3, MSI-X With CPU Binding) in Chapter 20.
-- DMA: Lab 4 (Stage 3, Interrupt-Driven Completion) and Lab 5 (Stage 4, Refactor and Regression) in Chapter 21.
-- Power management: Lab 2 (One-Hundred-Cycle Stress) and Lab 3 (Transfer Across a Cycle) in Chapter 22.
+- 寄存器和屏障：第16章实验1（观察寄存器之舞）和实验8（看门狗遇上寄存器场景）。
+- 负载下的模拟硬件：第17章实验6（注入卡住忙碌并观察驱动等待）和实验10（注入内存损坏攻击）。
+- PCI挂载和分离：第18章实验4（声明BAR并读取寄存器）和实验5（练习cdev并验证分离清理）。
+- 中断处理：第19章实验3（第2阶段，真实过滤器和延迟任务）。
+- MSI和MSI-X：第20章实验4（第3阶段，带CPU绑定的MSI-X）。
+- DMA：第21章实验4（第3阶段，中断驱动完成）和实验5（第4阶段，重构和回归）。
+- 电源管理：第22章实验2（百周期压力）和实验3（跨周期传输）。
 
-Part 5 will expect the following as a baseline:
+第5部分期望以下作为基线：
 
-- A hardware-capable driver with observability already baked in: counters, sysctls, and `devctl_notify` calls at the important transitions. Chapter 23's debugging machinery works best when the driver already reports on itself.
-- A regression script that can cycle the driver reliably, since Part 5 turns reproducibility into a first-class skill.
-- A kernel built with `INVARIANTS` and `WITNESS`. Part 5 leans on both even more heavily than Part 4, especially in Chapter 23.
-- The understanding that a bug in driver code is a bug in kernel code, which means user-space debuggers alone will not be enough and Part 5 will teach the kernel-space tools.
+- 一个已内置可观测性的硬件能力驱动：计数器、sysctl和在重要转换处的`devctl_notify`调用。第23章的调试机制在驱动已自我报告时效果最佳。
+- 能够可靠循环驱动的回归脚本，因为第5部分将可重现性变成一等技能。
+- 用`INVARIANTS`和`WITNESS`构建的内核。第5部分比第4部分更依赖两者，特别是在第23章。
+- 理解驱动代码中的错误就是内核代码中的错误，这意味着仅用户空间调试器不够用，第5部分将教授内核空间工具。
 
-If those hold, Part 5 is ready for you. If one still looks shaky, a short lap through the relevant lab will pay back its time several times over.
+如果这些成立，第5部分为您准备好了。如果某一项仍不稳定，短时间重做相关实验将获得数倍回报。
 
 ## 通往第23章的桥梁
 
-Chapter 23 is titled *Debugging and Tracing*. Its scope is the professional practice of finding bugs in drivers: tools like `ktrace`, `ddb`, `kgdb`, `dtrace`, and `procstat`; techniques for analysing panics, deadlocks, and data corruption; strategies for turning vague user reports into reproducible test cases; and the mindset of a driver developer who has to debug code running in kernel space with limited visibility.
+第23章题为*调试与追踪*。其范围是查找驱动中错误的专业实践：`ktrace`、`ddb`、`kgdb`、`dtrace`和`procstat`等工具；分析恐慌、死锁和数据损坏的技术；将模糊用户报告转化为可重现测试用例的策略；以及在有限可见性下必须调试内核空间运行代码的驱动开发者心态。
 
-Chapter 22 prepared the ground in four specific ways.
+第22章以四种具体方式准备了基础。
 
-First, **you have observability counters everywhere**. The Chapter 22 driver exposes suspend, resume, shutdown, and runtime-PM counters through sysctls. Chapter 23's debugging techniques rely on observability; a driver that already tracks its own state is much easier to debug than one that does not.
+首先，**您到处都有可观测性计数器**。第22章驱动通过sysctl暴露挂起、恢复、关机和运行时PM计数器。第23章的调试技术依赖可观测性；已跟踪自身状态的驱动比不跟踪的更容易调试。
 
-Second, **you have a regression test**. The cycle and stress scripts from Section 6 are a first taste of what Chapter 23 expands: the ability to reproduce a bug on demand. A bug you cannot reproduce is a bug you cannot fix; Chapter 22's scripts are a foundation for the heavier testing Chapter 23 adds.
+其次，**您有回归测试**。第6节的循环和压力脚本是第23章扩展内容的初体验：按需重现错误的能力。无法重现的错误是无法修复的错误；第22章的脚本是第23章添加的更重测试的基础。
 
-Third, **you have a working INVARIANTS / WITNESS debug kernel**. Chapter 22 leaned on both throughout; Chapter 23 builds on the same kernel for `ddb` sessions, post-mortem analysis, and kernel-crash reproduction.
+第三，**您有可工作的INVARIANTS/WITNESS调试内核**。第22章全程依赖两者；第23章在同一内核上构建`ddb`会话、事后分析和内核崩溃重现。
 
-Fourth, **you understand that bugs in driver code are bugs in kernel code**. Chapter 22 ran into hangs, frozen devices, lost interrupts, and WITNESS complaints. Each of those is a kernel bug in the user-visible sense; each requires a kernel-space debugging approach. Chapter 23 teaches that approach systematically.
+第四，**您理解驱动代码中的错误就是内核代码中的错误**。第22章遇到了挂起、冻结设备、丢失中断和WITNESS警告。每一个在用户可见意义上都是内核错误；每一个都需要内核空间调试方法。第23章系统地教授该方法。
 
-Specific topics Chapter 23 will cover:
+第23章将涵盖的具体主题：
 
-- Using `ktrace` and `kdump` to observe a process's system call trace in real time.
-- Using `ddb` to break into the kernel debugger for post-mortem analysis or live inspection.
-- Using `kgdb` with a core dump to recover the state of a crashed kernel.
-- Using `dtrace` for in-kernel tracing without modifying the source.
-- Using `procstat`, `top`, `pmcstat`, and related tools for performance observation.
-- Strategies for minimising a bug: shrinking a reproducer, bisecting a regression, hypothesising and testing.
-- Patterns for instrumenting a driver in production without disturbing behaviour.
+- 使用`ktrace`和`kdump`实时观察进程的系统调用追踪。
+- 使用`ddb`进入内核调试器进行事后分析或实时检查。
+- 使用`kgdb`配合核心转储恢复崩溃内核的状态。
+- 使用`dtrace`在不修改源代码的情况下进行内核内追踪。
+- 使用`procstat`、`top`、`pmcstat`及相关工具进行性能观察。
+- 最小化错误的策略：缩小重现器、二分回归、假设和测试。
+- 在生产环境中检测驱动而不干扰行为的模式。
 
-You do not need to read ahead. Chapter 22 is sufficient preparation. Bring your `myfirst` driver at `1.5-power`, your `LOCKING.md`, your `INTERRUPTS.md`, your `MSIX.md`, your `DMA.md`, your `POWER.md`, your `WITNESS`-enabled kernel, and your regression script. Chapter 23 starts where Chapter 22 ended.
+您不需要提前阅读。第22章已是充分准备。带上您的`myfirst`驱动`1.5-power`版本、`LOCKING.md`、`INTERRUPTS.md`、`MSIX.md`、`DMA.md`、`POWER.md`、启用`WITNESS`的内核和回归脚本。第23章从第22章结束的地方开始。
 
-Part 4 is complete. Chapter 23 opens Part 5 by adding the observability and debugging discipline that separates a driver you wrote last week from a driver you can maintain for years.
+第4部分已完成。第23章通过添加可观测性和调试纪律来开启第5部分，这将上周写的驱动与可以维护多年的驱动区分开来。
 
-The vocabulary is yours; the structure is yours; the discipline is yours. Chapter 23 adds the next missing piece: the ability to find and fix bugs that only show up in production.
+词汇是您的；结构是您的；纪律是您的。第23章添加下一个缺失的部分：查找和修复仅在生产环境中出现的错误的能力。
 
 
 
 ## Reference: 第22章快速参考卡
 
-A compact summary of the vocabulary, APIs, flags, and procedures Chapter 22 introduced.
+第22章引入的词汇、API、标志和过程的紧凑摘要。
 
 ### Vocabulary
 
-- **Suspend:** a transition from D0 (full operation) to a lower-power state from which the device can be brought back.
-- **Resume:** the transition back from the lower-power state to D0.
-- **Shutdown:** the transition to a final state from which the device will not return.
-- **Quiesce:** to bring a device to a state with no activity and no pending work.
-- **System sleep state (S0, S1, S3, S4, S5):** ACPI-defined levels of system power.
-- **Device power state (D0, D1, D2, D3hot, D3cold):** PCI-defined levels of device power.
-- **Link state (L0, L0s, L1, L1.1, L1.2, L2):** PCIe-defined levels of link power.
-- **ASPM (Active-State Power Management):** automatic transitions between L0 and L0s/L1.
-- **PME# (Power Management Event):** a signal a device asserts when it wants to wake the system.
-- **Wake source:** a mechanism by which a suspended device can request wakeup.
-- **Runtime PM:** device-level power saving while the system stays in S0.
+- **挂起（Suspend）：** 从D0（完全操作）到设备可以恢复的较低功耗状态的转换。
+- **恢复（Resume）：** 从较低功耗状态回到D0的转换。
+- **关机（Shutdown）：** 到设备不会返回的最终状态的转换。
+- **静默（Quiesce）：** 将设备带到无活动且无待处理工作的状态。
+- **系统睡眠状态（S0、S1、S3、S4、S5）：** ACPI定义的系统功耗级别。
+- **设备电源状态（D0、D1、D2、D3hot、D3cold）：** PCI定义的设备功耗级别。
+- **链路状态（L0、L0s、L1、L1.1、L1.2、L2）：** PCIe定义的链路功耗级别。
+- **ASPM（活动状态电源管理）：** L0和L0s/L1之间的自动转换。
+- **PME#（电源管理事件）：** 设备在想要唤醒系统时断言的信号。
+- **唤醒源：** 挂起设备可以通过其请求唤醒的机制。
+- **运行时PM：** 系统保持在S0时的设备级节能。
 
 ### Essential Kobj Methods
 
-- `DEVMETHOD(device_suspend, foo_suspend)`: called to quiesce the device before a power transition.
-- `DEVMETHOD(device_resume, foo_resume)`: called to restore the device after the power transition.
-- `DEVMETHOD(device_shutdown, foo_shutdown)`: called to leave the device in a safe state for reboot.
-- `DEVMETHOD(device_quiesce, foo_quiesce)`: called to stop activity without tearing down resources.
+- `DEVMETHOD(device_suspend, foo_suspend)`：在电源转换前调用来静默设备。
+- `DEVMETHOD(device_resume, foo_resume)`：在电源转换后调用来恢复设备。
+- `DEVMETHOD(device_shutdown, foo_shutdown)`：调用来使设备处于重启的安全状态。
+- `DEVMETHOD(device_quiesce, foo_quiesce)`：调用来停止活动而不拆除资源。
 
 ### Essential PCI APIs
 
-- `pci_has_pm(dev)`: true if the device has a power-management capability.
-- `pci_set_powerstate(dev, state)`: transition to `PCI_POWERSTATE_D0`, `D1`, `D2`, or `D3`.
-- `pci_get_powerstate(dev)`: current power state.
-- `pci_save_state(dev)`: cache the configuration space.
-- `pci_restore_state(dev)`: write the cached configuration space back.
-- `pci_enable_pme(dev)`: enable PME# generation.
-- `pci_clear_pme(dev)`: clear pending PME status.
-- `pci_enable_busmaster(dev)`: re-enable bus-master after a reset.
+- `pci_has_pm(dev)`：如果设备有电源管理能力则返回true。
+- `pci_set_powerstate(dev, state)`：转换到`PCI_POWERSTATE_D0`、`D1`、`D2`或`D3`。
+- `pci_get_powerstate(dev)`：当前电源状态。
+- `pci_save_state(dev)`：缓存配置空间。
+- `pci_restore_state(dev)`：将缓存的配置空间写回。
+- `pci_enable_pme(dev)`：启用PME#生成。
+- `pci_clear_pme(dev)`：清除待处理的PME状态。
+- `pci_enable_busmaster(dev)`：重置后重新启用总线主控。
 
 ### Essential Bus Helpers
 
-- `bus_generic_suspend(dev)`: suspend all children in reverse order.
-- `bus_generic_resume(dev)`: resume all children in forward order.
-- `device_quiesce(dev)`: call the driver's `DEVICE_QUIESCE`.
+- `bus_generic_suspend(dev)`：以相反顺序挂起所有子设备。
+- `bus_generic_resume(dev)`：以正向顺序恢复所有子设备。
+- `device_quiesce(dev)`：调用驱动的`DEVICE_QUIESCE`。
 
 ### Essential Sysctls
 
-- `hw.acpi.supported_sleep_state`: list of S-states the platform supports.
-- `hw.acpi.suspend_state`: default S-state for `zzz`.
-- `hw.pci.do_power_suspend`: automatic D0->D3 transition on suspend.
-- `hw.pci.do_power_resume`: automatic D3->D0 transition on resume.
-- `dev.N.M.suspended`: driver's own suspended flag.
-- `dev.N.M.power_suspend_count`, `power_resume_count`, `power_shutdown_count`.
-- `dev.N.M.runtime_state`, `runtime_suspend_count`, `runtime_resume_count`.
+- `hw.acpi.supported_sleep_state`：平台支持的S状态列表。
+- `hw.acpi.suspend_state`：`zzz`的默认S状态。
+- `hw.pci.do_power_suspend`：挂起时自动D0->D3转换。
+- `hw.pci.do_power_resume`：恢复时自动D3->D0转换。
+- `dev.N.M.suspended`：驱动自身的挂起标志。
+- `dev.N.M.power_suspend_count`、`power_resume_count`、`power_shutdown_count`。
+- `dev.N.M.runtime_state`、`runtime_suspend_count`、`runtime_resume_count`。
 
 ### Useful Commands
 
-- `acpiconf -s 3`: enter S3.
-- `zzz`: wrapper around `acpiconf`.
-- `devctl suspend <device>`: per-device suspend.
-- `devctl resume <device>`: per-device resume.
-- `devinfo -v`: device tree with state.
-- `pciconf -lvbc`: PCI devices with power state.
-- `sysctl -a | grep acpi`: all ACPI-related variables.
+- `acpiconf -s 3`：进入S3。
+- `zzz`：`acpiconf`的包装器。
+- `devctl suspend <device>`：每设备挂起。
+- `devctl resume <device>`：每设备恢复。
+- `devinfo -v`：带状态的设备树。
+- `pciconf -lvbc`：带电源状态的PCI设备。
+- `sysctl -a | grep acpi`：所有ACPI相关变量。
 
 ### Common Procedures
 
@@ -3985,13 +3984,13 @@ int foo_runtime_resume(struct foo_softc *sc) {
 
 ### 需要收藏的文件
 
-- `/usr/src/sys/kern/device_if.m`: the kobj method definitions.
-- `/usr/src/sys/kern/subr_bus.c`: `bus_generic_suspend`, `bus_generic_resume`, `device_quiesce`.
-- `/usr/src/sys/dev/pci/pci.c`: `pci_suspend_child`, `pci_resume_child`, `pci_save_state`, `pci_restore_state`.
-- `/usr/src/sys/dev/pci/pcivar.h`: `PCI_POWERSTATE_*` constants and inline API.
-- `/usr/src/sys/dev/re/if_re.c`: production reference for suspend/resume with WoL.
-- `/usr/src/sys/dev/xl/if_xl.c`: minimal suspend/resume pattern.
-- `/usr/src/sys/dev/virtio/block/virtio_blk.c`: virtio-style quiesce.
+- `/usr/src/sys/kern/device_if.m`：kobj方法定义。
+- `/usr/src/sys/kern/subr_bus.c`：`bus_generic_suspend`、`bus_generic_resume`、`device_quiesce`。
+- `/usr/src/sys/dev/pci/pci.c`：`pci_suspend_child`、`pci_resume_child`、`pci_save_state`、`pci_restore_state`。
+- `/usr/src/sys/dev/pci/pcivar.h`：`PCI_POWERSTATE_*`常量和内联API。
+- `/usr/src/sys/dev/re/if_re.c`：带WoL的挂起/恢复生产参考。
+- `/usr/src/sys/dev/xl/if_xl.c`：最小挂起/恢复模式。
+- `/usr/src/sys/dev/virtio/block/virtio_blk.c`：virtio风格的静默。
 
 
 

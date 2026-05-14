@@ -17,135 +17,135 @@ language: "zh-CN"
 
 ## 引言
 
-In the previous chapter, we walked carefully through the life of a USB 串行驱动程序. We followed the 设备 from the moment the 内核 noticed it on the 总线, through 探测 and 附加, into its active life as a 字符设备, and finally out through 分离 when the hardware was unplugged. That walkthrough taught us how transport-specific 驱动程序 live inside FreeBSD. They participate in a 总线, they expose a user-facing abstraction, and they accept that they may vanish at any moment because the underlying hardware is removable.
+在上一章中，我们仔细地走过了USB串行驱动程序的生命周期。我们从内核在总线上发现设备的那一刻开始，跟踪它经过探测和附加，进入其作为字符设备的活跃生命周期，最终在硬件被拔出时通过分离退出。那次完整的演练教会了我们特定传输层驱动程序如何在FreeBSD中生存。它们参与总线，暴露面向用户的抽象，并接受自己可能随时消失的事实，因为底层硬件是可移除的。
 
-Storage 驱动程序 live in a very different country. The hardware is still real, and many storage 设备 can still be removed unexpectedly, but the role of the 驱动程序 shifts in an important way. A USB serial adapter offers a stream of bytes to one process at a time. A storage 设备 offers a 块-addressable, long-lived, structured surface on which 文件系统 are built. When a user plugs in a USB serial adapter, they might immediately open `/dev/cuaU0` and begin a session. When a user plugs in a disk, they almost never read it as a raw stream. They 挂载 it, and from that moment on the disk disappears behind a 文件系统, behind a cache, behind the Virtual File System layer, and behind the many processes that share files on it.
+存储驱动程序生活在一个完全不同的世界里。硬件仍然是真实的，许多存储设备仍然可能被意外移除，但驱动程序的角色以一种重要的方式发生了转变。USB串行适配器一次为一个进程提供字节流。而存储设备提供的是一个块可寻址的、持久的、结构化的表面，文件系统就建立在它之上。当用户插入USB串行适配器时，他们可能会立即打开`/dev/cuaU0`并开始一个会话。当用户插入磁盘时，他们几乎从不会将其作为原始流来读取。他们会挂载它，从那一刻起，磁盘就消失在文件系统之后、消失在缓存之后、消失在虚拟文件系统层之后，以及消失在共享其文件的众多进程之后。
 
-This chapter teaches you what happens on the 驱动程序 side of that arrangement. You will learn what the VFS layer is, how it differs from `devfs`, and how 存储驱动程序 plug into the GEOM 框架 rather than speaking to the VFS layer directly. You will write a small pseudo 块设备 from scratch, expose it as a GEOM provider, give it a working backing store, watch `newfs_ufs` format it, 挂载 the result, create files on it, 卸载 it cleanly, and 分离 it without leaving footprints in the 内核. By the end of the chapter you will have a working mental model of the storage stack and a concrete example 驱动程序 that exercises every layer we discuss.
+本章将教你这种安排在驱动程序一侧发生了什么。你将了解VFS层是什么，它与`devfs`有何不同，以及存储驱动程序如何插入GEOM框架而不是直接与VFS层对话。你将从零开始编写一个小型伪块设备，将其暴露为GEOM提供者，赋予它一个可用的后备存储，观察`newfs_ufs`对其进行格式化，挂载结果，在其上创建文件，干净地卸载它，并在不留下内核足迹的情况下分离它。到本章结束时，你将拥有一个可用的存储栈心智模型和一个练习我们讨论的每一层的具体示例驱动程序。
 
-The chapter is long because the topic is layered. Unlike a character 驱动程序, where the main unit of interaction is a single `read` or `write` call from a process, a 存储驱动程序 lives inside a chain of 框架. Requests travel from a process through VFS, through the 缓冲区 cache, through the 文件系统, through GEOM, and only then reach the 驱动程序. Replies travel back the other way. Understanding that chain is essential before writing any real storage code, and it is essential again when diagnosing the kind of subtle failures that appear only under load or during 卸载. We will move slowly through the foundations, then gradually bring more layers into view.
+本章很长，因为主题是分层的。与字符驱动程序的主要交互单元是来自进程的单个`read`或`write`调用不同，存储驱动程序生活在一个框架链中。请求从进程出发，经过VFS，经过缓冲区缓存，经过文件系统，经过GEOM，然后才到达驱动程序。回复则沿相反方向返回。在编写任何真正的存储代码之前，理解这条链是至关重要的，在诊断仅在负载下或在卸载期间出现的细微故障时，这种理解同样重要。我们将缓慢地推进基础部分，然后逐渐引入更多的层。
 
-As with 第26章, the goal here is not to ship a production 块 驱动程序. The goal is to give you a sturdy, correct, readable first 块 驱动程序 that you understand completely. Real production 存储驱动程序, for SATA disks, NVMe drives, SCSI controllers, SD cards, or virtual 块设备, build on the same patterns. Once the foundations are clear, the step from pseudo to real is mostly a matter of replacing the backing store with code that talks to hardware 寄存器 and DMA engines, and of handling the much richer error and recovery surface that real disks expose.
+与第26章一样，本章的目标不是交付一个生产级块驱动程序。目标是给你一个坚固、正确、可读的第一个块驱动程序，让你完全理解它。真正的生产级存储驱动程序——无论是SATA磁盘、NVMe驱动器、SCSI控制器、SD卡还是虚拟块设备——都建立在相同的模式之上。一旦基础清晰了，从伪设备到真实设备的步骤主要就是用与硬件寄存器和DMA引擎对话的代码替换后备存储，以及处理真实磁盘暴露的更丰富的错误和恢复面。
 
-You will also see how 存储驱动程序 interact with tools the reader already knows from the user side of FreeBSD. `mdconfig(8)` will appear as a close cousin of our 驱动程序, since the 内核's `md(4)` RAM disk is exactly the kind of thing we are building. `newfs_ufs(8)`, `挂载(8)`, `u挂载(8)`, `diskinfo(8)`, `gstat(8)`, and `geom(8)` will become tools of verification, not just tools that other people use. The chapter is structured so that by the time you finish, you can look at the output of `gstat -I 1` while running `dd` against your 设备 and read it with understanding.
+你还将看到存储驱动程序如何与读者已经从FreeBSD用户侧了解的工具交互。`mdconfig(8)`将作为我们驱动程序的近亲出现，因为内核的`md(4)` RAM磁盘正是我们要构建的东西。`newfs_ufs(8)`、`mount(8)`、`umount(8)`、`diskinfo(8)`、`gstat(8)`和`geom(8)`将成为验证工具，而不仅仅是其他人使用的工具。本章的结构确保在你完成时，你可以在对你的设备运行`dd`的同时查看`gstat -I 1`的输出，并带着理解来阅读它。
 
-Finally, a note on what we will not cover here. We will not write a real 总线 驱动程序 that talks to a physical storage controller. We will not discuss the internals of UFS, ZFS, FUSE, or other specific 文件系统 beyond what is needed to understand how they meet a 块设备 at the boundary. We will not cover DMA, PCIe, NVMe queues, or SCSI command sets. All of those topics deserve their own treatment and, where relevant, will appear in later chapters that cover specific 总线es and specific subsystems. What we will do here is give you a complete, self-contained 块-layer experience that is representative of how all 存储驱动程序 in FreeBSD integrate with the 内核.
+最后，关于我们不会涵盖的内容的一点说明。我们不会编写与物理存储控制器对话的真正总线驱动程序。我们不会讨论UFS、ZFS、FUSE或其他特定文件系统的内部机制——超出理解它们在边界处如何与块设备相遇所需的范围。我们不会涵盖DMA、PCIe、NVMe队列或SCSI命令集。所有这些主题都值得单独讨论，在相关的地方，它们将出现在涵盖特定总线和特定子系统的后续章节中。我们在这里要做的是给你一个完整的、自包含的块层体验，它代表了FreeBSD中所有存储驱动程序如何与内核集成。
 
-Take your time with this chapter. Read slowly, type the code, boot the module, format it, 挂载 it, break it on purpose, watch what happens. The storage stack rewards patience and punishes shortcuts. You are not in a race.
+慢慢来阅读本章。慢慢读，输入代码，启动模块，格式化它，挂载它，故意破坏它，观察会发生什么。存储栈奖励耐心，惩罚走捷径。你不是在比赛。
 
-## How 第6部分 Differs from Parts 1 Through 5
+## 第6部分与第1至第5部分有何不同
 
-A short framing note before the chapter begins. 第27章 sits inside a Part that asks you to change one specific habit, and that shift is easier to make when it is named up front.
+在本章开始之前，先做一个简短的框架说明。第27章位于一个要求你改变一个特定习惯的部分中，而这种转变在一开始就明确命名会更容易接受。
 
-Parts 1 through 5 built a single running 驱动程序, `myfirst`, through twenty consecutive chapters, each adding one discipline to the same source tree. 第26章 extended that family with `myfirst_usb` as a transport sibling so the step into real hardware would not also be a step into unfamiliar source. **From 第27章 onward, the running `myfirst` 驱动程序 pauses as the backbone of the book.** 第6部分 shifts to new, self-contained demos that fit each subsystem it teaches: a pseudo 块设备 for storage here in 第27章, and a pseudo 网络接口 for networking in 第28章. These demos are parallel to `myfirst` in spirit but distinct in code, because the patterns that define a 存储驱动程序 or a 网络驱动程序 do not fit the character-设备 mould that `myfirst` grew from.
+第1至第5部分通过连续二十章构建了一个持续运行的驱动程序`myfirst`，每一章都在同一个源码树中增加一项规范。第26章通过`myfirst_usb`作为传输层的兄弟扩展了这个家族，这样迈向真实硬件的步骤不会同时也是迈向陌生源码的步骤。**从第27章开始，持续运行的`myfirst`驱动程序作为本书的主干暂停了。**第6部分转向新的、自包含的演示程序，以适应它所教授的每个子系统：第27章中的伪块设备用于存储，第28章中的伪网络接口用于网络。这些演示程序在精神上与`myfirst`平行，但在代码上是独立的，因为定义存储驱动程序或网络驱动程序的模式不适合`myfirst`所成长的字符设备模具。
 
-The **discipline and didactic shape continue unchanged**. Each chapter still walks you through 探测, 附加, the primary data path, the cleanup path, labs, challenge exercises, troubleshooting, and a bridge to the next chapter. Each chapter still grounds its examples in real FreeBSD source under `/usr/src`. The habits you built in Chapters 25 and earlier, the labelled-goto cleanup chain, rate-limited logging, `INVARIANTS` and `WITNESS`, the production-readiness checklist, carry over without modification. What changes is the code artefact in front of you: a small, focused 驱动程序 whose shape matches the subsystem under study, rather than one more stage in the `myfirst` timeline.
+**训练规范和教学形态保持不变。**每一章仍然引导你完成探测、附加、主数据路径、清理路径、实验、挑战练习、故障排除和通往下一章的桥梁。每一章仍然将示例建立在`/usr/src`下的真实FreeBSD源码之上。你在第25章及更早章节中建立的习惯——带标签的goto清理链、限速日志、`INVARIANTS`和`WITNESS`、生产就绪检查清单——无需修改即可延续。改变的是你面前的代码产物：一个小型、专注的驱动程序，其形状与所研究的子系统相匹配，而不是`myfirst`时间线中的又一个阶段。
 
-This is a deliberate didactic choice, not an accident of scope. A 存储驱动程序 and a 网络驱动程序 each have their own lifecycle, their own data flow, their own preferred idioms, and their own 框架 to plug into. Teaching them as fresh 驱动程序, rather than as further mutations of `myfirst`, keeps the focus on what makes each subsystem distinctive. A reader who tries to stretch `myfirst` into a 块设备 or a 网络接口 quickly ends up with code that teaches nothing about storage or networking. Fresh demos are the cleaner path, and they are the path this Part takes.
+这是一个经过深思熟虑的教学选择，而非范围上的偶然。存储驱动程序和网络驱动程序各自拥有自己的生命周期、自己的数据流、自己偏好的惯用法，以及自己要插入的框架。将它们作为全新的驱动程序来教授，而不是作为`myfirst`的进一步变体，可以保持对每个子系统的独特之处的关注。试图将`myfirst`延伸为块设备或网络接口的读者，很快就会得到一段关于存储或网络什么也教不了的代码。全新的演示程序是更清晰的路径，也是本部分所采取的路径。
 
-Part 7 returns to cumulative learning, but rather than resuming a single running 驱动程序, it revisits the 驱动程序 you have already written (`myfirst`, `myfirst_usb`, and the 第6部分 demos) and teaches the production-minded topics that matter once a first version of a 驱动程序 exists: portability across architectures, advanced debugging, performance tuning, security review, and contribution to the upstream project. The habit of building cumulatively stays with you; only the specific artefact in front of you changes.
+第7部分回归累积式学习，但它不是恢复单一运行中的驱动程序，而是回顾你已经编写过的驱动程序（`myfirst`、`myfirst_usb`和第6部分的演示程序），并教授一旦驱动程序的第一个版本存在后就变得重要的面向生产力的主题：跨架构的可移植性、高级调试、性能调优、安全审查和对上游项目的贡献。累积构建的习惯将伴随你；改变的只是你面前的具体产物。
 
-Keep this framing in mind as 第27章 unfolds. If the switch from `myfirst` to a new pseudo 块设备 feels jarring after twenty chapters of the same source tree, that reaction is expected and passes quickly, usually by the end of Section 3.
+在第27章展开的过程中，请记住这个框架。如果在二十章相同源码树之后，从`myfirst`切换到新的伪块设备感觉有些突兀，这种反应是正常的，通常会很快过去，一般到第3节结束时就会消失。
 
-## 读者指南: How to Use This Chapter
+## 读者指南：如何使用本章
 
-This chapter is designed as a guided course through the storage side of the FreeBSD 内核. It is one of the longer chapters in the book because the subject matter is layered and every layer has its own vocabulary, its own concerns, and its own failure modes. You do not need to rush through it.
+本章被设计为FreeBSD内核存储方面的引导式课程。它是本书中较长的章节之一，因为主题是分层的，每一层都有自己的词汇、自己的关注点和自己的故障模式。你不需要急于求成。
 
-If you choose the **reading-only path**, expect to spend around two to three hours going through the chapter carefully. You will come away with a clear picture of how VFS, the 缓冲区 cache, 文件系统, GEOM, and the 块设备 boundary fit together, and you will have a concrete 驱动程序 in front of you as an anchor for your mental model. This is a legitimate way to use the chapter, especially on a first pass.
+如果你选择**仅阅读路径**，预计需要花费大约两到三个小时仔细阅读本章。你将获得关于VFS、缓冲区缓存、文件系统、GEOM和块设备边界如何组合在一起的清晰图景，并且你面前将有一个具体的驱动程序作为心智模型的锚点。这是使用本章的合理方式，尤其是在第一次阅读时。
 
-If you choose the **reading-plus-labs path**, plan for four to six hours spread across one or two evenings, depending on your comfort with 内核模块 from 第26章. You will build the 驱动程序, format it, 挂载 it, watch it under load, and take it apart safely. Expect the mechanics of `kldload`, `kldunload`, `newfs_ufs`, and `挂载` to become second nature by the end.
+如果你选择**阅读加实验路径**，计划在连续一到两个晚上花费四到六个小时，具体取决于你对第26章中内核模块的熟悉程度。你将构建驱动程序、格式化它、挂载它、在负载下观察它，并安全地拆解它。预计到本章结束时，`kldload`、`kldunload`、`newfs_ufs`和`mount`的操作将变得轻车熟路。
 
-If you choose the **reading-plus-labs-plus-challenges path**, plan for a weekend or two evenings spread over a week. The challenges extend the 驱动程序 in small directions that matter in practice: adding optional flush semantics, responding to `BIO_DELETE` with zeroing, supporting multiple units, exporting extra attributes through `disk_getattr`, and enforcing read-only mode cleanly. Each challenge is self-contained and uses only what the chapter has already covered.
+如果你选择**阅读加实验加挑战路径**，计划在一个周末或分散在一个月内的两个晚上。这些挑战在实际重要的方向上扩展了驱动程序：添加可选的刷新语义、用清零响应`BIO_DELETE`、支持多个单元、通过`disk_getattr`导出额外属性、以及干净地强制只读模式。每个挑战都是自包含的，只使用本章已经涵盖的内容。
 
-Whichever path you choose, do not skip the troubleshooting section. Storage bugs tend to look alike from the outside, and the ability to recognise them by symptom is far more useful in practice than memorising the names of every function in GEOM. The troubleshooting material is placed near the end for readability, but you may find yourself turning back to it while working through the labs.
+无论你选择哪条路径，都不要跳过故障排除部分。存储bug从外部看往往很相似，通过症状识别它们的能力在实践中远比记住GEOM中每个函数的名字有用。故障排除材料放在接近末尾的位置以便于阅读，但你可能会在做实验时回过头来查阅它。
 
-A word on prerequisites. This chapter builds directly on 第26章, so at minimum you should be comfortable writing a small 内核模块, declaring a softc, allocating and freeing resources, and walking through the load and unload path. You should also be comfortable enough with the shell to run `kldload`, `kldstat`, `dmesg`, `挂载`, and `u挂载` without stopping to look up flags. If any of that feels unfamiliar, it is worth revisiting Chapters 5, 14, and 26 before continuing.
+关于先决条件的说明。本章直接建立在第26章之上，因此你至少应该能够熟练编写小型内核模块、声明softc、分配和释放资源，以及走过加载和卸载路径。你还应该足够熟悉shell，能够在不停下来查找标志的情况下运行`kldload`、`kldstat`、`dmesg`、`mount`和`umount`。如果其中任何内容感觉不熟悉，值得在继续之前回顾第5、14和26章。
 
-You should work on a throwaway FreeBSD 14.3 system, a virtual machine, or a branch where you do not mind the occasional 内核 panic. A panic is unlikely if you follow the text carefully, but the cost of a mistake on your development laptop is much higher than the cost of a mistake on a VM snapshot you can roll back. We have said this before and we will keep saying it: 内核 work is safe when you work in a safe place.
+你应该在一个一次性的FreeBSD 14.3系统、虚拟机或不介意偶尔内核崩溃的分支上工作。如果你仔细按照文本操作，崩溃是不太可能的，但在开发笔记本电脑上犯错的代价远高于在可以回滚的VM快照上犯错的代价。我们之前说过这话，我们会继续说：内核工作在安全的地方进行时是安全的。
 
-### Work Section by Section
+### 按节逐读
 
-The chapter is organised as a progression. Section 1 introduces VFS. Section 2 contrasts `devfs` with VFS and positions our 驱动程序 in that contrast. Section 3 寄存器 a minimal pseudo 块设备. Section 4 exposes it as a GEOM provider. Section 5 implements real read and write paths. Section 6 挂载s a 文件系统 on top. Section 7 gives the 设备 persistence. Section 8 teaches safe 卸载 and cleanup. Section 9 talks about refactoring, versioning, and what to do as the 驱动程序 grows.
+本章按循序渐进的方式组织。第1节介绍VFS。第2节对比`devfs`和VFS，并将我们的驱动程序定位在这种对比之中。第3节注册一个最小的伪块设备。第4节将其暴露为GEOM提供者。第5节实现真正的读写路径。第6节在顶部挂载文件系统。第7节赋予设备持久性。第8节教授安全的卸载和清理。第9节讨论重构、版本管理以及驱动程序增长时该怎么做。
 
-You are meant to read them in order. Each section assumes the previous sections are fresh in your mind, and the labs build on each other. If you jump in the middle, pieces will look strange.
+你应该按顺序阅读它们。每一节都假设前面的章节内容在你脑海中仍然清晰，实验也是相互构建的。如果你跳到中间，内容会显得很奇怪。
 
-### Type the Code
+### 输入代码
 
-Typing the code by hand remains the most effective way to internalise 内核 idioms. The companion files under `examples/part-06/ch27-storage-vfs/` exist so that you can check your work, not so that you can skip the typing. Reading code is not the same as writing it.
+手动输入代码仍然是内化内核惯用法的最有效方式。`examples/part-06/ch27-storage-vfs/`下的配套文件是为了让你检查工作，而不是让你跳过输入。阅读代码和编写代码不是一回事。
 
-### Open the FreeBSD Source Tree
+### 打开FreeBSD源码树
 
-You will be asked several times to open real FreeBSD source files, not only the companion examples. The files of interest include `/usr/src/sys/geom/geom.h`, `/usr/src/sys/sys/bio.h`, `/usr/src/sys/geom/geom_disk.h`, `/usr/src/sys/dev/md/md.c`, and `/usr/src/sys/geom/zero/g_zero.c`. Each of these is a primary reference, and the prose in this chapter will often refer back to them. If you have not already cloned or installed the 14.3 source tree, now is a good moment to do so.
+你将被多次要求打开真正的FreeBSD源文件，而不仅仅是配套示例。感兴趣的文件包括`/usr/src/sys/geom/geom.h`、`/usr/src/sys/sys/bio.h`、`/usr/src/sys/geom/geom_disk.h`、`/usr/src/sys/dev/md/md.c`和`/usr/src/sys/geom/zero/g_zero.c`。每一个都是主要参考，本章的文字经常会引用它们。如果你还没有克隆或安装14.3源码树，现在是个好时机。
 
-### Use Your Lab Logbook
+### 使用你的实验日志
 
-Keep your lab logbook from 第26章 open while you work. You will want to record the output of `gstat -I 1`, the messages emitted by `dmesg` when you load and unload the module, the time it takes to format the 设备, and any warnings or panics you see. Kernel work is much easier when you keep notes, because many symptoms look similar at first glance and the logbook lets you compare across sessions.
+在工作时保持第26章的实验日志打开。你会想记录`gstat -I 1`的输出、加载和卸载模块时`dmesg`发出的消息、格式化设备所需的时间，以及你看到的任何警告或崩溃。当你做笔记时，内核工作会变得容易得多，因为许多症状乍一看很相似，日志让你可以跨会话进行比较。
 
-### Pace Yourself
+### 掌握节奏
 
-If you feel your understanding blurring in a particular section, stop. Read it again. Try a small experiment on the running module. Do not push through a section that has not settled. Storage 驱动程序 punish confusion more severely than character 驱动程序, because confusion at the 块 layer often becomes 文件系统 corruption at the higher layer, and 文件系统 corruption takes time and care to repair even in a throwaway VM.
+如果你感觉在某一节中理解变得模糊，停下来。重新阅读它。在运行中的模块上尝试一个小实验。不要硬撑过尚未理解的小节。存储驱动程序比字符驱动程序更严厉地惩罚混乱，因为块层的混乱往往会变成上层的文件系统损坏，而文件系统损坏即使在一次性虚拟机中也需要时间和精力来修复。
 
-## How to Get the Most Out of This Chapter
+## 如何从本章获得最大收益
 
-The chapter is structured so that every section adds exactly one new concept on top of what came before. To make the most of that structure, treat the chapter as a workshop rather than as a reference. You are not here to find a quick answer. You are here to build a correct mental model.
+本章的结构使得每一节都恰好在前一节的基础上增加一个新概念。为了充分利用这种结构，把本章当作研讨会而不是参考手册。你不是来这里找快速答案的。你是来这里构建正确的心智模型的。
 
-### Work in Sections
+### 按节学习
 
-Do not read the whole chapter end to end without stopping. Read one section, then pause. Try the experiment or lab that goes with it. Look at the related FreeBSD source. Write a few lines in your logbook. Only then move on. Storage programming in the 内核 is strongly cumulative, and skipping ahead usually means that you will be confused about the next thing for a reason that was explained two sections ago.
+不要一口气从头到尾读完整个章节。读一节，然后暂停。尝试与之配套的实验或练习。查看相关的FreeBSD源码。在日志中写几行。然后再继续。内核中的存储编程是高度累积性的，跳过前进通常意味着你会因为两节之前解释过的原因而对下一个内容感到困惑。
 
-### Keep the Driver Running
+### 保持驱动程序运行
 
-Once you have loaded the 驱动程序 in Section 3, keep it loaded as much as possible while you read. Modify it, reload, poke it with `gstat`, run `dd` against it, call `diskinfo` on it. Having a live, observable example is far more valuable than any 挂载 of reading. You will notice things that no chapter could ever tell you about, because no chapter can show you real timing, real jitter, or real corner cases in your particular setup.
+一旦你在第3节加载了驱动程序，在阅读时尽量保持它处于加载状态。修改它，重新加载，用`gstat`探查它，对它运行`dd`，对它调用`diskinfo`。拥有一个活生生的、可观察的示例远比任何数量的阅读都更有价值。你会注意到没有任何章节能告诉你的事情，因为没有章节能向你展示真实的时序、真实的抖动或你特定设置中的真实边界情况。
 
-### Consult Manual Pages
+### 查阅手册页
 
-FreeBSD's manual pages are part of the teaching material, not a separate formality. Section 9 of the manual is where the 内核 接口 live. We will refer several times to pages such as `g_bio(9)`, `geom(4)`, `DEVICE_IDENTIFY(9)`, `disk(9)`, `总线_dma(9)`, and `devstat(9)`. Read them alongside this chapter. They are shorter than they look, and they are written by the same community that wrote the 内核 you are working inside.
+FreeBSD的手册页是教学材料的一部分，而不是额外的形式要求。手册的第9节是内核接口所在的地方。我们将多次引用`g_bio(9)`、`geom(4)`、`DEVICE_IDENTIFY(9)`、`disk(9)`、`bus_dma(9)`和`devstat(9)`等页面。与本章一起阅读它们。它们比你想象的要短，而且它们是由编写你正在使用的内核的同一社区编写的。
 
-### Type the Code, Then Mutate It
+### 输入代码，然后修改它
 
-When you build the 驱动程序 from the companion examples, type it first. Once it works, start changing things. Rename a method and watch the build fail. Remove an `if` branch and watch what happens when you load the module. Hardcode a smaller media size and watch `newfs_ufs` react. Kernel code becomes understandable through deliberate mutation far more than through pure reading.
+当你从配套示例构建驱动程序时，先输入它。一旦它工作了，就开始修改它。重命名一个方法，观察构建失败。删除一个`if`分支，观察加载模块时发生什么。硬编码一个更小的介质大小，观察`newfs_ufs`的反应。内核代码通过有意的修改变得可理解，远比纯粹阅读更有效。
 
-### Trust the Tooling
+### 信任工具
 
-FreeBSD gives you a wealth of tools for inspecting the storage stack: `geom`, `gstat`, `diskinfo`, `dd`, `mdconfig`, `dmesg`, `kldstat`, `sysctl`. Use them. When something goes wrong, the first move is almost never to read more source. It is to ask the system what state it is in. `geom disk list` and `geom part show` are often more informative than five minutes of grep.
+FreeBSD为你提供了丰富的工具来检查存储栈：`geom`、`gstat`、`diskinfo`、`dd`、`mdconfig`、`dmesg`、`kldstat`、`sysctl`。使用它们。当出现问题时，第一步几乎从不是阅读更多源码。而是询问系统当前处于什么状态。`geom disk list`和`geom part show`通常比五分钟的grep更有信息量。
 
-### Take Breaks
+### 适当休息
 
-Kernel work is cognitively dense. Two or three focused hours are usually more productive than a seven-hour sprint. If you catch yourself making the same typo three times, or copy-pasting without reading, that is your cue to stand up for ten minutes.
+内核工作在认知上是密集的。两到三个专注的小时通常比七个小时的冲刺更有效率。如果你发现自己犯了三次同样的打字错误，或者不看就复制粘贴，那就是你该站起来休息十分钟的信号。
 
-With those habits established, let us begin.
+建立了这些习惯后，让我们开始吧。
 
-## 第1节： What Is the Virtual File System Layer?
+## 第1节：什么是虚拟文件系统层？
 
-When a process opens a file on FreeBSD, it calls `open(2)` with a path. That path might resolve to a file on UFS, a file on ZFS, a file on a remotely 挂载ed NFS share, a pseudo-file in `devfs`, a file under `procfs`, or even a file inside a FUSE-挂载ed userland 文件系统. The process cannot tell. The process receives a file 描述符 and then reads and writes as if there were only one kind of file in the world. That uniformity is not an accident. It is the work of the Virtual File System layer.
+当进程在FreeBSD上打开文件时，它会带着路径调用`open(2)`。该路径可能解析为UFS上的文件、ZFS上的文件、远程挂载的NFS共享上的文件、`devfs`中的伪文件、`procfs`下的文件，甚至FUSE挂载的用户态文件系统中的文件。进程无法区分。进程收到一个文件描述符，然后像世界上只有一种文件一样进行读写。这种统一性并非偶然。这是虚拟文件系统层的工作。
 
-### The Problem VFS Solves
+### VFS解决的问题
 
-Before VFS, UNIX 内核s generally knew how to talk to one 文件系统 only. If you wanted a new 文件系统, you modified the code paths for `open`, `read`, `write`, `stat`, `unlink`, `rename`, and every other system call that touched files. That approach worked for a while, but it did not scale. New 文件系统 arrived: NFS, for remote access. MFS, for in-memory scratch space. Procfs, for exposing process state. ISO 9660, for CD-ROM media. FAT, for interoperability. Every addition meant new forks in every file-related system call.
+在VFS出现之前，UNIX内核通常只知道如何与一种文件系统对话。如果你想要一个新的文件系统，你必须修改`open`、`read`、`write`、`stat`、`unlink`、`rename`以及每个涉及文件的系统调用的代码路径。这种方法在一段时间内有效，但无法扩展。新的文件系统到来了：用于远程访问的NFS，用于内存暂存空间的MFS，用于暴露进程状态的Procfs，用于CD-ROM介质的ISO 9660，用于互操作的FAT。每次添加都意味着在每个与文件相关的系统调用中出现新的分支。
 
-Sun Microsystems introduced the Virtual File System architecture in the mid-1980s as a way out of this mess. The idea is simple. The 内核 talks to a single abstract 接口, defined in terms of generic operations on generic file objects. Each concrete 文件系统 寄存器 implementations of those operations, and the 内核 calls them through function pointers. When the 内核 needs to read a file, it does not know or care whether the file lives on UFS or NFS or ZFS. It knows there is a node with a `VOP_READ` method, and it calls that method.
+Sun Microsystems在1980年代中期引入了虚拟文件系统架构，作为摆脱这种困境的方法。思路很简单。内核与一个单一抽象接口对话，该接口以通用文件对象上的通用操作来定义。每个具体的文件系统注册这些操作的实现，内核通过函数指针调用它们。当内核需要读取文件时，它不知道也不关心文件存储在UFS还是NFS还是ZFS上。它知道有一个带有`VOP_READ`方法的节点，然后调用该方法。
 
-FreeBSD adopted this architecture and has extended it significantly over the decades. The result is that adding a 文件系统 to FreeBSD no longer requires modifying the core system calls. A 文件系统 is a separate 内核模块 that 寄存器 a set of operations with VFS, and from that moment VFS routes the right requests to it.
+FreeBSD采用了这种架构，并在数十年间对其进行了显著扩展。结果是，向FreeBSD添加文件系统不再需要修改核心系统调用。文件系统是一个独立的内核模块，它向VFS注册一组操作，从那一刻起，VFS将正确的请求路由给它。
 
-### The VFS Object Model
+### VFS对象模型
 
-VFS defines three main kinds of objects.
+VFS定义了三种主要对象。
 
-The first is the **挂载 point**, represented in the 内核 by `struct 挂载`. Every 挂载ed 文件系统 has one, and it records where in the namespace the 文件系统 is 附加ed, what flags it has, and which 文件系统 code is responsible for it.
+第一种是**挂载点**，在内核中用`struct mount`表示。每个挂载的文件系统都有一个挂载点，它记录了文件系统附加在命名空间中的位置、它有什么标志，以及哪个文件系统代码负责它。
 
-The second is the **vnode**, represented by `struct vnode`. A vnode is the 内核's handle on a single file or directory within a 挂载ed 文件系统. It is not the file itself. It is the 内核's runtime representation of that file for as long as something in the 内核 cares about it. Every file that a process has open has a vnode. Every directory the 内核 is walking through has a vnode. When nothing holds a reference to a vnode, it can be reclaimed, and the 内核 keeps a pool of them to avoid pressure on small-inode cases.
+第二种是**vnode**，用`struct vnode`表示。vnode是内核对已挂载文件系统中单个文件或目录的句柄。它不是文件本身。它是内核对该文件的运行时表示，只要内核中有东西关心它就存在。每个进程打开的文件都有一个vnode。内核遍历的每个目录都有一个vnode。当没有任何东西持有对vnode的引用时，它就可以被回收，内核保留一个vnode池以避免小inode情况下的压力。
 
-The third is the **vnode operations vector**, represented by `struct vop_vector`, which lists the operations each 文件系统 must implement on vnodes. The operations have names like `VOP_LOOKUP`, `VOP_READ`, `VOP_WRITE`, `VOP_CREATE`, `VOP_REMOVE`, `VOP_GETATTR`, and `VOP_SETATTR`. Each 文件系统 provides a pointer to its own vector, and the 内核 invokes operations through these vectors whenever it needs to do anything to a file.
+第三种是**vnode操作向量**，用`struct vop_vector`表示，它列出了每个文件系统必须在vnode上实现的操作。这些操作有`VOP_LOOKUP`、`VOP_READ`、`VOP_WRITE`、`VOP_CREATE`、`VOP_REMOVE`、`VOP_GETATTR`和`VOP_SETATTR`等名称。每个文件系统提供指向自己向量的指针，内核在需要对文件执行任何操作时通过这些向量调用操作。
 
-The elegant thing about this design is that from the system call side of the 内核, only the abstract 接口 matters. The system call layer calls `VOP_READ(vp, uio, ioflag, cred)` and does not care whether `vp` belongs to UFS, ZFS, NFS, or tmpfs. From the 文件系统 side, only the abstract 接口 matters too. UFS implements the vnode operations and never sees the system call code.
+这种设计的优雅之处在于，从内核的系统调用一侧看，只有抽象接口重要。系统调用层调用`VOP_READ(vp, uio, ioflag, cred)`，不关心`vp`属于UFS、ZFS、NFS还是tmpfs。从文件系统一侧看，也只有抽象接口重要。UFS实现vnode操作，永远不会看到系统调用代码。
 
-### Where Storage Drivers Fit
+### 存储驱动程序的位置
 
-Here is the question that matters for this chapter. If VFS is where 文件系统 live, where do 存储驱动程序 live?
+这是本章的关键问题。如果VFS是文件系统所在的地方，那么存储驱动程序在哪里？
 
-The answer is: not directly inside VFS. A 存储驱动程序 does not implement `VOP_READ`. It implements a much lower-level abstraction that looks like a disk. Filesystems then sit on top, consuming the disk-like abstraction, translating file-level operations into 块-level operations, and calling down.
+答案是：不直接在VFS内部。存储驱动程序不实现`VOP_READ`。它实现的是一个看起来像磁盘的低得多层的抽象。然后文件系统位于其上，消费类似磁盘的抽象，将文件级操作转换为块级操作，并向下调用。
 
-The chain of layers between a process and a 块设备 in FreeBSD typically looks like this.
+FreeBSD中进程和块设备之间的层链通常如下所示。
 
 ```text
        +------------------+
@@ -190,152 +190,152 @@ The chain of layers between a process and a 块设备 in FreeBSD typically looks
        +------------------+
 ```
 
-Each layer in this stack has a job. VFS hides 文件系统 differences from system calls. The 文件系统 translates files into 块. The 缓冲区 cache holds recently used 块 in RAM. GEOM routes 块 requests through transforms, 分区s, and mirrors. The 存储驱动程序 converts 块 requests into real I/O. The hardware does the work.
+这个栈中的每一层都有各自的职责。VFS向系统调用隐藏文件系统的差异。文件系统将文件转换为块。缓冲区缓存在RAM中保存最近使用的块。GEOM通过变换、分区和镜像来路由块请求。存储驱动程序将块请求转换为实际的I/O。硬件执行具体工作。
 
-For this chapter, almost everything we do happens at the bottom two layers: GEOM and the 存储驱动程序. We will touch the 文件系统 layer briefly when we 挂载 UFS on our 设备, and we will touch VFS only in the sense that `挂载(8)` calls it. The layers above GEOM are not our code.
+在本章中，我们几乎所有的操作都发生在最底部的两层：GEOM和存储驱动程序。我们将在设备上挂载UFS时简要涉及文件系统层，而VFS仅在`mount(8)`调用它的意义上会涉及到。GEOM以上的层不是我们的代码。
 
-### VFS in the Kernel Source
+### 内核源码中的VFS
 
-If you want to look at VFS directly, the entry points are under `/usr/src/sys/kern/vfs_*.c`. The vnode layer lives in `vfs_vnops.c` and `vfs_subr.c`. The 挂载 side lives in `vfs_挂载.c`. The vnode operations vector is defined and handled in `vfs_default.c`. UFS, our primary 文件系统 in this chapter, lives under `/usr/src/sys/ufs/ufs/` and `/usr/src/sys/ufs/ffs/`. You do not need to read any of those to follow this chapter. You should know where they are so that you understand what sits above the code you are about to write.
+如果你想直接查看VFS，入口点在`/usr/src/sys/kern/vfs_*.c`下。vnode层在`vfs_vnops.c`和`vfs_subr.c`中。挂载侧在`vfs_mount.c`中。vnode操作向量在`vfs_default.c`中定义和处理。UFS，本章的主要文件系统，位于`/usr/src/sys/ufs/ufs/`和`/usr/src/sys/ufs/ffs/`下。你不需要阅读其中任何一个来跟随本章。你应该知道它们在哪里，以便理解你即将编写的代码之上有什么。
 
-### What This Means for Our Driver
+### 这对我们的驱动程序意味着什么
 
-Because VFS is not our direct caller, we do not need to implement `VOP_` methods. We need to implement the 块-layer 接口 that the 文件系统 ultimately calls into. That 接口 is defined by GEOM and, for disk-like 设备 in particular, by the `g_disk` subsystem. Our 驱动程序 will expose a GEOM provider. A 文件系统 will consume it. The flow of I/O will go through `struct bio` rather than through `struct uio`, and the unit of work will be a 块 rather than a byte range.
+因为VFS不是我们的直接调用者，我们不需要实现`VOP_`方法。我们需要实现的是文件系统最终调用到的块层接口。该接口由GEOM定义，对于类似磁盘的设备，由`g_disk`子系统定义。我们的驱动程序将暴露一个GEOM提供者。文件系统将消费它。I/O的流动将通过`struct bio`而不是`struct uio`，工作单元将是块而不是字节范围。
 
-This is also why 存储驱动程序 rarely interact with `cdevsw` or `make_dev` directly the way character 驱动程序 do. The `/dev` node for a disk is created by GEOM, not by the 驱动程序. The 驱动程序 describes itself to GEOM, and GEOM publishes a provider, which then appears in `/dev` with an automatically generated name.
+这也解释了为什么存储驱动程序很少像字符驱动程序那样直接与`cdevsw`或`make_dev`交互。磁盘的`/dev`节点是由GEOM创建的，而不是由驱动程序创建的。驱动程序向GEOM描述自己，GEOM发布一个提供者，该提供者随后以自动生成的名称出现在`/dev`中。
 
-### The VFS Call Chain in Practice
+### VFS调用链实践
 
-Let us trace what happens when a user runs `cat /mnt/myfs/hello.txt`, assuming `/mnt/myfs` is 挂载ed on our future 块设备.
+让我们追踪一下当用户运行`cat /mnt/myfs/hello.txt`时会发生什么，假设`/mnt/myfs`挂载在我们未来的块设备上。
 
-First, the process calls `open("/mnt/myfs/hello.txt", O_RDONLY)`. That goes to `sys_openat` in the system call layer, which asks VFS to resolve the path. VFS walks the path one component at a time, calling `VOP_LOOKUP` on each directory vnode. When it reaches `myfs`, it notices that the vnode is a 挂载 point and crosses into the 挂载ed 文件系统. It eventually arrives at the vnode for `hello.txt` and returns a file 描述符.
+首先，进程调用`open("/mnt/myfs/hello.txt", O_RDONLY)`。这会进入系统调用层的`sys_openat`，后者要求VFS解析路径。VFS逐个组件地遍历路径，在每个目录vnode上调用`VOP_LOOKUP`。当到达`myfs`时，它注意到vnode是一个挂载点并跨越到已挂载的文件系统中。它最终到达`hello.txt`的vnode并返回一个文件描述符。
 
-Second, the process calls `read(fd, buf, 64)`. That goes to `sys_read`, which calls `vn_read`, which calls `VOP_READ` on the vnode. The UFS implementation of `VOP_READ` consults its inode, figures out which disk 块 hold the requested bytes, and asks the 缓冲区 cache for those 块. If the 块 are not cached, the 缓冲区 cache calls `bread`, which ultimately builds a `struct bio` and hands it to GEOM.
+第二步，进程调用`read(fd, buf, 64)`。这进入`sys_read`，后者调用`vn_read`，再调用vnode上的`VOP_READ`。UFS的`VOP_READ`实现查阅其inode，找出哪些磁盘块保存了请求的字节，然后向缓冲区缓存请求这些块。如果块未被缓存，缓冲区缓存调用`bread`，最终构建一个`struct bio`并将其交给GEOM。
 
-Third, GEOM looks at the provider the 文件系统 is consuming. Through a chain of providers and consumers, the `bio` ends up at the bottom provider, which is our 驱动程序's provider. Our strategy function receives the `bio`, reads the requested bytes from our backing store, and calls `biodone` or `g_io_deliver` to complete the request.
+第三步，GEOM查看文件系统正在消费的提供者。通过提供者和消费者的链条，`bio`最终到达最底层的提供者，也就是我们驱动程序的提供者。我们的策略函数接收`bio`，从后备存储中读取请求的字节，并调用`biodone`或`g_io_deliver`来完成请求。
 
-Fourth, the reply travels back the other way. The 缓冲区 cache gets its data, the 文件系统 returns to `vn_read`, `vn_read` copies the data into the user 缓冲区, and `sys_read` returns.
+第四步，回复沿相反方向返回。缓冲区缓存获取其数据，文件系统返回到`vn_read`，`vn_read`将数据复制到用户缓冲区中，`sys_read`返回。
 
-None of that code is ours except the last hop. But understanding the whole chain is what lets you make sensible design choices when you write the last hop.
+除了最后一跳，所有这些代码都不是我们的。但理解整个链路能让你在编写最后一跳时做出合理的设计选择。
 
 ### 总结 Section 1
 
-VFS is the layer that unifies 文件系统 in FreeBSD. It sits between the system call 接口 and the various concrete 文件系统, and it provides the abstraction that makes files look identical regardless of where they live. Storage 驱动程序 do not live inside VFS. They live at the bottom of the stack, far below VFS, behind GEOM and the 缓冲区 cache. Our job in this chapter is to write a 驱动程序 that participates correctly in that lower layer, and to understand enough about the upper layers to avoid confusion when diagnosing problems.
+VFS是FreeBSD中统一文件系统的层。它位于系统调用接口和各种具体文件系统之间，提供了使文件无论存储在哪里看起来都相同的抽象。存储驱动程序不在VFS内部。它们位于栈的底部，远在VFS之下，在GEOM和缓冲区缓存之后。我们在本章的任务是编写一个正确参与该底层的驱动程序，并充分理解上层以避免在诊断问题时产生困惑。
 
-In the next section, we will sharpen the distinction between `devfs` and VFS, because that distinction determines which mental model applies when you think about a given 设备 node.
+在下一节中，我们将明确`devfs`和VFS之间的区别，因为该区别决定了你在考虑给定设备节点时适用哪种心智模型。
 
-## 第2节： devfs vs VFS
+## 第2节：devfs与VFS
 
-Beginners often assume that `devfs` and the Virtual File System layer are two names for the same thing. They are not. They are related, but they play very different roles. Getting this distinction right early saves a great deal of confusion later, especially when thinking about 存储驱动程序, because 存储驱动程序 straddle both of them.
+初学者常常认为`devfs`和虚拟文件系统层是同一事物的两个名称。它们不是。它们有关联，但扮演着非常不同的角色。尽早弄清这个区别可以在以后省去很多困惑，特别是在考虑存储驱动程序时，因为存储驱动程序横跨两者。
 
-### What devfs Is
+### 什么是devfs
 
-`devfs` is a 文件系统. That sounds circular, but it is true. `devfs` is implemented as a 文件系统 module, 注册ed with VFS, and 挂载ed at `/dev` on every FreeBSD system. When you read a file under `/dev`, you are reading through VFS, which hands the request to `devfs`, which recognises that the "file" you are reading is really a 内核 设备 node and routes the call to the appropriate 驱动程序.
+`devfs`是一个文件系统。这听起来像是循环论证，但确实如此。`devfs`被实现为一个文件系统模块，向VFS注册，并在每个FreeBSD系统上挂载到`/dev`。当你在`/dev`下读取文件时，你是通过VFS进行读取的，VFS将请求交给`devfs`，`devfs`识别出你正在读取的"文件"实际上是一个内核设备节点，并将调用路由到相应的驱动程序。
 
-`devfs` has several special properties that distinguish it from an ordinary 文件系统 like UFS.
+`devfs`有几个特殊属性，使它区别于像UFS这样的普通文件系统。
 
-First, its contents are not stored on disk. The "files" in `devfs` are synthesised by the 内核 based on which 驱动程序 are currently loaded and which 设备 are currently present. When a 驱动程序 calls `make_dev(9)` to create `/dev/mybox`, `devfs` adds the corresponding node to its view. When the 驱动程序 destroys that 设备 with `destroy_dev(9)`, `devfs` removes the node. The user sees `/dev/mybox` appear and disappear in real time.
+第一，其内容不存储在磁盘上。`devfs`中的"文件"是由内核根据当前加载的驱动程序和当前存在的设备合成的。当驱动程序调用`make_dev(9)`创建`/dev/mybox`时，`devfs`将相应的节点添加到其视图中。当驱动程序用`destroy_dev(9)`销毁该设备时，`devfs`移除该节点。用户会实时看到`/dev/mybox`出现和消失。
 
-Second, the read and write paths for `devfs` nodes are not file data paths. When you write to `/dev/myserial0`, you are not appending bytes to a stored file. You are invoking the 驱动程序's `d_write` function through `cdevsw`, and that function decides what those bytes mean. In the case of a USB 串行驱动程序, they mean bytes to transmit on the wire. In the case of a pseudo 设备 like `/dev/null`, they mean bytes to discard.
+第二，`devfs`节点的读路径和写路径不是文件数据路径。当你写入`/dev/myserial0`时，你不是在向存储的文件追加字节。你是在通过`cdevsw`调用驱动程序的`d_write`函数，该函数决定这些字节的含义。对于USB串行驱动程序，它们意味着要在传输线上发送的字节。对于像`/dev/null`这样的伪设备，它们意味着要丢弃的字节。
 
-Third, the metadata of `devfs` nodes, such as permissions and ownership, is managed by a policy layer in the 内核 rather than by the 文件系统 itself. `devfs_ruleset(8)` and the `devd` 框架 configure that policy.
+第三，`devfs`节点的元数据（如权限和所有权）由内核中的策略层管理，而不是由文件系统本身管理。`devfs_ruleset(8)`和`devd`框架配置该策略。
 
-Fourth, `devfs` supports cloning, which character 驱动程序 like `pty`, `tun`, and `bpf` use to create a new minor 设备 whenever a process opens the node. This is how `/dev/ptyp0`, `/dev/ptyp1`, and their successors come into existence on demand.
+第四，`devfs`支持克隆，字符驱动程序如`pty`、`tun`和`bpf`利用克隆在进程打开节点时创建新的次设备。这就是`/dev/ptyp0`、`/dev/ptyp1`及其后继者按需产生的方式。
 
-### What VFS Is
+### 什么是VFS
 
-VFS, as we saw in Section 1, is the abstract 文件系统 layer. Every 文件系统 on a FreeBSD system, including `devfs`, is 注册ed with VFS and invoked through VFS. VFS is not a 文件系统. It is the 框架 that 文件系统 plug into.
+正如我们在第1节中看到的，VFS是抽象的文件系统层。FreeBSD系统上的每个文件系统，包括`devfs`，都向VFS注册并通过VFS调用。VFS不是文件系统。它是文件系统插入的框架。
 
-When you open a file on UFS, the chain is: system call -> VFS -> UFS -> 缓冲区 cache -> GEOM -> 驱动程序. When you open a node in `devfs`, the chain is: system call -> VFS -> devfs -> 驱动程序. Both go through VFS. Only the UFS chain involves GEOM.
+当你在UFS上打开文件时，链路是：系统调用 -> VFS -> UFS -> 缓冲区缓存 -> GEOM -> 驱动程序。当你在`devfs`中打开节点时，链路是：系统调用 -> VFS -> devfs -> 驱动程序。两者都经过VFS。只有UFS链路涉及GEOM。
 
-### Why Storage Drivers Live on Both Sides
+### 存储驱动程序为何横跨两端
 
-This is where 存储驱动程序 become interesting.
+这就是存储驱动程序变得有趣的地方。
 
-A 存储驱动程序 exposes a 块设备, and that 块设备 eventually appears as a node under `/dev`. For example, if we 注册 our 驱动程序 and tell GEOM about it, a node called `/dev/myblk0` may appear in `devfs`. When a user writes `dd if=image.iso of=/dev/myblk0`, they are writing through `devfs` to a special character 接口 that GEOM provides on top of our disk. The requests flow as BIO through GEOM and into our strategy function.
+存储驱动程序暴露一个块设备，该块设备最终以`/dev`下的节点形式出现。例如，如果我们注册驱动程序并告知GEOM，`devfs`中可能会出现一个名为`/dev/myblk0`的节点。当用户写入`dd if=image.iso of=/dev/myblk0`时，他们正在通过`devfs`写入GEOM在我们磁盘之上提供的特殊字符接口。请求以BIO的形式通过GEOM流入我们的策略函数。
 
-But when a user runs `newfs_ufs /dev/myblk0` and then `挂载 /dev/myblk0 /mnt`, the usage pattern changes. The 内核 now 挂载s UFS on top of the 设备. When a process later reads a file under `/mnt`, the path is: system call -> VFS -> UFS -> 缓冲区 cache -> GEOM -> 驱动程序. The `/dev/myblk0` node in `devfs` is not even involved in the hot path. UFS and the 缓冲区 cache talk directly to the GEOM provider. The `devfs` node is essentially a handle that tools use to refer to the 设备, not the pipe that file data flows through during normal operation.
+但当用户运行`newfs_ufs /dev/myblk0`然后`mount /dev/myblk0 /mnt`时，使用模式就改变了。内核现在在设备之上挂载UFS。当进程随后在`/mnt`下读取文件时，路径是：系统调用 -> VFS -> UFS -> 缓冲区缓存 -> GEOM -> 驱动程序。`devfs`中的`/dev/myblk0`节点甚至不参与热路径。UFS和缓冲区缓存直接与GEOM提供者对话。`devfs`节点本质上是工具用来引用设备的句柄，而不是正常操作期间文件数据流经的管道。
 
-### A Closer Look at the Buffer Cache
+### 深入了解缓冲区缓存
 
-Between the 文件系统 and GEOM in the storage path sits the 缓冲区 cache. We have mentioned it several times without pausing to describe it. Let us pause now, because it explains several of the behaviours you will observe when testing your 驱动程序.
+在存储路径中，文件系统和GEOM之间是缓冲区缓存。我们已经提到过它好几次但没有停下来描述。现在让我们停下来，因为它解释了你在测试驱动程序时会观察到的几种行为。
 
-The 缓冲区 cache is a pool of fixed-size 缓冲区 in 内核 memory, each of which holds one 文件系统 块. When a 文件系统 reads a 块, the 缓冲区 cache gets involved: the 文件系统 asks the cache for the 块, and the cache either returns a hit (the 块 is already in memory) or issues a miss (the cache allocates a 缓冲区, calls down through GEOM to fetch the data, and returns the 缓冲区 once the read completes). When a 文件系统 writes a 块, the same cache path applies in reverse: the write fills a 缓冲区, the 缓冲区 is marked dirty, and the cache schedules a write-back at some later point.
+缓冲区缓存是内核内存中固定大小缓冲区的池，每个缓冲区保存一个文件系统块。当文件系统读取一个块时，缓冲区缓存就会参与：文件系统向缓存请求该块，缓存要么返回命中（该块已在内存中），要么发出未命中（缓存分配一个缓冲区，通过GEOM向下调用获取数据，并在读取完成后返回该缓冲区）。当文件系统写入一个块时，相同的缓存路径以相反方式应用：写入填充一个缓冲区，该缓冲区被标记为脏，缓存安排在稍后的某个时间点进行回写。
 
-The 缓冲区 cache is why consecutive reads of the same file data do not always hit the 驱动程序. The first read misses, causing a BIO to travel to the 驱动程序. The second read hits the cache and returns immediately. This is a great feature for performance. It can be mildly confusing when you are first debugging a 驱动程序, because your `printf` in the strategy function does not fire on every user-space read.
+缓冲区缓存就是为什么对同一文件数据的连续读取并不总是到达驱动程序的原因。第一次读取未命中，导致BIO传输到驱动程序。第二次读取命中缓存并立即返回。这是一个很好的性能特性。在你第一次调试驱动程序时，这可能会让人有些困惑，因为策略函数中的`printf`不会在每次用户空间读取时触发。
 
-The 缓冲区 cache is also why writes can appear to happen faster than the underlying 驱动程序. A `dd if=/dev/zero of=/mnt/myblk/big bs=1m count=16` may appear to complete in a fraction of a second because the writes land in the cache and the cache defers the actual BIOs for a while. The 文件系统 issues the real writes to GEOM over the next second or two. If the system crashes before that happens, the file on disk is incomplete. `sync(2)` forces the cache to flush to the underlying 设备. `fsync(2)` flushes only the 缓冲区 associated with a single file 描述符.
+缓冲区缓存也是为什么写入看起来比底层驱动程序更快的原因。一个`dd if=/dev/zero of=/mnt/myblk/big bs=1m count=16`可能在几分之一秒内就看似完成了，因为写入进入了缓存，缓存将实际的BIO延迟了一段时间。文件系统在接下来的一两秒内向GEOM发出真正的写入。如果系统在此之前崩溃，磁盘上的文件是不完整的。`sync(2)`强制缓存刷新到底层设备。`fsync(2)`仅刷新与单个文件描述符关联的缓冲区。
 
-The 缓冲区 cache is distinct from the page cache. FreeBSD has both, and they cooperate. The page cache holds memory pages that back memory-mapped files and anonymous memory. The 缓冲区 cache holds 缓冲区 that back 文件系统-块 operations. Modern FreeBSD has largely unified them for many data paths, but the distinction still shows up in the source tree, particularly around `bread`, `bwrite`, `getblk`, and `brelse`, which are the 缓冲区-cache side of the 接口.
+缓冲区缓存与页缓存是不同的。FreeBSD两者都有，它们相互协作。页缓存保存支持内存映射文件和匿名内存的内存页。缓冲区缓存保存支持文件系统块操作的缓冲区。现代FreeBSD在许多数据路径上已经基本统一了它们，但这种区别仍然出现在源码树中，特别是在`bread`、`bwrite`、`getblk`和`brelse`周围，它们是接口的缓冲区缓存侧。
 
-The 缓冲区 cache has a single most important implication for our 驱动程序: we will almost never see completely synchronous BIO traffic. When a 文件系统 wants to read a 块, a BIO arrives in our strategy function; when a 文件系统 wants to write a 块, another BIO arrives, but usually some time later than the write system call that prompted it. BIOs also arrive in bursts when the cache flushes. This is normal, and your 驱动程序 must not make assumptions about timing or ordering across BIOs other than what is strictly documented. Each BIO is an independent request.
+缓冲区缓存对我们的驱动程序有一个最重要的含义：我们几乎永远不会看到完全同步的BIO流量。当文件系统想要读取一个块时，一个BIO到达我们的策略函数；当文件系统想要写入一个块时，另一个BIO到达，但通常比触发它的写入系统调用晚一些。BIO也会在缓存刷新时以突发方式到达。这是正常的，你的驱动程序不能对BIO之间的时序或顺序做出假设，除非严格文档化的情况。每个BIO都是独立的请求。
 
-### The Read and Write Paths
+### 读路径和写路径
 
-Let us trace a concrete example through the whole chain.
+让我们追踪一个贯穿整个链路的具体示例。
 
-When a user runs `cat /mnt/myblk/hello.txt`, the shell runs `cat`, which calls `open("/mnt/myblk/hello.txt", O_RDONLY)`. The `open` goes to `sys_openat`, which hands off to VFS. VFS calls `namei` to walk the path. For each path component, VFS calls `VOP_LOOKUP` on the current directory's vnode. When VFS reaches the `myblk` 挂载, it crosses into UFS, which walks the UFS directory structure to find `hello.txt`. UFS returns the vnode for that file, and VFS returns a file 描述符.
+当用户运行`cat /mnt/myblk/hello.txt`时，shell运行`cat`，`cat`调用`open("/mnt/myblk/hello.txt", O_RDONLY)`。`open`进入`sys_openat`，后者交给VFS。VFS调用`namei`遍历路径。对于每个路径组件，VFS在当前目录的vnode上调用`VOP_LOOKUP`。当VFS到达`myblk`挂载点时，它跨越到UFS中，UFS遍历其目录结构来找到`hello.txt`。UFS返回该文件的vnode，VFS返回一个文件描述符。
 
-The user then calls `read(fd, buf, 64)`. `sys_read` calls `vn_read`, which calls `VOP_READ` on the vnode. UFS's `VOP_READ` consults the inode to find the 块 address of the requested bytes, then calls `bread` on the 缓冲区 cache to fetch the 块. The 缓冲区 cache either returns a hit or issues a BIO.
+然后用户调用`read(fd, buf, 64)`。`sys_read`调用`vn_read`，后者在vnode上调用`VOP_READ`。UFS的`VOP_READ`查阅inode以找到请求字节的块地址，然后在缓冲区缓存上调用`bread`来获取该块。缓冲区缓存要么返回命中，要么发出一个BIO。
 
-If it is a cache miss, the 缓冲区 cache allocates a fresh 缓冲区, builds a BIO that asks for the relevant 块 from the underlying GEOM provider, and hands it off. The BIO travels down through GEOM, through our strategy function, and back. When the BIO completes, the 缓冲区 cache un块 the waiting `bread` call. UFS then copies the requested bytes from the 缓冲区 into the user's `buf`. `read` returns.
+如果是缓存未命中，缓冲区缓存分配一个新缓冲区，构建一个向底层GEOM提供者请求相关块的BIO，并将其发出。BIO向下通过GEOM，通过我们的策略函数，然后返回。当BIO完成时，缓冲区缓存解除等待中的`bread`调用的阻塞。然后UFS将请求的字节从缓冲区复制到用户的`buf`中。`read`返回。
 
-For writes, the chain is symmetric but the timing is different. UFS's `VOP_WRITE` calls `bread` or `getblk` to obtain the target 缓冲区, copies the user's data into the 缓冲区, marks the 缓冲区 dirty, and calls `bdwrite` or `bawrite` to schedule the write-back. The user's `write` call returns long before the BIO is issued to the 驱动程序. Later, the 缓冲区 cache's syncer thread picks up dirty 缓冲区 and issues BIO_WRITE requests to the 驱动程序.
+对于写入，链路是对称的，但时序不同。UFS的`VOP_WRITE`调用`bread`或`getblk`来获取目标缓冲区，将用户数据复制到缓冲区中，将缓冲区标记为脏，然后调用`bdwrite`或`bawrite`来安排回写。用户的`write`调用在BIO向驱动程序发出之前很久就返回了。稍后，缓冲区缓存的同步线程拾取脏缓冲区并向驱动程序发出BIO_WRITE请求。
 
-The net effect is that our 驱动程序's strategy function sees a stream of BIOs that is related to, but not identical to, the stream of user-space reads and writes. The 缓冲区 cache mediates the two.
+最终效果是，我们驱动程序的策略函数看到的是一系列BIO，这些BIO与用户空间读写流相关但不完全相同。缓冲区缓存是两者之间的中介。
 
-In other words, the same 存储驱动程序 can be reached two different ways.
+换句话说，同一个存储驱动程序可以通过两种不同的方式到达。
 
-1. **Raw access through `/dev`**: a user-space program opens `/dev/myblk0` and issues `read(2)` or `write(2)` calls. Those calls go through `devfs` and the GEOM character 接口, ending up in our strategy function.
-2. **Filesystem access through 挂载**: the 内核 挂载s a 文件系统 on the 设备. File I/O flows through VFS, the 文件系统, the 缓冲区 cache, and GEOM. `devfs` is not part of the hot path for those requests.
+1. **通过`/dev`的原始访问**：用户空间程序打开`/dev/myblk0`并发出`read(2)`或`write(2)`调用。这些调用通过`devfs`和GEOM字符接口，最终到达我们的策略函数。
+2. **通过挂载的文件系统访问**：内核在设备上挂载文件系统。文件I/O流经VFS、文件系统、缓冲区缓存和GEOM。`devfs`不是这些请求的热路径的一部分。
 
-Both paths converge at the GEOM provider, which is why GEOM is the correct abstraction for 存储驱动程序 even though character 驱动程序 typically deal with `devfs` more directly.
+两条路径在GEOM提供者处汇合，这就是为什么GEOM是存储驱动程序的正确抽象，尽管字符驱动程序通常更直接地与`devfs`打交道。
 
-### Why This Distinction Matters
+### 这种区分为何重要
 
-This matters for two reasons.
+这之所以重要有两个原因。
 
-First, it clarifies why we will not use `make_dev` for our 块 驱动程序. `make_dev` is the right call for character 驱动程序 that want to publish a `cdevsw` under `/dev`. It is the wrong call for a 块设备, because GEOM creates the `/dev` node for us as soon as we publish a provider. If you call `make_dev` in a 存储驱动程序, you typically end up with two `/dev` nodes competing for the same 设备, one of which is not connected to the GEOM topology, which leads to confusing behaviour.
+第一，它澄清了为什么我们不会为块驱动程序使用`make_dev`。`make_dev`是字符驱动程序想要在`/dev`下发布`cdevsw`时的正确调用。它对块设备来说是错误的调用，因为GEOM在我们发布提供者时会立即为我们创建`/dev`节点。如果你在存储驱动程序中调用`make_dev`，通常会得到两个竞争同一设备的`/dev`节点，其中一个未连接到GEOM拓扑，这会导致令人困惑的行为。
 
-Second, the distinction explains why the 内核 has two sets of tools for inspecting 设备 state. `devfs_ruleset(8)`, `devfs.rules`, and per-node permissions belong to `devfs`. `geom(8)`, `gstat(8)`, `diskinfo(8)`, and the GEOM class tree belong to GEOM. When you are diagnosing a permissions problem, you look at `devfs`. When you are diagnosing an I/O problem, you look at GEOM.
+第二，这种区别解释了为什么内核有两套用于检查设备状态的工具。`devfs_ruleset(8)`、`devfs.rules`和每个节点的权限属于`devfs`。`geom(8)`、`gstat(8)`、`diskinfo(8)`和GEOM类树属于GEOM。当你诊断权限问题时，你查看`devfs`。当你诊断I/O问题时，你查看GEOM。
 
-### A Concrete Example: /dev/null and /dev/ada0
+### 具体示例：/dev/null与/dev/ada0
 
-Compare two examples you already know.
+比较你已经知道的两个示例。
 
-`/dev/null` is a classic 字符设备. It lives under `/dev` because `devfs` creates it. The 驱动程序 is `null(4)`, and its source is in `/usr/src/sys/dev/null/null.c`. When you write to `/dev/null`, `devfs` routes the request through `cdevsw` to the `null` 驱动程序's write function, which simply discards the bytes. There is no GEOM, no 缓冲区 cache, no 文件系统. It is a raw `devfs` character node.
+`/dev/null`是一个经典的字符设备。它存在于`/dev`下是因为`devfs`创建了它。驱动程序是`null(4)`，其源码在`/usr/src/sys/dev/null/null.c`中。当你写入`/dev/null`时，`devfs`通过`cdevsw`将请求路由到`null`驱动程序的写入函数，该函数只是丢弃字节。没有GEOM，没有缓冲区缓存，没有文件系统。它是一个原始的`devfs`字符节点。
 
-`/dev/ada0` is a 块设备. It also lives under `/dev`. But the node is created by GEOM, not by a direct `make_dev` call in the `ada` 驱动程序. When you read raw bytes from `/dev/ada0`, those bytes flow through GEOM's character 接口 layer and arrive at the `ada` 驱动程序's strategy function. When you 挂载 UFS on `/dev/ada0` and then read a file, the file data flows through VFS, UFS, the 缓冲区 cache, and GEOM, and ends up in the same strategy function, without passing through `devfs` for each request.
+`/dev/ada0`是一个块设备。它也存在于`/dev`下。但该节点是由GEOM创建的，而不是由`ada`驱动程序中的直接`make_dev`调用创建的。当你从`/dev/ada0`读取原始字节时，这些字节通过GEOM的字符接口层流到`ada`驱动程序的策略函数中。当你在`/dev/ada0`上挂载UFS然后读取文件时，文件数据流经VFS、UFS、缓冲区缓存和GEOM，最终到达相同的策略函数，而不会为每个请求通过`devfs`。
 
-The node in `devfs` is the same. The usage pattern is different. The 驱动程序 must handle both.
+`devfs`中的节点是相同的。使用模式不同。驱动程序必须处理两者。
 
-### How We Will Proceed
+### 我们将如何继续
 
-We will not write a character 驱动程序 in this chapter. We already wrote one in 第26章. Instead, we will write a 驱动程序 that 寄存器 with GEOM as a disk, and we will let GEOM create the `/dev` node for us. The devfs integration will be automatic.
+我们不会在本章编写字符驱动程序。我们在第26章已经写过了。相反，我们将编写一个以磁盘形式向GEOM注册的驱动程序，并让GEOM为我们创建`/dev`节点。devfs集成将是自动的。
 
-This is the dominant pattern for 块 驱动程序 in FreeBSD 14.3. You can see it in `md(4)`, in `ata(4)`, in `nvme(4)`, and in almost every other 存储驱动程序. Each of them 寄存器 with GEOM, each of them receives `bio` requests, and each of them lets GEOM handle the `/dev` node.
+这是FreeBSD 14.3中块驱动程序的主流模式。你可以在`md(4)`、`ata(4)`、`nvme(4)`以及几乎每个其他存储驱动程序中看到它。它们每一个都向GEOM注册，每一个都接收`bio`请求，每一个都让GEOM处理`/dev`节点。
 
 ### 总结 Section 2
 
-`devfs` and VFS are distinct layers. `devfs` is a 文件系统 挂载ed at `/dev`, and VFS is the abstract 框架 that all 文件系统 plug into, including `devfs`. Storage 驱动程序 interact with both, but through GEOM, which takes care of creating the `/dev` node and of routing requests from both raw-access and 文件系统-access paths. For this chapter, we will use GEOM as our entry point and let it manage `devfs` on our behalf.
+`devfs`和VFS是不同的层。`devfs`是挂载到`/dev`的文件系统，VFS是所有文件系统（包括`devfs`）插入的抽象框架。存储驱动程序与两者交互，但通过GEOM，GEOM负责创建`/dev`节点以及从原始访问路径和文件系统访问路径路由请求。在本章中，我们将使用GEOM作为入口点，让它代表我们管理`devfs`。
 
-In the next section, we will begin building the 驱动程序. We will start with the minimum needed to 注册 a pseudo 块设备 with GEOM, without yet implementing real I/O. Once that is in place, we will add the backing store, the `bio` handler, and everything else in later sections.
+在下一节中，我们将开始构建驱动程序。我们将从向GEOM注册伪块设备所需的最少内容开始，暂不实现真正的I/O。一旦完成，我们将在后续小节中添加后备存储、`bio`处理程序和所有其他内容。
 
-## 第3节： Registering a Pseudo Block Device
+## 第3节：注册伪块设备
 
-In this section we will create a skeleton 驱动程序 that 寄存器 a pseudo 块设备 with the 内核. We will not yet implement read or write. We will not yet wire it up to a backing store. Our goal is more modest and more important: we want to understand exactly what it takes to make the 内核 recognise our code as a 存储驱动程序, publish a `/dev` node for it, and let tools like `geom(8)` see it.
+在本节中，我们将创建一个骨架驱动程序，向内核注册一个伪块设备。我们暂时不实现读取或写入。我们暂时不将其连接到后备存储。我们的目标更加温和但也更加重要：我们想确切了解让内核将我们的代码识别为存储驱动程序、为其发布`/dev`节点并让`geom(8)`等工具看到它需要什么。
 
-Once that is working, everything we add later will be purely incremental. The registration itself is the step that feels most mysterious, and it is the one the rest of the 驱动程序 builds on.
+一旦这个工作完成，我们之后添加的一切都将纯粹是增量的。注册本身是最令人感到神秘的步骤，也是驱动程序其余部分构建的基础。
 
-### The g_disk API
+### g_disk API
 
-FreeBSD gives 存储驱动程序 a high-level registration API called `g_disk`. It lives in `/usr/src/sys/geom/geom_disk.c` and `/usr/src/sys/geom/geom_disk.h`. The API wraps the lower-level GEOM class machinery and exposes a simpler 接口 that matches what disk 驱动程序 usually need.
+FreeBSD为存储驱动程序提供了一个称为`g_disk`的高级注册API。它位于`/usr/src/sys/geom/geom_disk.c`和`/usr/src/sys/geom/geom_disk.h`中。该API封装了较低层的GEOM类机制，暴露了更简单的接口，与磁盘驱动程序通常需要的相匹配。
 
-Using `g_disk` saves us from implementing a full `g_class` by hand. With `g_disk`, we allocate a `struct disk`, fill in a handful of fields and 回调 pointers, and call `disk_create`. The API takes care of building the GEOM class, creating the geom, publishing the provider, wiring up the character 接口, starting devstat accounting, and making our 设备 visible to userland through `/dev`.
+使用`g_disk`使我们免于手工实现完整的`g_class`。使用`g_disk`时，我们分配一个`struct disk`，填充少量字段和回调指针，然后调用`disk_create`。该API负责构建GEOM类、创建geom、发布提供者、连接字符接口、启动devstat统计，以及使我们的设备通过`/dev`对用户空间可见。
 
-Not every 存储驱动程序 uses `g_disk`. GEOM classes that do transformations on other providers, like `g_nop`, `g_mirror`, `g_stripe`, or `g_eli`, are built directly on the lower-level `g_class` machinery because they are not disk-shaped. But for anything that looks like a disk, and certainly for a pseudo-disk like ours, `g_disk` is the right starting point.
+并非每个存储驱动程序都使用`g_disk`。对其他提供者进行变换的GEOM类，如`g_nop`、`g_mirror`、`g_stripe`或`g_eli`，直接构建在较低层的`g_class`机制上，因为它们不是磁盘形状的。但对于任何看起来像磁盘的东西，当然也对于像我们这样的伪磁盘，`g_disk`是正确的起点。
 
-You can see the public structure in `/usr/src/sys/geom/geom_disk.h`. The shape is roughly the following, abbreviated for clarity.
+你可以在`/usr/src/sys/geom/geom_disk.h`中看到公共结构。其形状大致如下，为清晰起见进行了缩略。
 
 ```c
 struct disk {
@@ -365,19 +365,19 @@ struct disk {
 };
 ```
 
-The fields break down into three groups.
+这些字段分为三组。
 
-**Identification**: `d_name` is a short string like `"myblk"` that names the disk class, and `d_unit` is a small integer that distinguishes multiple instances. Together they form the `/dev` node name. A 驱动程序 with `d_name = "myblk"` and `d_unit = 0` publishes `/dev/myblk0`.
+**标识**：`d_name`是命名磁盘类的短字符串，如`"myblk"`，`d_unit`是区分多个实例的小整数。它们一起构成`/dev`节点名。`d_name = "myblk"`且`d_unit = 0`的驱动程序发布`/dev/myblk0`。
 
-**Callbacks**: the `d_open`, `d_close`, `d_strategy`, `d_ioctl`, `d_getattr`, and `d_gone` pointers are the functions the 内核 will call into our 驱动程序. Of these, only `d_strategy` is strictly required, because that is the function that handles actual I/O. The others are optional and we will discuss them as they become relevant.
+**回调**：`d_open`、`d_close`、`d_strategy`、`d_ioctl`、`d_getattr`和`d_gone`指针是内核将调用到我们驱动程序中的函数。其中只有`d_strategy`是严格要求的，因为它是处理实际I/O的函数。其他都是可选的，我们将在它们变得相关时讨论。
 
-**Geometry**: `d_扇区ize`, `d_mediasize`, `d_fw扇区`, `d_fwheads`, and `d_maxsize` describe the disk's physical and logical shape. `d_扇区ize` is the size of a 扇区 in bytes, typically 512 or 4096. `d_mediasize` is the total size of the 设备 in bytes. `d_fw扇区` and `d_fwheads` are advisory hints used by 分区ing tools. `d_maxsize` is the largest single I/O the 驱动程序 can accept, which GEOM will use to split large requests.
+**几何参数**：`d_sectorsize`、`d_mediasize`、`d_fwsectors`、`d_fwheads`和`d_maxsize`描述磁盘的物理和逻辑形状。`d_sectorsize`是扇区大小（字节），通常为512或4096。`d_mediasize`是设备的总大小（字节）。`d_fwsectors`和`d_fwheads`是分区工具使用的建议性提示。`d_maxsize`是驱动程序可以接受的最大单个I/O，GEOM将使用它来拆分大请求。
 
-**Driver state**: `d_drv1` is a generic pointer for the 驱动程序 to stash its own context. It is the closest equivalent to `设备_get_softc(dev)` in the New总线 world.
+**驱动程序状态**：`d_drv1`是驱动程序用于存放自己上下文的通用指针。它相当于Newbus世界中`device_get_softc(dev)`的最近等价物。
 
-### A Minimum Skeleton
+### 最小骨架
 
-Let us now sketch a minimum skeleton. We will place this in `examples/part-06/ch27-storage-vfs/myfirst_blk.c`. This initial version does almost nothing useful. It 寄存器 a disk, returns success on every operation, and un寄存器 cleanly on unload. But it is enough to appear in `/dev`, to be visible in `geom disk list`, and to be 探测d by `newfs_ufs` or `fdisk` without the 内核 crashing.
+现在让我们勾画一个最小的骨架。我们将把它放在`examples/part-06/ch27-storage-vfs/myfirst_blk.c`中。这个初始版本几乎不做任何有用的事情。它注册一个磁盘，在每个操作上返回成功，并在卸载时干净地注销。但它足以出现在`/dev`中，在`geom disk list`中可见，并且可以被`newfs_ufs`或`fdisk`探测而不会导致内核崩溃。
 
 ```c
 /*
@@ -505,27 +505,27 @@ DECLARE_MODULE(myblk, myblk_mod, SI_SUB_DRIVERS, SI_ORDER_MIDDLE);
 MODULE_VERSION(myblk, 1);
 ```
 
-Take a moment to read this through. Only a handful of moving pieces are visible, but each of them is doing real work.
+花一点时间仔细阅读这段代码。只有少量的活动部件可见，但每一个都在做真正的工作。
 
-The `myblk_softc` structure is the 驱动程序-local context. It holds a pointer to our `struct disk`, a 互斥锁 for future use, and the unit number. We allocate it on module load and free it on unload.
+`myblk_softc`结构是驱动程序的本地上下文。它保存了指向`struct disk`的指针、一个供未来使用的互斥锁和单元号。我们在模块加载时分配它，在卸载时释放它。
 
-The `myblk_strategy` function is the 回调 that GEOM will invoke whenever a `bio` is directed at our 设备. In this first version, we simply fail every request with `ENXIO`. That is not polite, but it is correct as a placeholder: the 内核 will not 块 waiting for us, and we will not pretend that I/O succeeded when it did not. In Section 5 we will replace this with a working handler.
+`myblk_strategy`函数是GEOM在`bio`指向我们的设备时将调用的回调函数。在这个第一个版本中，我们简单地对每个请求返回`ENXIO`失败。这不太礼貌，但作为占位符是正确的：内核不会阻塞等待我们，我们也不会在I/O未成功时假装成功了。在第5节中，我们将用可工作的处理程序替换它。
 
-The `myblk_附加_unit` function allocates a `struct disk`, fills in the identification, 回调, and geometry fields, and publishes it with `disk_create`. The call to `disk_create` is what actually produces the `/dev` node and 寄存器 the disk in the GEOM topology.
+`myblk_attach_unit`函数分配一个`struct disk`，填充标识、回调和几何参数字段，然后用`disk_create`发布它。对`disk_create`的调用是实际产生`/dev`节点并在GEOM拓扑中注册磁盘的操作。
 
-The `myblk_分离_unit` function reverses that. `disk_destroy` asks GEOM to wither the provider, cancel any pending I/O, and remove the `/dev` node. We set `sc->disk` to `NULL` so that subsequent unload attempts do not try to free an already-freed structure, though in the load/unload path we follow that cannot happen.
+`myblk_detach_unit`函数逆转该过程。`disk_destroy`请求GEOM使提供者枯萎，取消任何待处理的I/O，并移除`/dev`节点。我们将`sc->disk`设置为`NULL`，以便后续的卸载尝试不会试图释放已经释放的结构，尽管在我们遵循的加载/卸载路径中这不可能发生。
 
-The module loader is a standard `moduledata_t` boilerplate that you saw in 第26章. On `MOD_LOAD` it allocates the softc and calls `myblk_附加_unit`. On `MOD_UNLOAD` it calls `myblk_分离_unit`, frees the softc, and returns.
+模块加载器是你在第26章中看到的标准`moduledata_t`模板。在`MOD_LOAD`时，它分配softc并调用`myblk_attach_unit`。在`MOD_UNLOAD`时，它调用`myblk_detach_unit`，释放softc，然后返回。
 
-One line deserves special attention.
+有一行值得特别注意。
 
-The call `disk_create(sc->disk, DISK_VERSION)` passes the current ABI version of the disk structure. `DISK_VERSION` is defined in `/usr/src/sys/geom/geom_disk.h` and increments every time the `g_disk` ABI changes incompatibly. If you compile a 驱动程序 against the wrong tree, the 内核 will refuse to 注册 the disk and will print a diagnostic. This versioning is what allows the 内核 to evolve without silently breaking out-of-tree 驱动程序.
+调用`disk_create(sc->disk, DISK_VERSION)`传递了磁盘结构的当前ABI版本。`DISK_VERSION`在`/usr/src/sys/geom/geom_disk.h`中定义，每当`g_disk` ABI不兼容地变更时递增。如果你针对错误的源码树编译驱动程序，内核将拒绝注册磁盘并打印诊断信息。这种版本控制机制允许内核在不静默破坏树外驱动程序的情况下演进。
 
-You may wonder why we do not use `MODULE_DEPEND` to declare a dependency on `g_disk`. The reason is that `g_disk` is not a loadable 内核模块 in the usual sense. It is a GEOM class declared in the 内核 via `DECLARE_GEOM_CLASS(g_disk_class, g_disk)` in `/usr/src/sys/geom/geom_disk.c`, and it is always present whenever GEOM itself is compiled into the 内核. There is no separate `g_disk.ko` file you can unload or reload independently, and `MODULE_DEPEND(myblk, g_disk, ...)` would not resolve to a real module. The symbols we call (`disk_alloc`, `disk_create`, `disk_destroy`) come from the 内核 itself.
+你可能想知道为什么我们不使用`MODULE_DEPEND`来声明对`g_disk`的依赖。原因是`g_disk`在通常意义上不是一个可加载的内核模块。它是通过`/usr/src/sys/geom/geom_disk.c`中的`DECLARE_GEOM_CLASS(g_disk_class, g_disk)`在内核中声明的GEOM类，每当GEOM本身被编译进内核时它就存在。没有可以独立卸载或重新加载的单独`g_disk.ko`文件，`MODULE_DEPEND(myblk, g_disk, ...)`不会解析到一个真实的模块。我们调用的符号（`disk_alloc`、`disk_create`、`disk_destroy`）来自内核本身。
 
-### The Makefile
+### Makefile
 
-The Makefile for this module is almost identical to the one from 第26章.
+这个模块的Makefile与第26章中的几乎相同。
 
 ```make
 # Makefile for myfirst_blk.
@@ -540,11 +540,11 @@ SRCS    = myfirst_blk.c
 .include <bsd.kmod.mk>
 ```
 
-Place this in the same directory as `myfirst_blk.c`. Running `make` will build `myblk.ko`. Running `make load` will load it if you have the 内核 sources installed in the usual place. Running `make unload` will unload it.
+将此文件放在与`myfirst_blk.c`相同的目录中。运行`make`将构建`myblk.ko`。如果你将内核源码安装在常规位置，运行`make load`将加载它。运行`make unload`将卸载它。
 
-### Loading and Inspecting the Skeleton
+### 加载和检查骨架
 
-Once the module is loaded, the 内核 will have created a pseudo disk and a `/dev` node for it. Let us walk through what you should see.
+模块加载后，内核将创建一个伪磁盘和对应的`/dev`节点。让我们浏览一下你应该看到的内容。
 
 ```console
 # kldload ./myblk.ko
@@ -562,9 +562,9 @@ crw-r-----  1 root  operator  0x8b Apr 19 18:04 /dev/myblk0
         myblk0          # Disk ident.
 ```
 
-The `c` at the beginning of the permissions string tells us that GEOM has created a 字符设备 node, which is how FreeBSD exposes 块-oriented 设备 under `/dev` in the modern 内核. The 设备 major number, here `0x8b`, is assigned dynamically.
+权限字符串开头的`c`告诉我们GEOM创建了一个字符设备节点，这是现代内核在`/dev`下暴露面向块的设备的方式。设备主设备号，这里是`0x8b`，是动态分配的。
 
-Now let us look at the GEOM topology.
+现在让我们看看GEOM拓扑。
 
 ```console
 # geom disk list myblk0
@@ -581,9 +581,9 @@ Providers:
    fwheads: 0
 ```
 
-`Mode: r0w0e0` means zero readers, zero writers, zero exclusive holders. Nobody is using the disk.
+`Mode: r0w0e0`表示零个读取者、零个写入者、零个独占持有者。没有人正在使用磁盘。
 
-Now try something harmless.
+现在尝试一些无害的操作。
 
 ```console
 # dd if=/dev/myblk0 of=/dev/null bs=512 count=1
@@ -593,9 +593,9 @@ dd: /dev/myblk0: Device not configured
 0 bytes transferred in 0.000123 secs (0 bytes/sec)
 ```
 
-The `Device not configured` error is the `ENXIO` we deliberately returned. Our strategy function ran, marked the BIO as failed, and `dd` faithfully reported the failure. This is the first real evidence that our 驱动程序 is being reached by the 内核's 块-layer code.
+`Device not configured`错误是我们故意返回的`ENXIO`。我们的策略函数运行了，将BIO标记为失败，`dd`忠实地报告了失败。这是我们的驱动程序被内核块层代码到达的第一个真正证据。
 
-Try a read that expects success to fail loudly.
+尝试一个期望成功的读取来大声失败。
 
 ```console
 # newfs_ufs /dev/myblk0
@@ -607,9 +607,9 @@ super-block backups (for fsck_ffs -b #) at:
 192, 832, 1472, 2112
 ```
 
-The `-N` flag tells `newfs` to plan the 文件系统 layout without writing anything. We can see that it thinks of our 设备 as a small disk with 2048 扇区 of 512 bytes each. That matches the geometry we declared. It is not yet actually writing anything because our strategy function would still fail, but the planning works.
+`-N`标志告诉`newfs`规划文件系统布局但不写入任何内容。我们可以看到它将我们的设备视为一个小型磁盘，有2048个512字节的扇区。这与我们声明的几何参数匹配。它实际上还没有写入任何内容，因为我们的策略函数仍然会失败，但规划是有效的。
 
-Finally, let us unload the module cleanly.
+最后，让我们干净地卸载模块。
 
 ```console
 # kldunload myblk
@@ -619,89 +619,89 @@ myblk: unloaded
 ls: /dev/myblk0: No such file or directory
 ```
 
-That is the complete life cycle of the skeleton.
+这就是骨架的完整生命周期。
 
-### Why the Failures Are Expected
+### 为何这些失败是预期的
 
-At this stage, any user-space tool that actually tries to read or write data will fail. That is correct. Our strategy function does not yet know how to do anything, and we must not fake success. Faking success would lead to corruption the moment a 文件系统 tried to read back what it thought it had written.
+在这个阶段，任何实际尝试读取或写入数据的用户空间工具都会失败。这是正确的。我们的策略函数还不知道如何做任何事情，我们绝不能伪造成功。伪造成功会在文件系统试图读回它认为已经写入的内容时导致数据损坏。
 
-The fact that the 内核 and the tools gracefully handle our failure is evidence that the 块 layer is doing its job. A `bio` came down, the 驱动程序 rejected it, the error propagated back up to user space, and no one crashed. That is the kind of behaviour we want.
+内核和工具能够优雅地处理我们的失败这一事实证明块层正在正确地工作。一个`bio`传下来，驱动程序拒绝了它，错误传播回用户空间，没有人崩溃。这就是我们想要的行为。
 
-### How Things Fit Together
+### 各部分如何组合
 
-Before moving on, let us name the pieces so we can refer to them later without ambiguity.
+在继续之前，让我们命名这些部件，以便我们以后可以毫无歧义地引用它们。
 
-Our **驱动程序 module** is `myblk.ko`. It is what the user loads with `kldload`.
+我们的**驱动程序模块**是`myblk.ko`。它是用户用`kldload`加载的东西。
 
-Our **softc** is `struct myblk_softc`. It holds 驱动程序-local state. There is exactly one instance in this first version.
+我们的**softc**是`struct myblk_softc`。它保存驱动程序的本地状态。在第一个版本中恰好有一个实例。
 
-Our **disk** is a `struct disk` allocated by `disk_alloc` and 注册ed with `disk_create`. The 内核 owns its memory. We do not free it directly. We ask the 内核 to free it by calling `disk_destroy`.
+我们的**磁盘**是由`disk_alloc`分配并用`disk_create`注册的`struct disk`。内核拥有它的内存。我们不直接释放它。我们通过调用`disk_destroy`请求内核释放它。
 
-Our **geom** is the GEOM object the `g_disk` subsystem creates on our behalf. We do not see it directly in our code. It exists in the GEOM topology as the parent of our provider.
+我们的**geom**是`g_disk`子系统代表我们创建的GEOM对象。我们在代码中不直接看到它。它作为我们提供者的父级存在于GEOM拓扑中。
 
-Our **provider** is the producer-facing face of our 设备. It is what other GEOM classes consume when they connect to us. GEOM automatically creates a 字符设备 node for our provider under `/dev`.
+我们的**提供者**是我们设备面向生产者的一面。它是其他GEOM类连接到我们时消费的东西。GEOM自动在`/dev`下为我们的提供者创建字符设备节点。
 
-Our **consumer** is still empty. We have no one connected to us yet. Consumers are how GEOM classes that sit above us, like a 分区ing layer or a 文件系统's GEOM consumer, 附加.
+我们的**消费者**目前还是空的。还没有人连接到我们。消费者是位于我们之上的GEOM类（如分区层或文件系统的GEOM消费者）附加的方式。
 
-Our **/dev node** is `/dev/myblk0`. It is a live handle that user-space tools can use to issue raw I/O. When a 文件系统 is later 挂载ed on the 设备, it will also refer to the 设备 by this name, even though the hot I/O path will not pass through `devfs` for each request.
+我们的**/dev节点**是`/dev/myblk0`。它是一个活跃的句柄，用户空间工具可以使用它来发出原始I/O。当文件系统后来挂载到设备上时，它也会通过这个名称引用设备，即使热I/O路径不会为每个请求通过`devfs`。
 
 ### 总结 Section 3
 
-We built the smallest possible 驱动程序 that participates in the FreeBSD storage stack. It 寄存器 a pseudo disk with the `g_disk` subsystem, publishes a `/dev` node through GEOM, accepts BIO requests, and declines them politely. It loads, it appears in `geom disk list`, and it unloads without leaks.
+我们构建了参与FreeBSD存储栈的最小可能驱动程序。它向`g_disk`子系统注册一个伪磁盘，通过GEOM发布`/dev`节点，接受BIO请求并礼貌地拒绝它们。它加载，它出现在`geom disk list`中，它卸载无泄漏。
 
-In the next section, we will look at GEOM more directly. We will understand what a provider really is, what a consumer really is, and how the class-based design lets transformations like 分区ing, mirroring, encryption, and compression compose with our 驱动程序 for free. That understanding will set us up for Section 5, where we replace the placeholder strategy function with one that actually serves reads and writes from a backing store.
+在下一节中，我们将更直接地了解GEOM。我们将理解提供者到底是什么，消费者到底是什么，以及基于类的设计如何让分区、镜像、加密和压缩等变换与我们的驱动程序自由组合。这种理解将为我们进入第5节做好准备，在那里我们将用实际从后备存储提供读写的处理程序替换占位符策略函数。
 
-## 第4节： Exposing a GEOM-Backed Provider
+## 第4节：暴露GEOM支持的提供者
 
-The previous section let us 注册 a disk with `g_disk` and take the word of the 框架 for what happens under the hood. That is a reasonable first step, and for many 驱动程序 it is all the involvement with GEOM that they ever need. But storage work rewards understanding the layer you are sitting on. When a 文件系统 挂载 fails, when `gstat` shows requests piling up, or when a `kldunload` 块 for longer than you expect, you will want to know the vocabulary of GEOM well enough to ask the right questions.
+上一节让我们用`g_disk`注册了一个磁盘，并接受了框架关于底层发生的事情的说法。这是一个合理的起点，对于许多驱动程序来说，这就是它们与GEOM的全部交互。但存储工作需要对所坐的层有深入的理解。当文件系统挂载失败时，当`gstat`显示请求堆积时，或者当`kldunload`阻塞的时间超过你的预期时，你会希望足够了解GEOM的词汇来提出正确的问题。
 
-This section is a tour of GEOM from the storage-驱动程序 perspective. It is not an exhaustive reference. There are entire chapters in the FreeBSD Developer's Handbook devoted to GEOM, and we will not duplicate them. What we will do is describe the concepts and objects that matter to a 驱动程序 author, and show how `g_disk` fits into that picture.
+本节是从存储驱动程序角度对GEOM的导览。它不是详尽的参考。FreeBSD开发者手册中有整章专门介绍GEOM，我们不会重复。我们要做的是描述对驱动程序作者重要的概念和对象，并展示`g_disk`如何融入这幅图景。
 
-### GEOM in One Page
+### GEOM一页概览
 
-GEOM is a storage 框架. It sits between 文件系统 and the 块 驱动程序 that talk to real hardware, and it composes by design. That composition is the whole point.
+GEOM是一个存储框架。它位于文件系统和与真实硬件对话的块驱动程序之间，按设计可组合。这种组合是其全部意义所在。
 
-The idea is that a storage stack is built out of small transformations. One transformation presents a raw disk. Another transformation splits it into 分区s. Another transformation mirrors two disks into one. Another transformation encrypts a 分区. Another transformation compresses a 文件系统. Each transformation is a small piece of code that takes in I/O requests from above, does something to them, and either returns a result directly or passes them along to the next layer below.
+其理念是存储栈由小的变换构建而成。一个变换呈现原始磁盘。另一个变换将其拆分为分区。另一个变换将两个磁盘镜像为一个。另一个变换加密一个分区。另一个变换压缩一个文件系统。每个变换都是一小段代码，从上方接收I/O请求，对其进行处理，然后要么直接返回结果，要么将其传递给下一层。
 
-In GEOM's vocabulary, each transformation is a **class**. Each instance of a class is a **geom**. Each geom has some number of **providers**, which are its outputs, and some number of **consumers**, which are its inputs. Providers face upward toward the next layer. Consumers face downward toward the previous layer. A geom with no consumer is at the bottom of the stack: it must produce I/O on its own. A geom with no provider is at the top of the stack: it must terminate I/O and deliver it somewhere outside GEOM, typically into a 文件系统 or into a `devfs` 字符设备.
+在GEOM的词汇中，每个变换是一个**类**。类的每个实例是一个**geom**。每个geom有若干**提供者**（其输出）和若干**消费者**（其输入）。提供者面向上方的下一层。消费者面向下方的前一层。没有消费者的geom位于栈的底部：它必须自己产生I/O。没有提供者的geom位于栈的顶部：它必须终止I/O并将其传递到GEOM之外的某个地方，通常是文件系统或`devfs`字符设备。
 
-Requests flow from providers to consumers through the stack. Replies flow back. The unit of I/O is a `struct bio`, which we will study in detail in Section 5.
+请求从提供者通过栈流向消费者。回复沿相反方向流回。I/O的单位是`struct bio`，我们将在第5节详细研究。
 
-### A Concrete Example of Composition
+### 组合的具体示例
 
-Imagine you have a 1 TB SATA SSD. The 内核's `ada(4)` 驱动程序 runs on the SATA controller and publishes a disk provider called `ada0`. That is a geom with no consumer at the bottom and one provider at the top.
+假设你有一个1 TB的SATA SSD。内核的`ada(4)`驱动程序在SATA控制器上运行，发布一个名为`ada0`的磁盘提供者。那是一个底部没有消费者、顶部有一个提供者的geom。
 
-You slice the SSD with `gpart`. The `PART` class creates a geom whose single consumer is 附加ed to `ada0`, and which publishes multiple providers, one per 分区: `ada0p1`, `ada0p2`, `ada0p3`, and so on.
+你用`gpart`对SSD进行切片。`PART`类创建一个geom，其单个消费者附加到`ada0`，并发布多个提供者，每个分区一个：`ada0p1`、`ada0p2`、`ada0p3`等等。
 
-You encrypt `ada0p2` with `geli`. The `ELI` class creates a geom whose single consumer is 附加ed to `ada0p2`, and which publishes a single provider called `ada0p2.eli`.
+你用`geli`加密`ada0p2`。`ELI`类创建一个geom，其单个消费者附加到`ada0p2`，并发布一个名为`ada0p2.eli`的提供者。
 
-You 挂载 UFS on `ada0p2.eli`. UFS opens that provider, reads its super块, and begins serving files.
+你在`ada0p2.eli`上挂载UFS。UFS打开该提供者，读取其超级块，并开始提供文件服务。
 
-When a process reads a file, the request travels from UFS, to `ada0p2.eli`, through the `geli` geom which decrypts the relevant 块, to `ada0p2`, through the `PART` geom which offsets the 块 addresses, to `ada0`, where the `ada` 驱动程序 talks to the SATA controller.
+当进程读取文件时，请求从UFS出发，到`ada0p2.eli`，通过`geli` geom解密相关块，到`ada0p2`，通过`PART` geom偏移块地址，到`ada0`，`ada`驱动程序与SATA控制器通信。
 
-At no point does UFS know that its underlying storage is encrypted, 分区ed, or even a physical disk. It just sees a provider. The layers below it can be as simple or as elaborate as the administrator chooses.
+UFS始终不知道其底层存储是加密的、分区的，甚至是一个物理磁盘。它只看到一个提供者。它下面的层可以简单也可以复杂，由管理员选择。
 
-That composition is the reason GEOM exists. A single 存储驱动程序 only needs to know how to be a reliable bottom-of-stack producer of I/O. Everything above it is reusable.
+这种组合就是GEOM存在的原因。单个存储驱动程序只需要知道如何成为可靠的栈底I/O生产者。它上面的所有东西都是可重用的。
 
-### Providers and Consumers in Code
+### 代码中的提供者和消费者
 
-In the 内核, a provider is a `struct g_provider` and a consumer is a `struct g_consumer`. Both are defined in `/usr/src/sys/geom/geom.h`. As a disk 驱动程序 author, you almost never allocate either directly. `g_disk` allocates a provider on your behalf when you call `disk_create`, and you never need a consumer, because a disk 驱动程序 does not 附加 to anything underneath.
+在内核中，提供者是`struct g_provider`，消费者是`struct g_consumer`。两者都在`/usr/src/sys/geom/geom.h`中定义。作为磁盘驱动程序作者，你几乎从不直接分配它们中的任何一个。`g_disk`在你调用`disk_create`时代表你分配一个提供者，而你从不需要消费者，因为磁盘驱动程序不附加到下面的任何东西。
 
-What you do need is a mental model of what they mean.
+你确实需要的是对它们含义的心智模型。
 
-A provider is a named, seekable, 块-addressable surface that something can read and write. It has a size, a 扇区 size, a name, and some access counters. GEOM publishes providers in `/dev` via its character-设备 integration, so the administrator can refer to them by name.
+提供者是一个命名的、可寻址的、块可寻址的表面，可供读写。它有大小、扇区大小、名称和一些访问计数器。GEOM通过其字符设备集成在`/dev`中发布提供者，因此管理员可以通过名称引用它们。
 
-A consumer is a channel from one geom into another geom's provider. The consumer is where the upper geom issues I/O requests, and it is where the upper geom 寄存器 access rights. When you 挂载 UFS on `ada0p2.eli`, the 挂载 operation causes a consumer to be 附加ed inside UFS's GEOM hook, and that consumer acquires access rights on the `ada0p2.eli` provider.
+消费者是从一个geom到另一个geom的提供者的通道。消费者是上层geom发出I/O请求的地方，也是上层geom注册访问权限的地方。当你在`ada0p2.eli`上挂载UFS时，挂载操作导致一个消费者被附加在UFS的GEOM钩子内，该消费者获取对`ada0p2.eli`提供者的访问权限。
 
-### Access Rights
+### 访问权限
 
-Providers have three access counters: read (`r`), write (`w`), and exclusive (`e`). They are visible in `gstat` and `geom disk list` as `r0w0e0` or similar. Each number is incremented when a consumer asks for that kind of access and decremented when the consumer releases it.
+提供者有三个访问计数器：读取（`r`）、写入（`w`）和独占（`e`）。它们在`gstat`和`geom disk list`中可见，显示为`r0w0e0`或类似的格式。每个数字在消费者请求该类型的访问时递增，在消费者释放时递减。
 
-An exclusive access is what `挂载`, `newfs`, and similar administrative tools acquire when they need to be sure no other process is writing the 设备. An exclusive count of zero means no exclusive access is held. An exclusive count greater than zero means the provider is 总线y.
+独占访问是`mount`、`newfs`等管理工具在需要确保没有其他进程正在写入设备时获取的。独占计数为零意味着没有持有独占访问。独占计数大于零意味着提供者正忙。
 
-The access counts are not trivia. They are a real synchronisation tool. When you call `disk_destroy` to remove a disk, the 内核 will refuse to destroy the provider if it still has open users, because destroying it under the feet of a 挂载ed 文件系统 would be catastrophic. This is the same mechanism that makes `kldunload` 块 if the module is in use, but it operates at the GEOM layer, one level higher than the module subsystem.
+访问计数不是琐碎的细节。它们是真正的同步工具。当你调用`disk_destroy`移除磁盘时，如果提供者仍有打开的用户，内核将拒绝销毁它，因为在已挂载的文件系统脚下销毁它将是灾难性的。这与`kldunload`在模块使用中时阻塞的机制相同，但它在GEOM层操作，比模块子系统高一级。
 
-You can watch the access counters change in real time.
+你可以实时观察访问计数器的变化。
 
 ```console
 # geom disk list myblk0 | grep Mode
@@ -711,88 +711,88 @@ You can watch the access counters change in real time.
    Mode: r1w0e0
 ```
 
-When `dd` finishes, the mode returns to `r0w0e0`.
+当`dd`完成时，模式返回到`r0w0e0`。
 
-### The BIO Object and Its Life Cycle
+### BIO对象及其生命周期
 
-The unit of work in GEOM is the BIO, defined as `struct bio` in `/usr/src/sys/sys/bio.h`. A BIO represents one I/O request. It has a command (`bio_cmd`), an offset (`bio_offset`), a length (`bio_length`), a data pointer (`bio_data`), a byte count (`bio_bcount`), a residual (`bio_resid`), an error (`bio_error`), flags (`bio_flags`), and a number of other fields that we will meet as we need them.
+GEOM中的工作单位是BIO，在`/usr/src/sys/sys/bio.h`中定义为`struct bio`。一个BIO代表一个I/O请求。它有一个命令（`bio_cmd`）、一个偏移量（`bio_offset`）、一个长度（`bio_length`）、一个数据指针（`bio_data`）、一个字节计数（`bio_bcount`）、一个剩余量（`bio_resid`）、一个错误（`bio_error`）、标志（`bio_flags`），以及我们将在需要时遇到的其他一些字段。
 
-The `bio_cmd` values tell the 驱动程序 what kind of I/O is being requested. The most common values are `BIO_READ`, `BIO_WRITE`, `BIO_DELETE`, `BIO_GETATTR`, and `BIO_FLUSH`. `BIO_READ` and `BIO_WRITE` are what you expect. `BIO_DELETE` asks the 驱动程序 to release the 块 in the range, the way `TRIM` does on SSDs or `mdconfig -d` does on a memory disk. `BIO_GETATTR` queries an attribute by name and is how GEOM layers discover 分区 types, media labels, and other metadata. `BIO_FLUSH` asks the 驱动程序 to commit outstanding writes to stable storage.
+`bio_cmd`的值告诉驱动程序正在请求什么类型的I/O。最常见的值是`BIO_READ`、`BIO_WRITE`、`BIO_DELETE`、`BIO_GETATTR`和`BIO_FLUSH`。`BIO_READ`和`BIO_WRITE`如你所预期。`BIO_DELETE`要求驱动程序释放范围内的块，就像SSD上的`TRIM`或内存磁盘上的`mdconfig -d`所做的那样。`BIO_GETATTR`通过名称查询属性，是GEOM层发现分区类型、介质标签和其他元数据的方式。`BIO_FLUSH`要求驱动程序将未完成的写入提交到稳定存储。
 
-A BIO travels downward from one geom to the next via `g_io_request`. When it reaches the bottom of the stack, the 驱动程序's strategy function is called. When the 驱动程序 is done, it completes the BIO by calling `biodone` or, at the GEOM class level, `g_io_deliver`. The completion call releases the BIO back up the stack.
+BIO通过`g_io_request`从一个geom向下传递到下一个。当它到达栈底时，驱动程序的策略函数被调用。当驱动程序完成时，它通过调用`biodone`或在GEOM类级别调用`g_io_deliver`来完成BIO。完成调用将BIO沿栈向上释放。
 
-`g_disk` 驱动程序 get a slightly simpler view because the `g_disk` infrastructure translates GEOM-level BIO handling into `biodone`-style completion. When you implement `d_strategy`, you receive a `struct bio` and you must eventually call `biodone(bp)` to complete it. You do not call `g_io_deliver` directly. The 框架 does.
+`g_disk`驱动程序得到稍微简化的视图，因为`g_disk`基础设施将GEOM级别的BIO处理转换为`biodone`风格的完成方式。当你实现`d_strategy`时，你接收一个`struct bio`，最终必须调用`biodone(bp)`来完成它。你不直接调用`g_io_deliver`。框架来做。
 
-### The GEOM Topology Lock
+### GEOM拓扑锁
 
-GEOM has a global lock called the topology lock. It protects modifications to the tree of geoms, providers, and consumers. When a provider is created or destroyed, when a consumer is 附加ed or 分离ed, when access counts change, or when GEOM walks the tree to route a request, the topology lock is taken.
+GEOM有一个称为拓扑锁的全局锁。它保护geom、提供者和消费者树的修改。当提供者被创建或销毁时，当消费者被附加或分离时，当访问计数变化时，或当GEOM遍历树来路由请求时，都会获取拓扑锁。
 
-The topology lock is held across operations that can take time, which is unusual for 内核 locks, so GEOM operates much of its real work asynchronously through a dedicated thread called the event queue. When you look at `g_class` definitions in the source tree, the `init`, `fini`, `access`, and similar methods are invoked in the context of the GEOM event thread, not in the context of the user process that triggered the operation.
+拓扑锁在可能耗时的操作期间被持有，这对内核锁来说是不寻常的，所以GEOM通过称为事件队列的专用线程异步执行其大部分实际工作。当你在源码树中查看`g_class`定义时，`init`、`fini`、`access`和类似方法是在GEOM事件线程的上下文中调用的，而不是在触发操作的用户进程的上下文中。
 
-For a 驱动程序 using `g_disk`, this matters in one specific way. You should not hold your own 驱动程序 lock across a call into GEOM-level functions, because GEOM may acquire the topology lock inside those functions, and nested locking in the wrong order leads to deadlock. `g_disk` is written carefully enough that you do not usually have to think about this as long as you follow the patterns we show. But the fact is worth knowing.
+对于使用`g_disk`的驱动程序，这在一个特定方面很重要。你不应该在调用GEOM级别函数时持有自己的驱动程序锁，因为GEOM可能在那些函数内部获取拓扑锁，错误的嵌套锁定顺序会导致死锁。`g_disk`编写得足够仔细，只要你遵循我们展示的模式，通常不需要考虑这一点。但这个事实值得了解。
 
-### The GEOM Event Queue
+### GEOM事件队列
 
-GEOM processes many events on a single dedicated 内核 thread called `g_event`. If you have the 内核 running with debugging enabled, you can see it in `procstat -kk`. This thread picks up events placed on its queue and processes them one at a time. Typical events include creating a geom, destroying a geom, 附加ing a consumer, 分离ing a consumer, and retasting a provider.
+GEOM在名为`g_event`的单一专用内核线程上处理许多事件。如果你在启用调试的情况下运行内核，你可以在`procstat -kk`中看到它。该线程从其队列中拾取事件并逐个处理。典型事件包括创建geom、销毁geom、附加消费者、分离消费者和重新品尝提供者。
 
-A practical consequence is that some actions you take from your 驱动程序, such as `disk_destroy`, do not happen synchronously in the context of the calling thread. They get queued for the event thread, and the actual destruction happens a moment later. `disk_destroy` handles the waiting correctly so that by the time it returns, the disk is gone. But if you are chasing a subtle ordering bug, remembering that GEOM has its own thread can help.
+一个实际的后果是，你从驱动程序采取的某些操作（如`disk_destroy`）不会在调用线程的上下文中同步发生。它们被排队等待事件线程处理，实际的销毁在稍后发生。`disk_destroy`正确处理了等待，所以在它返回时，磁盘已经消失了。但如果你在追踪一个微妙的排序bug，记住GEOM有自己的线程可能会有帮助。
 
-### How g_disk Wraps All of This
+### g_disk如何封装这一切
 
-With that vocabulary in hand, we can now describe what `g_disk` does for us more precisely.
+有了这些词汇，我们现在可以更精确地描述`g_disk`为我们做了什么。
 
-When we call `disk_alloc`, we receive a `struct disk` that is pre-initialised enough to be filled in. We set the name, unit, 回调, and geometry, then call `disk_create`.
+当我们调用`disk_alloc`时，我们收到一个已经预初始化到足以填充的`struct disk`。我们设置名称、单元、回调和几何参数，然后调用`disk_create`。
 
-`disk_create` does the following for us, through the event queue:
+`disk_create`通过事件队列为我们执行以下操作：
 
-1. creates a GEOM class if one does not already exist for this disk name,
-2. creates a geom under that class,
-3. creates a provider associated with the geom,
-4. sets up devstat accounting so that `iostat` and `gstat` have data,
-5. wires up GEOM's character-设备 接口 so that `/dev/<name><unit>` appears,
-6. arranges for BIO requests to flow into our `d_strategy` 回调.
+1. 如果该磁盘名称的GEOM类不存在，则创建一个，
+2. 在该类下创建一个geom，
+3. 创建与geom关联的提供者，
+4. 设置devstat统计，使`iostat`和`gstat`有数据，
+5. 连接GEOM的字符设备接口，使`/dev/<name><unit>`出现，
+6. 安排BIO请求流入我们的`d_strategy`回调。
 
-It also sets up a few optional behaviours. If we provide a `d_ioctl`, the 内核 routes user-space `ioctl` calls on the `/dev` node through to our function. If we provide a `d_getattr`, GEOM routes `BIO_GETATTR` requests through to it. If we provide a `d_gone`, the 内核 calls it if something outside our 驱动程序 decides the disk is gone, such as a hotplug removal event.
+它还设置了一些可选行为。如果我们提供`d_ioctl`，内核将`/dev`节点上的用户空间`ioctl`调用路由到我们的函数。如果我们提供`d_getattr`，GEOM将`BIO_GETATTR`请求路由到它。如果我们提供`d_gone`，当我们驱动程序之外的东西决定磁盘已消失（如热插拔移除事件）时，内核会调用它。
 
-On the teardown side, `disk_destroy` queues the removal, waits for all pending I/O to drain, releases the provider, destroys the geom, and frees the `struct disk`. We do not call `free` on the disk ourselves. The 框架 does that.
+在拆解侧，`disk_destroy`排队移除，等待所有待处理的I/O排干，释放提供者，销毁geom，并释放`struct disk`。我们不自己调用`free`释放磁盘。框架来做。
 
-### Where to Read Source
+### 在哪里阅读源码
 
-You now have enough vocabulary to benefit from reading the `g_disk` source directly. Open `/usr/src/sys/geom/geom_disk.c` and look for the following.
+你现在有足够的词汇来直接从阅读`g_disk`源码中受益了。打开`/usr/src/sys/geom/geom_disk.c`并查找以下内容。
 
-The function `disk_alloc` is early in the file. It is a simple allocator that returns a zeroed `struct disk`. Nothing dramatic.
+函数`disk_alloc`在文件的开头。它是一个简单的分配器，返回一个清零的`struct disk`。没什么戏剧性的。
 
-The function `disk_create` is longer. Skim it and notice the event-based approach: most of the real work is queued rather than performed inline. Also notice the sanity checks on the disk's fields, which catch 驱动程序 that forget to set the 扇区 size, the media size, or the strategy function.
+函数`disk_create`更长。略读它并注意基于事件的方法：大部分实际工作是排队的，而不是内联执行的。同时注意对磁盘字段的健全性检查，它们能捕获忘记设置扇区大小、介质大小或策略函数的驱动程序。
 
-The function `disk_destroy` is similarly event-queued. It guards the teardown with an access-count check, because destroying a disk that is still open would be a bug.
+函数`disk_destroy`同样是事件排队的。它用访问计数检查来保护拆解，因为销毁仍然打开的磁盘将是一个bug。
 
-The function `g_disk_start` is the inner strategy function. It validates a BIO, updates devstat, and calls the 驱动程序's `d_strategy`.
+函数`g_disk_start`是内部策略函数。它验证BIO，更新devstat，并调用驱动程序的`d_strategy`。
 
-Take a moment to look at the code. You do not need to understand every branch. You do need to recognise the overall shape: events for structural changes, inline work for I/O. That is the shape of most GEOM-based code.
+花一点时间看看代码。你不需要理解每个分支。你确实需要识别整体形状：结构变更用事件，I/O用内联工作。这就是大多数基于GEOM的代码的形状。
 
-### Comparing md(4) and g_zero
+### 比较md(4)和g_zero
 
-Two real 驱动程序 make good reading as counterpoints to `g_disk`. The first is the `md(4)` 驱动程序, in `/usr/src/sys/dev/md/md.c`. This is a memory-disk 驱动程序 that uses both `g_disk` and directly managed GEOM structures. It is the most thorough example of a 存储驱动程序 in the tree, supporting multiple backing-store types, resizing, dumping, and many other features. It is a large file, but it is the closest relative of what we are building.
+两个真实的驱动程序是作为`g_disk`对照的良好阅读材料。第一个是`md(4)`驱动程序，在`/usr/src/sys/dev/md/md.c`中。这是一个内存磁盘驱动程序，同时使用`g_disk`和直接管理的GEOM结构。它是源码树中最全面的存储驱动程序示例，支持多种后备存储类型、调整大小、转储和许多其他功能。它是一个大文件，但它是我们正在构建的东西的最近亲。
 
-The second is `g_zero`, in `/usr/src/sys/geom/zero/g_zero.c`. This is a minimal GEOM class that reads always return zeroed memory and writes are discarded. It is roughly 145 lines and uses the lower-level `DECLARE_GEOM_CLASS` API directly rather than `g_disk`. It is a great counterpoint because it shows the GEOM class mechanics without any of the disk-specific adornment. When you want to understand what `g_disk` hides, read `g_zero`.
+第二个是`g_zero`，在`/usr/src/sys/geom/zero/g_zero.c`中。这是一个最小的GEOM类，读取总是返回清零的内存，写入被丢弃。它大约145行，直接使用较低层的`DECLARE_GEOM_CLASS` API而不是`g_disk`。它是一个很好的对照，因为它展示了没有任何磁盘特定装饰的GEOM类机制。当你想理解`g_disk`隐藏了什么时，阅读`g_zero`。
 
-### Why Our Driver Uses g_disk
+### 我们的驱动程序为何使用g_disk
 
-You might ask whether we should build our 驱动程序 directly on the lower-level `g_class` API, the way `g_zero` does, to expose more of the machinery. We will not, for three reasons.
+你可能会问我们是否应该像`g_zero`那样直接在较低层的`g_class` API上构建驱动程序，以暴露更多机制。我们不会，有三个原因。
 
-First, `g_disk` is the idiomatic choice for anything that looks like a disk, which our pseudo 块设备 does. Reviewers of real FreeBSD 驱动程序 patches would push back on a 驱动程序 that used `g_class` directly when `g_disk` would do.
+第一，`g_disk`是任何看起来像磁盘的东西的惯用选择，而我们的伪块设备就是如此。真正的FreeBSD驱动程序补丁的审查者会对在`g_disk`可用时直接使用`g_class`的驱动程序提出反对。
 
-Second, `g_disk` gives us devstat integration, standard ioctls, and `/dev` node management for free. Re-implementing those by hand would be a substantial distraction from the teaching goal of this chapter.
+第二，`g_disk`免费为我们提供devstat集成、标准ioctl和`/dev`节点管理。手工重新实现这些将是对本章教学目标的重大干扰。
 
-Third, the simpler the first working 驱动程序, the easier it is to reason about. We have plenty of code to write in the next few sections. We do not need to spend pages on class-level GEOM plumbing that `g_disk` already gets right.
+第三，第一个可工作的驱动程序越简单，就越容易推理。我们在接下来的几个小节中有很多代码要写。我们不需要在`g_disk`已经正确处理的类级别GEOM管道上花费篇幅。
 
-That said, if you are curious, you should absolutely read `g_zero.c`. It is a small file and it reveals the mechanics that `g_disk` abstracts. The 总结 for this section will point you to it one last time.
+话虽如此，如果你好奇，绝对应该阅读`g_zero.c`。它是一个小文件，揭示了`g_disk`抽象的机制。本节的总结将最后一次指向它。
 
-### A Walk Through g_class
+### g_class详解
 
-For readers who want a little more of the underlying machinery, let us walk through what a `g_class` structure looks like in code, without yet building one of our own.
+对于想要更多底层机制的读者，让我们走一遍`g_class`结构在代码中的样子，先不构建我们自己的。
 
-The following is reproduced (slightly simplified) from `/usr/src/sys/geom/zero/g_zero.c`.
+以下内容（略有简化）摘自`/usr/src/sys/geom/zero/g_zero.c`。
 
 ```c
 static struct g_class g_zero_class = {
@@ -807,71 +807,71 @@ static struct g_class g_zero_class = {
 DECLARE_GEOM_CLASS(g_zero_class, g_zero);
 ```
 
-`.name` is the class name, used in `geom -t` output. `.version` must match `G_VERSION` for the running 内核; mismatched versions are rejected at load time. `.start` is the function called when a BIO arrives at a provider of this class. `.init` is called when the class is first instantiated, typically to create the initial geom and its provider. `.fini` is the teardown counterpart to `.init`. `.destroy_geom` is called when a specific geom under this class is being removed.
+`.name`是类名，用于`geom -t`输出。`.version`必须与运行内核的`G_VERSION`匹配；版本不匹配在加载时被拒绝。`.start`是当BIO到达该类的提供者时调用的函数。`.init`在类首次实例化时调用，通常用于创建初始geom及其提供者。`.fini`是`.init`的拆解对应物。`.destroy_geom`在该类下的特定geom被移除时调用。
 
-`DECLARE_GEOM_CLASS` is a macro that expands to a module declaration that loads this class into the 内核 when the module is loaded. It hides the `moduledata_t`, the `SYSINIT`, and the `g_modevent` wiring behind a single line.
+`DECLARE_GEOM_CLASS`是一个宏，展开为一个模块声明，在模块加载时将该类加载到内核中。它在单行后面隐藏了`moduledata_t`、`SYSINIT`和`g_modevent`的连接。
 
-Our 驱动程序 does not use `g_class` directly. `g_disk` does it for us, and the class it declares under the hood is the universal `DISK` class that all disk-shaped 驱动程序 share. But understanding the structure is useful because, if you ever write a transformation class (a GEOM-level encrypt, compress, or 分区 layer), you will define your own `g_class`.
+我们的驱动程序不直接使用`g_class`。`g_disk`为我们做了，它在底层声明的类是所有磁盘形状的驱动程序共享的通用`DISK`类。但理解这个结构是有用的，因为如果你以后要编写变换类（GEOM级别的加密、压缩或分区层），你将定义自己的`g_class`。
 
-### The Life of a BIO, In Detail
+### BIO的生命周期详解
 
-We covered the BIO life cycle briefly earlier. Here it is in more detail, because every storage-驱动程序 bug touches this life cycle at some point.
+我们之前简要介绍了BIO的生命周期。这里更详细地说明，因为每个存储驱动程序的bug都会在某个时候触及这个生命周期。
 
-A BIO originates somewhere above the 驱动程序. For our 驱动程序, the most common origins are:
+BIO在驱动程序之上的某个地方产生。对于我们的驱动程序，最常见的来源是：
 
-1. **A 文件系统's 缓冲区-cache write-back**. UFS calls `bwrite` or `bawrite` on a 缓冲区, which builds a BIO and hands it to GEOM through `g_io_request`.
-2. **A 文件系统's 缓冲区-cache read**. UFS calls `bread`, which checks the cache and, on a miss, issues a BIO.
-3. **A raw access through `/dev/myblk0`**. A program calls `read(2)` or `write(2)` on the node. `devfs` and GEOM's character-设备 integration build a BIO and issue it.
-4. **A tool-issued operation**. `newfs_ufs`, `diskinfo`, `dd`, and similar tools issue BIOs the same way as a raw access.
+1. **文件系统的缓冲区缓存回写**。UFS在缓冲区上调用`bwrite`或`bawrite`，构建一个BIO并通过`g_io_request`将其交给GEOM。
+2. **文件系统的缓冲区缓存读取**。UFS调用`bread`，检查缓存，在未命中时发出BIO。
+3. **通过`/dev/myblk0`的原始访问**。程序在节点上调用`read(2)`或`write(2)`。`devfs`和GEOM的字符设备集成构建一个BIO并发出它。
+4. **工具发出的操作**。`newfs_ufs`、`diskinfo`、`dd`和类似工具以与原始访问相同的方式发出BIO。
 
-Once built, the BIO is routed through GEOM's topology. Each consumer -> provider hop along the way may transform or validate the BIO. For a simple stack (our 驱动程序 with no intermediate geoms), there are no intermediate hops; the BIO arrives at our provider and is dispatched to our strategy function.
+BIO构建后，通过GEOM的拓扑路由。沿途的每个消费者->提供者跳转可能会变换或验证BIO。对于简单的栈（我们的驱动程序没有中间geom），没有中间跳转；BIO到达我们的提供者并被分派到我们的策略函数。
 
-Inside `g_disk`, the strategy function is preceded by three small pieces of bookkeeping:
+在`g_disk`内部，策略函数之前有三个小的簿记步骤：
 
-1. Some sanity checks (for instance, verifying that the BIO's offset and length are within the media).
-2. A call to `devstat_start_transaction_bio` to start timing the request.
-3. A call to the 驱动程序's `d_strategy`.
+1. 一些健全性检查（例如，验证BIO的偏移量和长度在介质范围内）。
+2. 调用`devstat_start_transaction_bio`开始为请求计时。
+3. 调用驱动程序的`d_strategy`。
 
-On completion, `g_disk` intercepts the `biodone` call, records the end time with `devstat_end_transaction_bio`, and forwards the completion up the stack.
+在完成时，`g_disk`拦截`biodone`调用，用`devstat_end_transaction_bio`记录结束时间，并将完成沿栈向上转发。
 
-From the 驱动程序's point of view, the only thing that matters is that `d_strategy` gets called, and that `biodone` is called once per BIO. Everything else is plumbing.
+从驱动程序的角度看，唯一重要的是`d_strategy`被调用，并且每个BIO恰好调用一次`biodone`。其他一切都是管道。
 
-### Error Propagation
+### 错误传播
 
-When a BIO fails, the 驱动程序 sets `bio_error` to an `errno` value and sets the `BIO_ERROR` flag in `bio_flags`. `biodone` is then called as normal.
+当BIO失败时，驱动程序将`bio_error`设置为一个`errno`值，并在`bio_flags`中设置`BIO_ERROR`标志。然后像平常一样调用`biodone`。
 
-Above the 驱动程序, GEOM's completion code checks for the error. If set, the error is propagated up the stack. The 文件系统 sees the error and decides what to do; typically, a read error on metadata is fatal and the 文件系统 reports EIO to user space. A write error is often delayed; the 文件系统 may retry, or may mark the associated 缓冲区 as needing attention on the next sync.
+在驱动程序之上，GEOM的完成代码检查错误。如果设置了错误，错误沿栈向上传播。文件系统看到错误并决定怎么做；通常，元数据上的读取错误是致命的，文件系统向用户空间报告EIO。写入错误通常被延迟；文件系统可能重试，或者可能将关联的缓冲区标记为需要在下次同步时注意。
 
-Common `errno` values in the BIO path:
+BIO路径中常见的`errno`值：
 
-- `EIO`: a generic I/O error. The 内核 assumes the 设备 is having trouble.
-- `ENXIO`: the 设备 is not configured or has gone away.
-- `EOPNOTSUPP`: the 驱动程序 does not support this operation.
-- `EROFS`: the medium is read-only.
-- `ENOSPC`: no space available.
-- `EFAULT`: an address in the request is invalid. Very rare in the BIO path.
+- `EIO`：通用I/O错误。内核假设设备遇到问题。
+- `ENXIO`：设备未配置或已消失。
+- `EOPNOTSUPP`：驱动程序不支持此操作。
+- `EROFS`：介质是只读的。
+- `ENOSPC`：没有可用空间。
+- `EFAULT`：请求中的地址无效。在BIO路径中非常罕见。
 
-For our in-memory 驱动程序, the only errors that should ever appear are the bounds-check error (`EIO`) and the unknown-command error (`EOPNOTSUPP`).
+对于我们的内存驱动程序，唯一应该出现的错误是边界检查错误（`EIO`）和未知命令错误（`EOPNOTSUPP`）。
 
-### What g_disk Does That You Do Not See
+### g_disk为你做的你看不到的事
 
-We have mentioned that `g_disk` takes care of several things on our behalf. Here is a fuller list.
+我们提到过`g_disk`代表我们处理了几件事情。这里是更完整的列表。
 
-- It creates the GEOM class for the `DISK` type if it does not already exist, and it shares this class among all disk 驱动程序.
-- It creates a geom under that class when we call `disk_create`.
-- It creates a provider on the geom and publishes it in `/dev`.
-- It wires up devstat accounting automatically.
-- It handles the GEOM access protocol, converting user-space `open` and `close` calls on `/dev/myblk0` into provider access-count changes.
-- It handles the GEOM character-设备 接口, converting read and write on `/dev/myblk0` into BIOs to our strategy function.
-- It handles the BIO_GETATTR default cases (most attributes have sensible defaults).
-- It handles withering on `disk_destroy`, waiting for in-flight BIOs.
-- It forwards `d_ioctl` calls for ioctls it does not handle itself.
+- 如果`DISK`类型的GEOM类不存在，它会创建它，并在所有磁盘驱动程序之间共享该类。
+- 当我们调用`disk_create`时，它在该类下创建一个geom。
+- 它在geom上创建一个提供者并在`/dev`中发布。
+- 它自动连接devstat统计。
+- 它处理GEOM访问协议，将`/dev/myblk0`上的用户空间`open`和`close`调用转换为提供者访问计数变化。
+- 它处理GEOM字符设备接口，将`/dev/myblk0`上的读写转换为到我们策略函数的BIO。
+- 它处理BIO_GETATTR的默认情况（大多数属性有合理的默认值）。
+- 它处理`disk_destroy`时的枯萎，等待飞行中的BIO。
+- 它转发它自己不处理的ioctl的`d_ioctl`调用。
 
-Each of these is a piece of code you would have to write if you built directly on `g_class`. Reading `/usr/src/sys/geom/geom_disk.c` is a good way to appreciate just how much `g_disk` does for us.
+这些中的每一项都是如果你直接在`g_class`上构建就必须编写的代码。阅读`/usr/src/sys/geom/geom_disk.c`是感受`g_disk`为我们做了多少的好方法。
 
-### Inspecting Our Provider
+### 检查我们的提供者
 
-Let us take our skeleton 驱动程序 from Section 3, load it, and inspect it through GEOM's eyes.
+让我们从第3节中取出我们的骨架驱动程序，加载它，并通过GEOM的眼睛检查它。
 
 ```console
 # kldload ./myblk.ko
@@ -889,7 +889,7 @@ Providers:
    fwheads: 0
 ```
 
-`geom disk list` shows us only the `DISK` class's geoms. Each of those geoms has one provider. We can also see the full class tree.
+`geom disk list`只向我们显示`DISK`类的geom。这些geom每个都有一个提供者。我们还可以看到完整的类树。
 
 ```console
 # geom -t | head -n 40
@@ -901,13 +901,13 @@ ada0        DISK       ada0
 myblk0      DISK       myblk0
 ```
 
-Our geom is a sibling of the real disks, without any upper-layer class 附加ed to it yet. In later sections we will see what happens when a 文件系统 附加.
+我们的geom是真实磁盘的兄弟，还没有附加任何上层类。在后续小节中，我们将看到当文件系统附加时会发生什么。
 
 ```console
 # geom stats myblk0
 ```
 
-`geom stats` returns detailed performance counters. On an idle, unused 设备 like ours, all the counters are zero.
+`geom stats`返回详细的性能计数器。在像我们这样空闲、未使用的设备上，所有计数器都是零。
 
 ```console
 # gstat -I 1
@@ -917,25 +917,25 @@ dT: 1.002s  w: 1.000s
     0      0      0      0    0.0      0      0    0.0    0.0| myblk0
 ```
 
-`gstat` is a more compact view that updates live. We will use this heavily in later sections.
+`gstat`是一个更紧凑的实时更新视图。我们将在后续小节中大量使用它。
 
 ### 总结 Section 4
 
-GEOM is a composable 块-layer 框架 made of classes, geoms, providers, and consumers. Requests flow through it as `struct bio` objects, with `BIO_READ`, `BIO_WRITE`, and a handful of other commands. Access rights, topology locking, and event-driven structure management are the mechanisms that keep the 框架 safe to evolve under load. `g_disk` wraps all of this for disk-shaped 驱动程序 and gives them a friendlier 接口 with little loss of expressiveness.
+GEOM是一个由类、geom、提供者和消费者组成的可组合块层框架。请求以`struct bio`对象流经它，带有`BIO_READ`、`BIO_WRITE`和少量其他命令。访问权限、拓扑锁定和事件驱动的结构管理是保持框架在负载下安全演进的机制。`g_disk`为磁盘形状的驱动程序封装了所有这些，给它们一个更友好的接口，几乎没有表达能力的损失。
 
-Our skeleton 驱动程序 is now a first-class GEOM participant, even though it cannot yet do any real I/O. In the next section, we will give it that missing piece. We will allocate a backing 缓冲区, implement a strategy function that actually reads and writes, and watch the 内核's storage stack exercise our code from both raw-access and 文件系统-access directions.
+我们的骨架驱动程序现在是一流的GEOM参与者，尽管它还不能做任何真正的I/O。在下一节中，我们将给它那个缺失的部分。我们将分配一个后备缓冲区，实现一个实际读写的策略函数，并观察内核的存储栈从原始访问和文件系统访问两个方向测试我们的代码。
 
-## 第5节： Implementing Basic Read and Write
+## 第5节：实现基本读写
 
-In Section 3 we returned `ENXIO` for every BIO. In Section 4 we learned enough about GEOM to know exactly what kind of request our strategy function receives and what its obligations are. In this section we will replace that placeholder with a working handler that reads and writes real bytes against an in-memory backing store. By the end, our 驱动程序 will serve traffic through `dd`, will return sane data, and will survive being formatted by `newfs_ufs`.
+在第3节中，我们对每个BIO返回`ENXIO`。在第4节中，我们学到了足够多的关于GEOM的知识，确切地知道我们的策略函数接收什么样的请求以及它的义务是什么。在本节中，我们将用一个可工作的处理程序替换那个占位符，该处理程序针对内存后备存储读写真实的字节。到本节结束时，我们的驱动程序将通过`dd`服务流量，返回合理的数据，并在被`newfs_ufs`格式化后存活。
 
-### The Backing Store
+### 后备存储
 
-Our backing store for now is simply an array of bytes in 内核 memory, sized to match `d_mediasize`. It is the simplest possible representation of a disk: a flat 缓冲区. Real 存储驱动程序 replace this with hardware DMA, with a vnode-backed file, or with a swap-backed VM object, but a flat 缓冲区 is enough to teach every other concept in this chapter without distraction.
+我们目前的后备存储只是内核内存中的一个字节数组，大小与`d_mediasize`匹配。这是磁盘的最简单可能表示：一个扁平缓冲区。真正的存储驱动程序用硬件DMA、vnode支持的文件或交换支持的VM对象替换它，但扁平缓冲区足以无干扰地教授本章中的其他概念。
 
-For 1 MiB we can simply `malloc` the 缓冲区. For larger sizes we would need a different allocator, because the 内核 heap does not scale gracefully to contiguous allocations of tens or hundreds of megabytes. `md(4)` avoids the issue for large memory disks by using page-at-a-time allocation and a custom indirection structure. We do not need that level of sophistication yet, but we will note the limitation in the code.
+对于1 MiB，我们可以简单地用`malloc`分配缓冲区。对于更大的大小，我们需要不同的分配器，因为内核堆不能优雅地扩展到几十或几百兆字节的连续分配。`md(4)`通过使用逐页分配和自定义间接结构来避免大型内存磁盘的这个问题。我们目前还不需要那种复杂程度，但我们会在代码中注明这个限制。
 
-Let us update `myblk_softc` to include the backing store.
+让我们更新`myblk_softc`以包含后备存储。
 
 ```c
 struct myblk_softc {
@@ -947,9 +947,9 @@ struct myblk_softc {
 };
 ```
 
-Two new fields: `backing` is the pointer to the 内核 memory we allocated, and `backing_size` is the number of bytes we allocated. These should always be equal to `d_mediasize`, but storing the size explicitly is cleaner than relying on indirection through `disk->d_mediasize`.
+两个新字段：`backing`是我们分配的内核内存的指针，`backing_size`是我们分配的字节数。这些应该始终等于`d_mediasize`，但显式存储大小比通过`disk->d_mediasize`间接引用更干净。
 
-Now, in `myblk_附加_unit`, allocate the backing 缓冲区.
+现在，在`myblk_attach_unit`中，分配后备缓冲区。
 
 ```c
 static int
@@ -973,9 +973,9 @@ myblk_attach_unit(struct myblk_softc *sc)
 }
 ```
 
-`malloc` with `M_WAITOK | M_ZERO` returns a zeroed 缓冲区 or sleeps until one is available. It cannot fail for small allocations on a healthy system, which is why we do not check the return value here. If we were allocating a very large 缓冲区 we might want `M_NOWAIT` and explicit error handling, but for 1 MiB `M_WAITOK` is the idiomatic choice.
+带有`M_WAITOK | M_ZERO`的`malloc`返回一个清零的缓冲区或睡眠直到有可用的。在健康的系统上，小分配不可能失败，这就是为什么我们不在这里检查返回值。如果我们要分配一个非常大的缓冲区，我们可能需要`M_NOWAIT`和显式错误处理，但对于1 MiB，`M_WAITOK`是惯用的选择。
 
-`myblk_分离_unit` must free the backing store after destroying the disk.
+`myblk_detach_unit`必须在销毁磁盘后释放后备存储。
 
 ```c
 static void
@@ -994,11 +994,11 @@ myblk_detach_unit(struct myblk_softc *sc)
 }
 ```
 
-Order matters here. We destroy the disk first, which ensures there are no more BIOs in flight. Only then do we free the backing 缓冲区. If we freed the 缓冲区 first, an in-flight BIO might try to `memcpy` into or out of a pointer that no longer refers to our memory, and the 内核 would crash on the next I/O.
+顺序很重要。我们首先销毁磁盘，这确保没有更多的BIO在飞行中。然后我们才释放后备缓冲区。如果我们先释放缓冲区，一个飞行中的BIO可能试图`memcpy`到或从一个不再引用我们内存的指针，内核将在下一次I/O时崩溃。
 
-### The Strategy Function
+### 策略函数
 
-Now for the heart of the change. Replace the placeholder `myblk_strategy` with a function that actually services BIOs.
+现在是变更的核心。用实际服务BIO的函数替换占位符`myblk_strategy`。
 
 ```c
 static void
@@ -1063,43 +1063,43 @@ myblk_strategy(struct bio *bp)
 }
 ```
 
-Let us read this carefully. It is not a long function, but every line is doing something that matters.
+让我们仔细阅读这段代码。它不是一个很长的函数，但每一行都在做一些重要的事情。
 
-The first line finds our softc. GEOM gives us the BIO with a pointer to the disk in `bp->bio_disk`. We stashed our softc in `d_drv1` during `disk_create`, so we retrieve it from there. This is the 块-驱动程序 equivalent of `设备_get_softc(dev)` in the New总线 world.
+第一行找到我们的softc。GEOM在`bp->bio_disk`中给了我们一个指向磁盘的指针的BIO。我们在`disk_create`期间将softc存放在`d_drv1`中，所以我们从那里取回它。这是Newbus世界中`device_get_softc(dev)`在块驱动程序中的等价物。
 
-The second pair of lines extract the offset and length of the request. `bio_offset` is a byte offset into the media. `bio_bcount` is the number of bytes to transfer. GEOM has already translated file-level operations through whatever layers sit above us into a linear byte range.
+第二对行提取请求的偏移量和长度。`bio_offset`是介质中的字节偏移量。`bio_bcount`是要传输的字节数。GEOM已经通过我们上面的任何层将文件级操作转换为线性字节范围。
 
-The bounds check that follows is defensive programming. GEOM will not normally send us a request that exceeds the media size, because it splits and validates BIOs on our behalf. But defensive 驱动程序 check anyway, because a silently accepted out-of-bounds write can smash 内核 memory, and because the cost of the check is a few instructions per request. We also guard against arithmetic overflow by rewriting the obvious `offset + len > backing_size` check as `len > backing_size - offset`, which cannot overflow because `offset <= backing_size` at this point.
+随后的边界检查是防御性编程。GEOM通常不会向我们发送超过介质大小的请求，因为它代表我们拆分和验证BIO。但防御性驱动程序无论如何都会检查，因为静默接受的越界写入可能破坏内核内存，而且检查的成本是每个请求几条指令。我们还通过将明显的`offset + len > backing_size`检查重写为`len > backing_size - offset`来防止算术溢出，这不可能溢出，因为此时`offset <= backing_size`。
 
-The switch is where the real work happens. Each BIO command gets its own case.
+switch是真正工作发生的地方。每个BIO命令有自己的case。
 
-`BIO_READ` copies `len` bytes from our backing store at `offset` into `bp->bio_data`. GEOM has allocated `bp->bio_data` for us, and it will be released when the BIO completes. Our job is just to fill it.
+`BIO_READ`从后备存储的`offset`处复制`len`字节到`bp->bio_data`。GEOM已经为我们分配了`bp->bio_data`，它将在BIO完成时释放。我们的工作只是填充它。
 
-`BIO_WRITE` copies `len` bytes from `bp->bio_data` into our backing store at `offset`. Symmetrical to the read case.
+`BIO_WRITE`从`bp->bio_data`复制`len`字节到后备存储的`offset`处。与读取情况对称。
 
-`BIO_DELETE` zeroes the range. For a real disk, `BIO_DELETE` is how 文件系统 signal that a range of 块 is no longer in use, and the disk is free to reclaim it. SSDs use it to drive TRIM. For our in-memory 驱动程序, there is nothing to reclaim, but zeroing the range is a reasonable response because it reflects the "data is gone" semantics.
+`BIO_DELETE`将范围清零。对于真实磁盘，`BIO_DELETE`是文件系统通知一定范围的块不再使用的方式，磁盘可以自由回收它。SSD用它来驱动TRIM。对于我们的内存驱动程序，没有什么可以回收的，但将范围清零是合理的响应，因为它反映了"数据已消失"的语义。
 
-`BIO_FLUSH` is a request to commit outstanding writes to stable storage. Our storage is never volatile in the sense that a FLUSH would help: every `memcpy` is already visible to the next `memcpy` in the same order it was issued. We return success with nothing to do.
+`BIO_FLUSH`是将未完成的写入提交到稳定存储的请求。我们的存储从不具有FLUSH会有帮助的那种易失性：每个`memcpy`已经按照发出的顺序对下一个`memcpy`可见。我们返回成功，无需做任何事情。
 
-Any other command we do not recognise gets `EOPNOTSUPP`. GEOM layers above us will see this and react accordingly.
+我们不认识的任何其他命令获得`EOPNOTSUPP`。我们上面的GEOM层将看到这个并相应地反应。
 
-At the end, `biodone(bp)` completes the BIO. This is not optional. Every BIO that enters the strategy function must leave through `biodone` exactly once, or the BIO will be leaked, the caller will 块 forever, and you will have a difficult time diagnosing the issue.
+最后，`biodone(bp)`完成BIO。这不是可选的。每个进入策略函数的BIO必须恰好通过`biodone`一次离开，否则BIO将被泄漏，调用者将永远阻塞，你将很难诊断这个问题。
 
-### The Role of bio_resid
+### bio_resid的作用
 
-Notice the handling of `bp->bio_resid`. This field represents the number of bytes remaining to transfer after the 驱动程序 is done. When the full transfer succeeds, `bio_resid` is zero. When the transfer fails completely, `bio_resid` equals `bio_bcount`. When the transfer partially succeeds, `bio_resid` is the number of bytes that did not make it.
+注意`bp->bio_resid`的处理。这个字段代表驱动程序完成后剩余要传输的字节数。当完整传输成功时，`bio_resid`为零。当传输完全失败时，`bio_resid`等于`bio_bcount`。当传输部分成功时，`bio_resid`是未成功传输的字节数。
 
-Our 驱动程序 either transfers everything or nothing, so we set `bio_resid` to either `0` (success) or `len` (error). A real hardware 驱动程序 might set it to an intermediate value if a transfer stopped partway through. Filesystems and user-space tools use `bio_resid` to figure out how much data actually moved.
+我们的驱动程序要么传输全部，要么什么也不传输，所以我们将`bio_resid`设置为`0`（成功）或`len`（错误）。真正的硬件驱动程序可能在传输中途停止时将其设置为中间值。文件系统和用户空间工具使用`bio_resid`来计算实际移动了多少数据。
 
-### The Lock
+### 锁
 
-We take `sc->lock` around the `memcpy`. For an in-memory 驱动程序 that services one request at a time, the lock is not doing much visible work: the 内核's BIO scheduling makes truly concurrent requests unlikely on our toy 设备. But the lock is good hygiene. GEOM does not promise that your strategy function will be invoked serially, and even if it did, a future change to the 驱动程序 to add an asynchronous worker thread would require the lock anyway. Adding it now is cheaper than adding it later.
+我们在`memcpy`周围获取`sc->lock`。对于一次服务一个请求的内存驱动程序，锁并没有做太多可见的工作：内核的BIO调度使得真正的并发请求在我们的玩具设备上不太可能。但锁是良好的卫生习惯。GEOM不承诺你的策略函数会被串行调用，即使承诺了，将来为驱动程序添加异步工作线程的更改也无论如何都需要锁。现在添加比以后添加更便宜。
 
-A more sophisticated 驱动程序 might use a fine-grained lock, or might use an MPSAFE approach that relies on atomic operations. For now, a coarse 互斥锁 around the `memcpy` is fine. It is correct, it is easy to reason about, and it does not hurt performance on a pseudo 设备.
+更复杂的驱动程序可能使用细粒度锁，或者可能使用依赖原子操作的MPSAFE方法。目前，`memcpy`周围的粗粒度互斥锁就可以了。它是正确的，容易推理，并且不会损害伪设备的性能。
 
-### Rebuilding and Reloading
+### 重新构建和重新加载
 
-After updating the source and `kldunload`-ing the old version, rebuild and reload.
+更新源码并`kldunload`旧版本后，重新构建并重新加载。
 
 ```console
 # make
@@ -1110,7 +1110,7 @@ cc -O2 -pipe -fno-strict-aliasing ...
 myblk: loaded, /dev/myblk0 size=1048576 bytes
 ```
 
-Now let us try some real I/O.
+现在让我们尝试一些真正的I/O。
 
 ```console
 # dd if=/dev/zero of=/dev/myblk0 bs=4096 count=16
@@ -1123,7 +1123,7 @@ Now let us try some real I/O.
 65536 bytes transferred in 0.000512 secs (128 MB/sec)
 ```
 
-We wrote 64 KiB of zeros and read them back. The speeds you see will depend on your hardware and on how much the 缓冲区 cache helps, but any speed above a few MB/sec is fine for a first run.
+我们写入了64 KiB的零并将其读回。你看到的速度取决于你的硬件和缓冲区缓存帮助了多少，但任何超过几MB/秒的速度对于第一次运行都是可以的。
 
 ```console
 # dd if=/dev/random of=/dev/myblk0 bs=4096 count=16
@@ -1140,20 +1140,20 @@ We wrote 64 KiB of zeros and read them back. The speeds you see will depend on y
 #
 ```
 
-We wrote random data, read it back twice, and confirmed that both reads return the same content. Our 驱动程序 is now a coherent store.
+我们写入了随机数据，读回两次，确认两次读取返回相同的内容。我们的驱动程序现在是一个一致的存储。
 
-### A Quick Look Under Load
+### 负载下的快速观察
 
-Let us run a short stress test and watch `gstat`.
+让我们运行一个短的压力测试并观察`gstat`。
 
-In one terminal:
+在一个终端中：
 
 ```console
 # while true; do dd if=/dev/urandom of=/dev/myblk0 bs=4096 \
     count=256 2>/dev/null; done
 ```
 
-In another terminal:
+在另一个终端中：
 
 ```console
 # gstat -I 1 -f myblk0
@@ -1162,13 +1162,13 @@ dT: 1.002s  w: 1.000s
     0    251      0      0    0.0    251   1004    0.0    2.0| myblk0
 ```
 
-About 250 write operations per second at 4 KiB each, approximately 1 MB/sec. The latency is very low because the backing store is RAM. For a real disk the numbers would be very different, but the structure of what you are watching is the same.
+大约每秒250次写入操作，每次4 KiB，大约1 MB/秒。延迟非常低，因为后备存储是RAM。对于真实磁盘，数字会非常不同，但你正在观察的结构是相同的。
 
-Stop the stress test with `Ctrl-C` on the first terminal.
+在第一个终端上用`Ctrl-C`停止压力测试。
 
-### Refining the Driver with ioctl Support
+### 通过ioctl支持完善驱动程序
 
-Many storage tools send an ioctl to the 设备 to query geometry or to issue commands. GEOM handles the common ones for us, but if we provide a `d_ioctl` 回调, the 内核 will route unknown ioctls through to our function. For now we do not implement any custom ioctl. We only note that the hook exists.
+许多存储工具向设备发送ioctl来查询几何参数或发出命令。GEOM为我们处理常见的ioctl，但如果我们提供`d_ioctl`回调，内核会将未知的ioctl路由到我们的函数。目前我们不实现任何自定义ioctl。我们只注意到钩子存在。
 
 ```c
 static int
@@ -1186,11 +1186,11 @@ myblk_ioctl(struct disk *d, u_long cmd, void *data, int flag,
 }
 ```
 
-We 注册 the 回调 by assigning `sc->disk->d_ioctl = myblk_ioctl;` before calling `disk_create`. Returning `ENOIOCTL` from the default case tells GEOM that we do not handle the command and gives it the chance to pass the request to its own default handler.
+我们在调用`disk_create`之前通过赋值`sc->disk->d_ioctl = myblk_ioctl;`注册回调。从默认case返回`ENOIOCTL`告诉GEOM我们不处理该命令，并给它将请求传递给自己默认处理器的机会。
 
-### Refining the Driver with getattr Support
+### 通过getattr支持完善驱动程序
 
-GEOM uses `BIO_GETATTR` to ask storage 设备 for named attributes. A 文件系统 might ask for `GEOM::rotation_rate` to know whether it is on spinning media. The 分区ing layer might ask for `GEOM::ident` to get a stable identifier. A `d_getattr` 回调 is the hook that lets us respond.
+GEOM使用`BIO_GETATTR`向存储设备请求命名属性。文件系统可能会询问`GEOM::rotation_rate`以了解它是否在旋转介质上。分区层可能会询问`GEOM::ident`以获取稳定标识符。`d_getattr`回调是让我们响应的钩子。
 
 ```c
 static int
@@ -1214,73 +1214,73 @@ myblk_getattr(struct bio *bp)
 }
 ```
 
-The return-value convention for `d_getattr` is worth pausing on, because it trips up many first-time readers. Returning `0` with `bio_completed` set tells `g_disk` that we handled the attribute successfully. Returning a positive errno value (such as `EFAULT` for a too-small 缓冲区) tells `g_disk` that we handled the attribute but the operation failed. Returning `-1` tells `g_disk` that we did not recognise the attribute and it should try its built-in default handler. That is why we return `-1` at the bottom: we want `g_disk` to answer standard attributes such as `GEOM::fw扇区` on our behalf. For our 驱动程序, responding to `GEOM::ident` with a short string is enough to show up in `diskinfo -v`. Register this with `sc->disk->d_getattr = myblk_getattr;` before `disk_create`.
+`d_getattr`的返回值约定值得停下来思考，因为它让许多首次阅读者绊倒。返回`0`并设置`bio_completed`告诉`g_disk`我们成功处理了属性。返回一个正的errno值（如太小的缓冲区的`EFAULT`）告诉`g_disk`我们处理了属性但操作失败了。返回`-1`告诉`g_disk`我们不认识该属性，它应该尝试其内建的默认处理器。这就是为什么我们在底部返回`-1`：我们希望`g_disk`代表我们回答标准属性如`GEOM::fwsectors`。对于我们的驱动程序，用短字符串响应`GEOM::ident`足以在`diskinfo -v`中显示。在`disk_create`之前用`sc->disk->d_getattr = myblk_getattr;`注册。
 
-### Partial Writes and Short Reads
+### 部分写入和短读取
 
-Our 驱动程序 does not actually produce partial writes or short reads, because the backing store is in RAM and every transfer either fully succeeds or fully fails. But for a real hardware 驱动程序, partial transfers are normal: a disk may return a few 扇区 successfully and then fail on a bad 扇区. The BIO 框架 supports this through `bio_resid`, and a 驱动程序 should set `bio_resid` to the number of bytes that did not complete.
+我们的驱动程序实际上不会产生部分写入或短读取，因为后备存储在RAM中，每次传输要么完全成功要么完全失败。但对于真正的硬件驱动程序，部分传输是正常的：磁盘可能成功返回几个扇区然后在一个坏扇区上失败。BIO框架通过`bio_resid`支持这一点，驱动程序应该将`bio_resid`设置为未完成的字节数。
 
-The practical guidance is to always set `bio_resid` explicitly before calling `biodone`. If the transfer fully succeeded, set it to zero. If it partially succeeded, set it to the residual. If it fully failed, set it to `bio_bcount`. Forgetting to set `bio_resid` leaves whatever garbage was in the field when the BIO was allocated, which can confuse callers.
+实际的指导是在调用`biodone`之前始终显式设置`bio_resid`。如果传输完全成功，将其设置为零。如果部分成功，设置为剩余量。如果完全失败，设置为`bio_bcount`。忘记设置`bio_resid`会在BIO分配时留下字段中的任何垃圾，这可能使调用者困惑。
 
 ### 常见错误 in Strategy Functions
 
-Before we continue, let us name three common mistakes that appear in first-time strategy functions.
+在我们继续之前，让我们指出首次编写策略函数时出现的三个常见错误。
 
-**Forgetting `biodone`.** Every path out of the strategy function must call `biodone(bp)` on the BIO. If you forget, the BIO is leaked and the caller hangs. This is the single most common source of "my 挂载 hangs" problems.
+**忘记`biodone`。**策略函数的每条退出路径都必须对BIO调用`biodone(bp)`。如果你忘记了，BIO被泄漏，调用者挂起。这是"我的挂载挂起"问题最常见的单一来源。
 
-**Holding a lock across `biodone`.** `biodone` may call upward into GEOM or into a 文件系统's completion handler. Those handlers may take other locks, or may need to acquire locks you already hold, leading to lock-order reversal and potential deadlock. The safest pattern is to drop your lock before calling `biodone`. Our simple version does this implicitly: the `mtx_unlock` is always inside the switch, and `biodone` runs after the switch.
+**在`biodone`之间持锁。**`biodone`可能向上调用到GEOM或文件系统的完成处理器。这些处理器可能获取其他锁，或者可能需要获取你已经持有的锁，导致锁顺序反转和潜在死锁。最安全的模式是在调用`biodone`之前释放你的锁。我们的简单版本隐式地做到了这一点：`mtx_unlock`总是在switch内部，`biodone`在switch之后运行。
 
-**Returning from the strategy function with an error code.** `d_strategy` is a `void` function. Errors are reported by setting `bio_error` and the `BIO_ERROR` flag on the BIO, not by returning. Compilers catch this if you declare the function correctly, but beginners sometimes write it as returning `int`, which causes compiler warnings that should not be ignored.
+**从策略函数返回错误码。**`d_strategy`是一个`void`函数。错误通过在BIO上设置`bio_error`和`BIO_ERROR`标志来报告，而不是通过返回值。如果你正确声明了函数，编译器会捕获这个错误，但初学者有时会将其写为返回`int`，这会产生不应被忽略的编译器警告。
 
 ### Chained BIOs and BIO Hierarchies
 
-A BIO can have a child. GEOM uses this when a transformation class needs to split, combine, or transform a request into one or more downstream requests. For example, a mirror class might take a BIO_WRITE and issue two child BIOs, one to each mirror member. A 分区 class might take a BIO_READ and issue a single child BIO with the offset shifted into the underlying provider's address space.
+BIO可以有一个子级。GEOM在变换类需要将请求拆分、组合或变换为一个或多个下游请求时使用它。例如，镜像类可能接收一个BIO_WRITE并发出两个子BIO，每个镜像成员一个。分区类可能接收一个BIO_READ并发出一个偏移量已移入底层提供者地址空间的单个子BIO。
 
-The parent-child relationship is recorded in `bio_parent`. When a child completes, its error is propagated to the parent by `biodone`, which accumulates errors and delivers the parent when all children have completed.
+父子关系记录在`bio_parent`中。当子级完成时，其错误由`biodone`传播到父级，`biodone`累积错误并在所有子级完成后交付父级。
 
-Our 驱动程序 does not produce child BIOs. It receives them as leaves of the chain. From the 驱动程序's perspective, every BIO is self-contained: it has an offset, a length, and a data 缓冲区, and our job is to service it.
+我们的驱动程序不产生子BIO。它作为链的叶级接收它们。从驱动程序的角度看，每个BIO都是自包含的：它有偏移量、长度和数据缓冲区，我们的工作是服务它。
 
-But if you ever find yourself needing to split a BIO inside your 驱动程序 (for example, if a request spans a boundary that your backing store handles in separate chunks), you can use `g_clone_bio` to create a child BIO, `g_io_request` to dispatch it, and `g_std_done` or a custom completion handler to reassemble the parent. The pattern is visible in several places in the 内核, including `g_mirror` and `g_raid`.
+但如果你发现自己需要在驱动程序内部分割BIO（例如，如果请求跨越了后备存储以单独块处理的边界），你可以使用`g_clone_bio`创建子BIO，`g_io_request`分派它，`g_std_done`或自定义完成处理器来重组父级。该模式在内核中的多个地方可见，包括`g_mirror`和`g_raid`。
 
-### The Thread Context of the Strategy Function
+### 策略函数的线程上下文
 
-The strategy function runs in whatever thread submitted the BIO. For 文件系统-originated BIOs, that is typically the 文件系统's syncer thread or a 缓冲区-cache worker. For direct user-space access, it is the user thread that called `read` or `write` on `/dev/myblk0`. For GEOM transformations, it might be the GEOM event thread or a class-specific worker thread.
+策略函数在提交BIO的任何线程中运行。对于文件系统产生的BIO，通常是文件系统的同步线程或缓冲区缓存工作线程。对于直接的用户空间访问，是调用`/dev/myblk0`上`read`或`write`的用户线程。对于GEOM变换，可能是GEOM事件线程或类特定的工人线程。
 
-What this means for your 驱动程序 is that `d_strategy` can run in many different thread contexts. You cannot assume that `curthread` belongs to any particular process, and you cannot 块 for a long time or the calling 文件系统 (or user program) will stall.
+这对你的驱动程序意味着`d_strategy`可以在许多不同的线程上下文中运行。你不能假设`curthread`属于任何特定进程，你不能长时间阻塞，否则调用的文件系统（或用户程序）将停滞。
 
-If your strategy function needs to do something slow (I/O against a vnode, waiting for hardware, or complex locking), the right pattern is to enqueue the BIO on an internal queue and have a dedicated worker thread process it. This is what `md(4)` does for all backing types, because vnode I/O (for instance) can 块 arbitrarily long.
+如果你的策略函数需要做慢的事情（对vnode的I/O、等待硬件或复杂的锁定），正确的模式是将BIO排队到内部队列并让专门的工人线程处理它。这就是`md(4)`对所有后备类型所做的，因为vnode I/O（例如）可能任意长时间阻塞。
 
-Our 驱动程序 is entirely in-memory and does `memcpy` only, so we do not need a worker thread. But understanding the pattern is important for the future.
+我们的驱动程序完全在内存中且只做`memcpy`，所以我们不需要工人线程。但理解这个模式对未来很重要。
 
-### A Worked Example: Reading Across a Boundary
+### 实例演练：跨边界读取
 
-Suppose a 文件系统 issues a BIO_READ with offset 100000 and length 8192. That spans bytes 100000 through 108191. Let us trace how our strategy function handles it.
+假设一个文件系统发出一个偏移量100000、长度8192的BIO_READ。它跨越字节100000到108191。让我们追踪策略函数如何处理它。
 
-1. `bp->bio_cmd` is `BIO_READ`.
-2. `bp->bio_offset` is 100000.
-3. `bp->bio_bcount` is 8192.
-4. `bp->bio_data` points to a 内核 缓冲区 (or a user 缓冲区 mapped into the 内核) where the 8192 bytes should go.
+1. `bp->bio_cmd`是`BIO_READ`。
+2. `bp->bio_offset`是100000。
+3. `bp->bio_bcount`是8192。
+4. `bp->bio_data`指向一个内核缓冲区（或映射到内核的用户缓冲区），8192字节应该放入其中。
 
-Our code computes `offset = 100000` and `len = 8192`. The bounds check passes: `100000 + 8192 = 108192`, which is less than our `backing_size` of 32 MiB (33554432).
+我们的代码计算`offset = 100000`和`len = 8192`。边界检查通过：`100000 + 8192 = 108192`，小于我们的`backing_size`32 MiB（33554432）。
 
-The switch enters the `BIO_READ` case. We acquire the lock, `memcpy` 8192 bytes from `sc->backing + 100000` into `bp->bio_data`, and release the lock. We set `bp->bio_resid = 0` to indicate a complete transfer. We fall through to `biodone(bp)`, which completes the BIO.
+switch进入`BIO_READ` case。我们获取锁，从`sc->backing + 100000`将8192字节`memcpy`到`bp->bio_data`中，然后释放锁。我们设置`bp->bio_resid = 0`表示完整传输。我们落入`biodone(bp)`，完成BIO。
 
-The 文件系统 receives the completion, notices the error is zero, and uses the 8192 bytes. The read is complete.
+文件系统收到完成通知，注意到错误为零，并使用这8192字节。读取完成。
 
-Now suppose, instead, the offset was 33554431 and the length was 2 bytes. That is one byte inside the backing store and one byte past the end.
+现在假设偏移量是33554431，长度是2字节。即一个字节在后备存储内，一个字节超出末尾。
 
-1. `offset = 33554431`.
-2. `len = 2`.
+1. `offset = 33554431`。
+2. `len = 2`。
 
-The bounds check: `offset > sc->backing_size` evaluates `33554431 > 33554432`, which is false. `len > sc->backing_size - offset` evaluates `2 > 33554432 - 33554431`, which evaluates to `2 > 1`, which is true. The check fails, and we fall into the error path: set `bio_error = EIO`, set the `BIO_ERROR` flag, set `bio_resid = 2`, and call `biodone`. The 文件系统 sees the error and handles it.
+边界检查：`offset > sc->backing_size`计算为`33554431 > 33554432`，为假。`len > sc->backing_size - offset`计算为`2 > 33554432 - 33554431`，即`2 > 1`，为真。检查失败，我们落入错误路径：设置`bio_error = EIO`，设置`BIO_ERROR`标志，设置`bio_resid = 2`，然后调用`biodone`。文件系统看到错误并处理它。
 
-Notice how we used subtraction to avoid the overflow risk. Had we written `offset + len > sc->backing_size`, and had `offset` and `len` both been close to the maximum of `off_t`, the addition could wrap around to a small number and the check would silently pass for a malformed request. Defensive bounds checks always rearrange arithmetic to avoid overflow.
+注意我们是如何使用减法来避免溢出风险的。如果我们写成`offset + len > sc->backing_size`，并且`offset`和`len`都接近`off_t`的最大值，加法可能回绕为一个小数字，检查会静默通过一个格式错误的请求。防御性边界检查总是重新排列算术以避免溢出。
 
-### The Devstat Side Effect
+### Devstat的副作用
 
-One pleasant feature of using `g_disk` is that devstat accounting is automatic. Every BIO we service is counted by `iostat` and `gstat`. No extra code is needed.
+使用`g_disk`的一个令人愉快的特性是devstat统计是自动的。我们服务的每个BIO都被`iostat`和`gstat`计数。不需要额外代码。
 
-You can verify this with `iostat -x 1` in another terminal while running the stress loop.
+你可以在运行压力循环时在另一个终端中用`iostat -x 1`验证这一点。
 
 ```text
                         extended device statistics
@@ -1289,46 +1289,46 @@ ada0         0       2       0      48   0.0   0.1   0.0   0.1    0   0
 myblk0       0     251       0    1004   0.0   0.0   0.0   0.0    0   2
 ```
 
-If our 驱动程序 were built on the raw `g_class` API rather than `g_disk`, we would have to wire up devstat ourselves. This is one of the small quality-of-life features that `g_disk` gives us for free.
+如果我们的驱动程序构建在原始`g_class` API而不是`g_disk`上，我们将不得不自己连接devstat。这是`g_disk`免费给我们的小生活质量特性之一。
 
 ### 总结 Section 5
 
-We replaced the placeholder strategy function with a working handler. Our 驱动程序 now services `BIO_READ`, `BIO_WRITE`, `BIO_DELETE`, and `BIO_FLUSH` correctly against an in-memory backing store. It participates in devstat, it cooperates with `gstat`, and it accepts real traffic from `dd`.
+我们将占位符策略函数替换为可工作的处理程序。我们的驱动程序现在正确地对内存后备存储服务`BIO_READ`、`BIO_WRITE`、`BIO_DELETE`和`BIO_FLUSH`。它参与devstat，与`gstat`协作，并接受来自`dd`的真实流量。
 
-In the next section, we will cross the boundary from raw 块 access to 文件系统 access. We will format the 设备 with `newfs_ufs`, 挂载 it, create files on it, and observe how the request path changes when a real 文件系统 sits above the provider.
+在下一节中，我们将跨越从原始块访问到文件系统访问的边界。我们将用`newfs_ufs`格式化设备，挂载它，在其上创建文件，并观察当真正的文件系统位于提供者之上时请求路径如何变化。
 
-## Section 6: Mounting a Filesystem on the Device
+## 第6节：在设备上挂载文件系统
 
-Up to this point, our 驱动程序 has been exercised through raw access: `dd`, `diskinfo`, and similar tools reading and writing the entire surface as a flat byte range. That is a valuable mode, but it is not the mode most storage 设备 live in. Storage 设备 in real life serve 文件系统. This section takes our 驱动程序 the last mile: we will format it, 挂载 a real 文件系统 on it, create files, and observe how the 内核's 块-layer plumbing routes requests when a 文件系统 is in the picture.
+到目前为止，我们的驱动程序通过原始访问进行测试：`dd`、`diskinfo`和类似工具将整个表面作为扁平字节范围进行读写。这是一种有价值的模式，但不是大多数存储设备生活的模式。现实生活中的存储设备为文件系统服务。本节将我们的驱动程序带到最后一英里：我们将格式化它，在上面挂载真正的文件系统，创建文件，并观察当文件系统出现时内核的块层管道如何路由请求。
 
-This is also the first section where the theoretical distinction between raw access and 文件系统 access becomes concrete. Understanding the difference, and being able to see it in action, is one of the most useful insights a storage-驱动程序 author can acquire.
+这也是理论上的原始访问和文件系统访问之间的区别变得具体的第一节。理解这种差异并能够看到它在实践中运行，是存储驱动程序作者可以获得的最有用的洞察之一。
 
-### The Plan
+### 计划
 
-We will do the following in this section, in order.
+我们将在本节中按顺序执行以下操作。
 
-1. Increase the media size of our 驱动程序 from 1 MiB to something large enough to hold a usable UFS 文件系统.
-2. Build and load the updated 驱动程序.
-3. Run `newfs_ufs` against the 设备 to create a 文件系统.
-4. Mount the 文件系统 on a scratch directory.
-5. Create some files and verify that the data is read back correctly.
-6. Un挂载 the 文件系统.
-7. Reload the module and watch what happens.
+1. 将驱动程序的介质大小从1 MiB增加到足以容纳可用UFS文件系统的大小。
+2. 构建并加载更新后的驱动程序。
+3. 对设备运行`newfs_ufs`以创建文件系统。
+4. 将文件系统挂载到临时目录上。
+5. 创建一些文件并验证数据正确读回。
+6. 卸载文件系统。
+7. 重新加载模块并观察发生了什么。
 
-By the end, you will have seen a complete 文件系统 on top of your own 块 驱动程序.
+到本节结束时，你将在自己的块驱动程序上看到一个完整的文件系统。
 
-### Increasing the Media Size
+### 增加介质大小
 
-UFS has a minimum practical size. You can create tiny UFS 文件系统, but the overhead of the super块, cylinder groups, and inode tables takes a noticeable fraction of the space on anything smaller than a few megabytes. For our purposes, 32 MiB is a comfortable size: it is small enough that the backing store still fits in a plain `malloc`, and large enough that UFS has room to breathe.
+UFS有一个最小的实际大小。你可以创建很小的UFS文件系统，但超级块、柱面组和inode表的开销在任何小于几兆字节的东西上都占据明显的空间比例。对于我们的目的，32 MiB是一个舒适的大小：它足够小，后备存储仍然适合普通的`malloc`，也足够大，UFS有呼吸的空间。
 
-Update the size definitions at the top of `myfirst_blk.c`.
+更新`myfirst_blk.c`顶部的尺寸定义。
 
 ```c
 #define MYBLK_SECTOR     512
 #define MYBLK_MEDIASIZE  (32 * 1024 * 1024)   /* 32 MiB */
 ```
 
-Rebuild.
+重新构建。
 
 ```console
 # make clean
@@ -1344,11 +1344,11 @@ Rebuild.
         0               # stripeoffset
 ```
 
-32 MiB is enough.
+32 MiB足够了。
 
-### Formatting with newfs_ufs
+### 使用newfs_ufs格式化
 
-`newfs_ufs` is the standard UFS formatter on FreeBSD. It lays down the super块, the cylinder groups, the root inode, and all the other structures a UFS 文件系统 requires. Let us run it on our 设备.
+`newfs_ufs`是FreeBSD上的标准UFS格式化工具。它放置超级块、柱面组、根inode和UFS文件系统所需的所有其他结构。让我们在我们的设备上运行它。
 
 ```console
 # newfs_ufs /dev/myblk0
@@ -1358,18 +1358,18 @@ super-block backups (for fsck_ffs -b #) at:
 192, 16576, 32960, 49344
 ```
 
-A few things happened under the hood.
+幕后发生了几件事。
 
-`newfs_ufs` opened `/dev/myblk0` for writing, which caused the GEOM access count to tick up. Our strategy function then received a stream of writes: the super块 first, then the cylinder groups, then the empty root directory, then the several backup super块. Each of those writes is a BIO, and each BIO was handled by our 驱动程序.
+`newfs_ufs`为写入打开了`/dev/myblk0`，这导致GEOM访问计数增加。然后我们的策略函数收到了一连串写入：先是超级块，然后是柱面组，然后是空根目录，然后是几个备份超级块。每次写入都是一个BIO，每个BIO都由我们的驱动程序处理。
 
-You can verify that `newfs_ufs` really wrote to the 设备 by reading a few bytes back.
+你可以通过读回几个字节来验证`newfs_ufs`确实写入了设备。
 
 ```console
 # dd if=/dev/myblk0 bs=1 count=16 2>/dev/null | hexdump -C
 00000000  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00
 ```
 
-The first few bytes of a UFS 分区 are deliberately zero because the super块 does not sit at offset zero: it is at offset 65536 (块 128) to leave room for boot 块 and other preambles. Let us peek there.
+UFS分区的前几个字节故意为零，因为超级块不在偏移零处：它在偏移65536（块128）处，以留出启动块和其他前导的空间。让我们看看那里。
 
 ```console
 # dd if=/dev/myblk0 bs=512 count=2 skip=128 2>/dev/null | hexdump -C | head
@@ -1378,11 +1378,11 @@ The first few bytes of a UFS 分区 are deliberately zero because the super块 d
 ...
 ```
 
-You should see non-zero bytes now. That is the super块 that `newfs_ufs` laid down on our backing store.
+你现在应该看到非零字节了。那就是`newfs_ufs`放置在我们后备存储上的超级块。
 
-### Mounting the Filesystem
+### 挂载文件系统
 
-Create a 挂载 point and 挂载 the 文件系统.
+创建一个挂载点并挂载文件系统。
 
 ```console
 # mkdir -p /mnt/myblk
@@ -1394,18 +1394,18 @@ Filesystem    Size    Used   Avail Capacity  Mounted on
 /dev/myblk0    31M    8.0K     28M     0%    /mnt/myblk
 ```
 
-Our pseudo 设备 is now a real 文件系统. Watch the GEOM access counts.
+我们的伪设备现在是一个真正的文件系统了。观察GEOM访问计数。
 
 ```console
 # geom disk list myblk0 | grep Mode
    Mode: r1w1e1
 ```
 
-`r1w1e1` means one reader, one writer, one exclusive holder. The exclusive hold is UFS: it has told GEOM that it is the sole authority over writes to the 设备 until it is 卸载ed.
+`r1w1e1`表示一个读取者、一个写入者、一个独占持有者。独占持有者是UFS：它已经告诉GEOM它是对设备写入的唯一权威，直到被卸载。
 
-### Creating and Reading Files
+### 创建和读取文件
 
-Let us actually use the 文件系统.
+让我们实际使用文件系统。
 
 ```console
 # echo "hello from myblk" > /mnt/myblk/hello.txt
@@ -1416,9 +1416,9 @@ total 4
 hello from myblk
 ```
 
-Note what just happened. The call `echo "hello from myblk" > /mnt/myblk/hello.txt` traveled through the system call layer to `sys_openat`, then to VFS, then to UFS, which opened the root directory's inode, created a new inode for `hello.txt`, allocated a data 块, copied the 17 bytes into the 缓冲区 cache, and scheduled a write-back. The 缓冲区 cache eventually called down to GEOM, which called down to our strategy function, which copied those bytes into our backing store.
+注意刚才发生了什么。调用`echo "hello from myblk" > /mnt/myblk/hello.txt`通过系统调用层传到`sys_openat`，然后到VFS，然后到UFS，UFS打开根目录的inode，为`hello.txt`创建新inode，分配数据块，将17字节复制到缓冲区缓存中，并安排回写。缓冲区缓存最终向下调用GEOM，GEOM向下调用我们的策略函数，策略函数将那些字节复制到我们的后备存储中。
 
-When you then ran `cat`, the request traveled down the same stack. Except, because the data was still in the 缓冲区 cache from the recent write, UFS did not actually need to read from our 设备. The 缓冲区 cache served the read from RAM. If you 卸载 and re挂载, you will see an actual read.
+当你运行`cat`时，请求沿相同的栈向下传输。只不过，由于数据仍然在缓冲区缓存中（来自最近的写入），UFS实际上不需要从我们的设备读取。缓冲区缓存从RAM提供读取服务。如果你卸载并重新挂载，你会看到实际的读取。
 
 ```console
 # umount /mnt/myblk
@@ -1427,11 +1427,11 @@ When you then ran `cat`, the request traveled down the same stack. Except, becau
 hello from myblk
 ```
 
-That second `cat` probably did cause BIO_READ requests to reach our 驱动程序, because the 卸载-and-re挂载 cycle invalidated the 缓冲区 cache for that 文件系统.
+第二次`cat`可能确实导致了BIO_READ请求到达我们的驱动程序，因为卸载和重新挂载的循环使该文件系统的缓冲区缓存失效了。
 
-### Watching the Traffic
+### 观察流量
 
-`gstat` shows us the BIO traffic in real time. Open another terminal and run `gstat -I 1 -f myblk0`. Then in the first terminal, create a big file.
+`gstat`实时显示BIO流量。打开另一个终端并运行`gstat -I 1 -f myblk0`。然后在第一个终端中，创建一个大文件。
 
 ```console
 # dd if=/dev/zero of=/mnt/myblk/big bs=1m count=16
@@ -1440,14 +1440,14 @@ That second `cat` probably did cause BIO_READ requests to reach our 驱动程序
 16777216 bytes transferred in 0.150 secs (112 MB/sec)
 ```
 
-In the `gstat` terminal, you should see a burst of writes, perhaps spread across a second or two depending on how quickly the 缓冲区 cache flushes.
+在`gstat`终端中，你应该看到写入的突发，可能分布在一两秒内，取决于缓冲区缓存刷新的速度。
 
 ```text
  L(q)  ops/s    r/s   kBps   ms/r    w/s   kBps   ms/w    %busy Name
     0    128      0      0    0.0    128  16384    0.0   12.0| myblk0
 ```
 
-These are the 4 KiB or 32 KiB (depending on UFS's 块 size) writes that UFS is issuing to fill the file. We can verify the file's presence.
+这些是UFS为填充文件而发出的4 KiB或32 KiB（取决于UFS的块大小）的写入。我们可以验证文件的存在。
 
 ```console
 # ls -lh /mnt/myblk
@@ -1460,17 +1460,17 @@ total 16460
  16M    /mnt/myblk
 ```
 
-And we can delete it again to watch the BIO_DELETE traffic.
+我们可以再次删除它来观察BIO_DELETE流量。
 
 ```console
 # rm /mnt/myblk/big
 ```
 
-UFS by default does not issue `BIO_DELETE` unless the 文件系统 was 挂载ed with the `trim` option, so on a plain 挂载 you will see almost no BIO traffic on delete: UFS just marks the 块 as free in its own metadata. To see `BIO_DELETE`, we would need to 挂载 with `-o trim`, which we will cover briefly in the labs.
+UFS默认不发出`BIO_DELETE`，除非文件系统以`trim`选项挂载，所以在普通挂载上，你几乎不会在删除时看到BIO流量：UFS只是在自己的元数据中将块标记为空闲。要看到`BIO_DELETE`，我们需要以`-o trim`挂载，我们将在实验中简要介绍。
 
-### Un挂载ing
+### 卸载
 
-Un挂载 the 文件系统 before unloading the module.
+在卸载模块之前卸载文件系统。
 
 ```console
 # umount /mnt/myblk
@@ -1478,11 +1478,11 @@ Un挂载 the 文件系统 before unloading the module.
    Mode: r0w0e0
 ```
 
-The access count dropped back to zero as soon as UFS released its exclusive hold. Our 驱动程序 is now free to be unloaded or further mucked with.
+访问计数在UFS释放其独占持有时立即降回零。我们的驱动程序现在可以自由卸载或进一步操作。
 
-### Attempting to Unload While Mounted
+### 在挂载状态下尝试卸载
 
-What happens if you forget the `u挂载` and try to unload the module?
+如果你忘记`umount`并尝试卸载模块会怎样？
 
 ```console
 # mount /dev/myblk0 /mnt/myblk
@@ -1490,11 +1490,11 @@ What happens if you forget the `u挂载` and try to unload the module?
 kldunload: can't unload file: Device busy
 ```
 
-The 内核 refuses. The `g_disk` subsystem knows that our provider still has an active exclusive holder, and it will not let `disk_destroy` proceed until the hold is released. This is the same mechanism we saw in 第26章 protecting the USB serial 设备 during an active session, lifted to the GEOM layer.
+内核拒绝了。`g_disk`子系统知道我们的提供者仍然有一个活跃的独占持有者，在持有者释放之前它不会让`disk_destroy`继续。这与我们在第26章中看到的保护活跃会话中USB串行设备的机制相同，只是提升到了GEOM层。
 
-This is a safety feature. Unloading the module while a 文件系统 is 挂载ed on the backing 设备 would cause the 内核 to panic on the next BIO: the strategy function would no longer exist, but UFS would still try to call into it.
+这是一个安全特性。在后备设备上挂载文件系统时卸载模块会导致内核在下一次BIO时崩溃：策略函数将不再存在，但UFS仍会尝试调用它。
 
-Un挂载 first, then unload.
+先卸载，再卸载模块。
 
 ```console
 # umount /mnt/myblk
@@ -1503,78 +1503,78 @@ Un挂载 first, then unload.
 # 
 ```
 
-Clean.
+干净。
 
-### A Brief Anatomy of UFS on Top of Our Driver
+### 我们的驱动程序上UFS的简要剖析
 
-Now that we have UFS 挂载ed on our 设备, it is worth pausing to notice what is actually on the backing store. UFS is a well-documented 文件系统, and seeing its structures in place on a 设备 we control is illuminating.
+现在我们已经将UFS挂载到我们的设备上，值得停下来注意后备存储上实际有什么。UFS是一个文档完善的文件系统，在我们可以控制的设备上看到其结构就位是很有启发性的。
 
-The first 65535 bytes of a UFS 文件系统 are reserved for the boot area. On our 设备, these bytes are all zero because `newfs_ufs` does not write a boot 扇区 by default.
+UFS文件系统的前65535字节保留给启动区。在我们的设备上，这些字节全为零，因为`newfs_ufs`默认不写入启动扇区。
 
-At offset 65536 lives the super块. The super块 is a fixed-size structure that describes the geometry of the 文件系统: the 块 size, the fragment size, the number of cylinder groups, the location of the root inode, and many other invariants. `newfs_ufs` writes the super块 first, and it also writes backup copies at predictable offsets in case the primary is corrupted.
+偏移65536处是超级块。超级块是一个固定大小的结构，描述文件系统的几何参数：块大小、片段大小、柱面组数量、根inode的位置和许多其他不变量。`newfs_ufs`首先写入超级块，它还在可预测的偏移处写入备份副本，以防主副本损坏。
 
-Following the super块 come the cylinder groups. Each cylinder group holds inodes, data 块, and metadata for a chunk of the 文件系统's address space. The number and size of cylinder groups depends on the 文件系统 size. Our 32 MiB 文件系统 has four cylinder groups of 8 MiB each.
+超级块之后是柱面组。每个柱面组保存inode、数据块和文件系统地址空间一部分的元数据。柱面组的数量和大小取决于文件系统大小。我们的32 MiB文件系统有四个柱面组，每个8 MiB。
 
-Within each cylinder group sit inode 块. Each inode is a small structure (256 bytes on FreeBSD UFS2) that describes a single file or directory: its type, owner, permissions, timestamps, size, and the 块 addresses of its data.
+每个柱面组内有inode块。每个inode是一个小结构（FreeBSD UFS2上为256字节），描述单个文件或目录：其类型、所有者、权限、时间戳、大小和数据的块地址。
 
-Finally, the data 块 themselves hold file contents. These are allocated from the free-块 map in the cylinder group.
+最后，数据块本身保存文件内容。它们从柱面组的空闲块映射中分配。
 
-When we wrote `"hello from myblk"` into `/mnt/myblk/hello.txt`, the 内核 did roughly the following:
+当我们写入`"hello from myblk"`到`/mnt/myblk/hello.txt`时，内核大致执行了以下操作：
 
-1. VFS asked UFS to create a new file `hello.txt` in the root directory.
-2. UFS allocated an inode from the root cylinder group's inode table.
-3. UFS updated the root directory's inode to include an entry for `hello.txt`.
-4. UFS allocated a data 块 for the file.
-5. UFS wrote the 17 bytes of content into that data 块.
-6. UFS wrote the updated inode back.
-7. UFS wrote the updated directory entry back.
-8. UFS updated its internal bookkeeping.
+1. VFS请求UFS在根目录中创建新文件`hello.txt`。
+2. UFS从根柱面组的inode表中分配了一个inode。
+3. UFS更新根目录的inode以包含`hello.txt`的条目。
+4. UFS为文件分配了一个数据块。
+5. UFS将17字节的内容写入该数据块。
+6. UFS将更新的inode写回。
+7. UFS将更新的目录条目写回。
+8. UFS更新了其内部簿记。
 
-Each of those steps turned into one or more BIOs to our 驱动程序. Most were small writes on metadata 块. The file content itself was one BIO. UFS's Soft Updates feature orders the writes to ensure crash consistency.
+这些步骤中的每一个都转换为到我们驱动程序的一个或多个BIO。大多数是对元数据块的小写入。文件内容本身是一个BIO。UFS的Soft Updates特性对写入进行排序以确保崩溃一致性。
 
-If you want to see these BIOs in action, run your DTrace one-liner from Lab 7 while creating a file. You will see a small burst of writes around the time of the `echo`.
+如果你想看到这些BIO的实际运行，可以在创建文件时运行实验7中的DTrace单行命令。你会在`echo`的时间附近看到一小阵写入。
 
-### How Mount Actually Works
+### 挂载实际上是如何工作的
 
-The `挂载(8)` command is a wrapper around the `挂载(2)` system call. That system call takes a 文件系统 type, a source 设备, and a target 挂载 point, and it asks the 内核 to perform the 挂载.
+`mount(8)`命令是`mount(2)`系统调用的包装器。该系统调用接受一个文件系统类型、一个源设备和一个目标挂载点，然后请求内核执行挂载。
 
-The 内核's response is to find the appropriate 文件系统 code by type (UFS, ZFS, tmpfs, etc.) and to call its 挂载 handler, which in UFS's case is `ufs_挂载` in `/usr/src/sys/ufs/ffs/ffs_vfsops.c`. The 挂载 handler validates the source, opens it as a GEOM consumer, reads the super块, verifies that it is well-formed, allocates an in-memory 挂载 structure, and installs it in the namespace.
+内核的响应是按类型找到相应的文件系统代码（UFS、ZFS、tmpfs等）并调用其挂载处理器，UFS的情况下是`/usr/src/sys/ufs/ffs/ffs_vfsops.c`中的`ufs_mount`。挂载处理器验证源设备，将其作为GEOM消费者打开，读取超级块，验证其格式正确，分配一个内存中的挂载结构，并将其安装到命名空间中。
 
-From our 驱动程序's point of view, none of this is visible. We see a series of BIOs: first a few reads for the super块, then whatever UFS needs to bootstrap its in-memory state. Once 挂载 has succeeded, UFS issues BIOs on its own schedule as the 文件系统 is used.
+从我们驱动程序的角度看，这些都不可见。我们看到的是一系列BIO：先是几次超级块读取，然后是UFS引导其内存状态所需的任何内容。挂载成功后，UFS在使用文件系统时按自己的时间表发出BIO。
 
-If 挂载 fails, UFS reports an error and the 内核's 挂载 code cleans up. The GEOM consumer is 分离ed, the access count drops, and the namespace is left alone. Our 驱动程序 does not need to do anything special on 挂载 failure.
+如果挂载失败，UFS报告错误，内核的挂载代码进行清理。GEOM消费者被分离，访问计数下降，命名空间保持不变。我们的驱动程序不需要在挂载失败时做任何特殊处理。
 
-### The GEOM Character Interface
+### GEOM字符接口
 
-Earlier in the chapter we said that raw access through `/dev/myblk0` goes through "GEOM's character 接口". Here is what that means in more detail.
+在本章前面我们说通过`/dev/myblk0`的原始访问经过"GEOM的字符接口"。以下是更详细的含义。
 
-GEOM publishes a 字符设备 for every provider. This is not the same as a `cdev` created with `make_dev`; it is a specialised path within GEOM that presents a provider as a 字符设备 to `devfs`. The code for this lives in `/usr/src/sys/geom/geom_dev.c`.
+GEOM为每个提供者发布一个字符设备。这与用`make_dev`创建的`cdev`不同；它是GEOM内部的一个专门路径，将提供者作为字符设备呈现给`devfs`。其代码位于`/usr/src/sys/geom/geom_dev.c`。
 
-When a user program opens `/dev/myblk0`, `devfs` routes the `open` to GEOM's character-接口 code, which 附加 a consumer to our provider with the requested access mode. When the program writes, GEOM's character-接口 code builds a BIO and issues it to our provider, which routes it to our strategy function. When the program closes the file 描述符, GEOM 分离 the consumer, releasing the access.
+当用户程序打开`/dev/myblk0`时，`devfs`将`open`路由到GEOM的字符接口代码，该代码以请求的访问模式将一个消费者附加到我们的提供者。当程序写入时，GEOM的字符接口代码构建一个BIO并向我们的提供者发出，后者将其路由到我们的策略函数。当程序关闭文件描述符时，GEOM分离消费者，释放访问权限。
 
-The character-接口 layer translates between `struct uio` (the user-space I/O 描述符) and `struct bio` (the 块-layer I/O 描述符). It splits large user I/O into multiple BIOs when necessary, respecting the `d_maxsize` we specified.
+字符接口层在`struct uio`（用户空间I/O描述符）和`struct bio`（块层I/O描述符）之间转换。必要时，它将大型用户I/O拆分为多个BIO，尊重我们指定的`d_maxsize`。
 
-All of this is invisible to our 驱动程序. We just receive BIOs. But knowing that the character 接口 exists helps you understand why certain user-space operations map to certain BIO patterns, and why `d_maxsize` matters.
+所有这些对我们的驱动程序都是不可见的。我们只是接收BIO。但知道字符接口的存在有助于你理解为什么某些用户空间操作映射到某些BIO模式，以及为什么`d_maxsize`重要。
 
-### What Filesystems Need from a Block Driver
+### 文件系统从块驱动程序中需要什么
 
-Now that we have actually 挂载ed a 文件系统 on our 驱动程序, we can describe more precisely what a 文件系统 requires from a 块 驱动程序 underneath.
+现在我们已经在驱动程序上实际挂载了文件系统，我们可以更精确地描述文件系统从底层块驱动程序需要什么。
 
-A 文件系统 needs **correct reads and writes**. If a write at offset X is followed by a read at offset X, the read must return what the write put there, up to the granularity of the 扇区 size. We guaranteed this with `memcpy` into and out of our backing store.
+文件系统需要**正确的读写**。如果在偏移X处的写入后跟在偏移X处的读取，读取必须返回写入放在那里的内容，精度到扇区大小的粒度。我们通过`memcpy`进出后备存储来保证这一点。
 
-A 文件系统 needs **correct bounds**. The 块 驱动程序 must not accept reads or writes that extend beyond the media size. We check this explicitly in the strategy function.
+文件系统需要**正确的边界**。块驱动程序不能接受超出介质大小的读取或写入。我们在策略函数中显式检查这一点。
 
-A 文件系统 needs **stable media size**. The size of the 设备 must not change under the 文件系统's feet once it is 挂载ed, because 文件系统 metadata encodes offsets and counts that assume a fixed size. Our 驱动程序 holds the media size constant.
+文件系统需要**稳定的介质大小**。设备的大小在文件系统挂载后不能在文件系统脚下改变，因为文件系统元数据编码了假设固定大小的偏移和计数。我们的驱动程序保持介质大小不变。
 
-A 文件系统 needs **crash safety**, to the extent the underlying storage provides it. UFS can recover from an unclean shutdown if the backing store does not lose previously committed writes. Our RAM-backed 驱动程序 loses everything on reboot, but it is at least self-consistent while running. In Section 7, we will introduce options for persistence.
+文件系统需要**崩溃安全**，在底层存储提供的范围内。如果后备存储不丢失先前提交的写入，UFS可以从不干净的关机中恢复。我们的RAM后备驱动程序在重启时丢失所有内容，但至少在运行时是自洽的。在第7节中，我们将介绍持久性选项。
 
-A 文件系统 sometimes needs **flush semantics**. A call to `BIO_FLUSH` should ensure that all previously issued writes are durable before returning. Our RAM-backed 驱动程序 trivially satisfies this, because there is no deferred writeback in its path.
+文件系统有时需要**刷新语义**。对`BIO_FLUSH`的调用应确保在返回之前所有先前发出的写入都是持久的。我们的RAM后备驱动程序平凡地满足这一点，因为它的路径中没有延迟回写。
 
-Finally, a 文件系统 benefits from **fast sequential access**. This is a quality-of-service matter rather than a correctness matter, but our 驱动程序 is fine in this regard because `memcpy` is fast.
+最后，文件系统受益于**快速顺序访问**。这是一个服务质量问题而非正确性问题，但我们的驱动程序在这方面很好，因为`memcpy`很快。
 
-### Raw Access Versus Filesystem Access, Visualised
+### 原始访问与文件系统访问可视化
 
-Let us draw the two access paths side by side, using our actual 驱动程序 as the anchor.
+让我们将两条访问路径并排画出，以我们的实际驱动程序作为锚点。
 
 ```text
 Raw access:                          Filesystem access:
@@ -1607,145 +1607,145 @@ Raw access:                          Filesystem access:
   myblk_strategy (BIO_READ)            myblk_strategy (BIO_READ)
 ```
 
-The last two hops are identical. Our strategy function is called exactly the same way regardless of whether the request came from `dd` or from `cat` on a 挂载ed file. This is the great advantage of living at the 块 layer: we do not need to distinguish between the two paths. The upper layers sort out how to translate file-level operations into 块-level operations, and we deal in 块.
+最后两跳是相同的。无论请求来自`dd`还是来自已挂载文件上的`cat`，我们的策略函数都以完全相同的方式被调用。这是位于块层的巨大优势：我们不需要区分两条路径。上层负责将文件级操作转换为块级操作，而我们只处理块。
 
-### Watching the Request Path with DTrace
+### 使用DTrace观察请求路径
 
-If you want to see the request path explicitly, DTrace can help.
+如果你想显式地看到请求路径，DTrace可以帮助。
 
 ```console
 # dtrace -n 'fbt::myblk_strategy:entry { printf("cmd=%d off=%lld len=%u", \
     args[0]->bio_cmd, args[0]->bio_offset, args[0]->bio_bcount); }'
 ```
 
-With the 探测 running, do something on the 挂载ed 文件系统 in another terminal and watch the BIOs arrive. You will see reads come through in 512-byte to 32 KiB chunks, depending on UFS's 块 size and what operation you performed. Running `dd if=/dev/zero of=/mnt/myblk/test bs=1m count=1` produces a burst of 32 KiB writes.
+在探测运行时，在另一个终端中对已挂载的文件系统做一些操作并观察BIO的到来。你会看到读取以512字节到32 KiB的块到达，取决于UFS的块大小和你执行的操作。运行`dd if=/dev/zero of=/mnt/myblk/test bs=1m count=1`会产生一阵32 KiB的写入。
 
-DTrace is one of the most capable observability tools FreeBSD provides, and it comes alive with storage work because the BIO path is so instrumented. We will use it more in later chapters, but even a one-liner like the above is enough to make the abstract path concrete.
+DTrace是FreeBSD提供的最强可观测性工具之一，它在存储工作中活跃起来是因为BIO路径被充分仪器化。我们将在后面的章节中更多地使用它，但即使像上面那样的单行命令也足以使抽象路径具体化。
 
 ### 总结 Section 6
 
-Our pseudo 块设备 now plays the full role of a storage 设备: raw access through `dd`, 文件系统 access through UFS, and safe coexistence with 内核 卸载 protections. The strategy function we wrote in Section 5 did not need to change at all for UFS to work, because UFS and `dd` share the same 块-layer protocol below them.
+我们的伪块设备现在扮演存储设备的完整角色：通过`dd`的原始访问，通过UFS的文件系统访问，以及与内核卸载保护的安全共存。我们在第5节编写的策略函数完全不需要改变就能让UFS工作，因为UFS和`dd`在它们下面共享相同的块层协议。
 
-We have also seen the end-to-end flow: VFS at the top, UFS just below, the 缓冲区 cache between, GEOM below that, and our 驱动程序 at the very bottom. That flow is the same for every 存储驱动程序 in FreeBSD. You now know how to occupy the bottom of it.
+我们也看到了端到端的流程：VFS在顶部，UFS紧随其后，中间是缓冲区缓存，下面是GEOM，最底部是我们的驱动程序。这个流程对FreeBSD中的每个存储驱动程序都是相同的。你现在知道如何占据它的底部了。
 
-In the next section, we will turn our attention to persistence. A RAM-backed 设备 is convenient for testing but loses its contents on every reload. We will discuss options for making the backing store persistent, what trade-offs each option brings, and how to add one of them to our 驱动程序.
+在下一节中，我们将把注意力转向持久性。RAM后备设备便于测试，但在每次重新加载时都会丢失内容。我们将讨论使后备存储持久化的选项，每个选项带来什么权衡，以及如何将其中之一添加到我们的驱动程序中。
 
-## Section 7: Persistence and In-Memory Backing Stores
+## 第7节：持久性与内存后备存储
 
-Our 驱动程序 is self-consistent while running. If you write a byte at offset X, you can read it back at offset X moments later. If you create a file on the 挂载ed 文件系统, you can read it again until you 卸载 or unload. This is already useful for testing and for short-lived workloads.
+我们的驱动程序在运行时是自洽的。如果你在偏移X处写入一个字节，稍后你可以在偏移X处读回它。如果你在已挂载的文件系统上创建一个文件，你可以再次读取它直到你卸载或卸载模块。这对于测试和短期工作负载已经很有用了。
 
-It is not, however, durable. Unload the module and the backing 缓冲区 is freed. Reboot the machine and every byte vanishes. For a teaching 驱动程序 that is arguably a feature: it reboots clean, it does not accumulate state across runs, and it cannot silently corrupt a previous session. But understanding the options for making storage persistent is essential for real 驱动程序 work, so this section walks through the major choices and then shows how to add the simplest kind of persistence to our 驱动程序.
+然而，它不是持久的。卸载模块后，后备缓冲区被释放。重启机器后，每个字节都消失了。对于教学驱动程序来说，这可以说是一个特性：它重启后是干净的，不会跨运行累积状态，也不会静默损坏之前的会话。但理解使存储持久化的选项对于真正的驱动程序工作是至关重要的，因此本节遍历主要选择，然后展示如何向我们的驱动程序添加最简单的持久性。
 
-### Why Persistence Is Hard
+### 持久性为何困难
 
-Storage persistence is not just about where the bytes live. It is about three intertwined properties.
+存储持久性不仅仅是字节存储在哪里的问题。它涉及三个相互关联的属性。
 
-**Durability** means that once a write returns, the data is safe against a crash. On a hardware disk, durability is typically coupled with the disk's own cache policy: the write hits the drive's internal 缓冲区, then the platter, then the drive reports completion. `BIO_FLUSH` is the hook that gives 文件系统 a way to demand flush-to-platter semantics.
+**持久性**意味着一旦写入返回，数据在崩溃时是安全的。在硬件磁盘上，持久性通常与磁盘自身的缓存策略相关联：写入到达驱动器的内部缓冲区，然后是盘片，然后驱动器报告完成。`BIO_FLUSH`是给文件系统一种要求刷新到盘片语义的钩子。
 
-**Consistency** means that a read at offset X returns the most recent write at offset X, not some earlier or partial version. Consistency is usually provided by the hardware or by careful locking in the 驱动程序.
+**一致性**意味着在偏移X处的读取返回在偏移X处的最近写入，而不是某个更早或部分的版本。一致性通常由硬件或驱动程序中的仔细锁定提供。
 
-**Crash safety** means that after an unclean shutdown, the state of the storage is usable. Either it reflects all committed writes, or it reflects a well-defined prefix of them. UFS has SU+J (Soft Updates with Journaling) to help recover from a crash; ZFS uses copy-on-write and atomic transactions. All of that relies on a 块 layer that behaves predictably.
+**崩溃安全**意味着在不干净关机后，存储的状态是可用的。它要么反映所有提交的写入，要么反映它们的良好定义的前缀。UFS有SU+J（带日志的Soft Updates）来帮助从崩溃中恢复；ZFS使用写时复制和原子事务。所有这些都依赖于可预测地行为的块层。
 
-For a teaching 驱动程序, we do not need to address all three with full rigour. We need to understand what the choices are and to pick one that fits our goals.
+对于教学驱动程序，我们不需要以完全的严谨性来解决所有三个问题。我们需要理解选择是什么，并选择一个适合我们目标的。
 
-### The Options
+### 各种选择
 
-There are four common ways to back a pseudo 块设备.
+有四种常见的伪块设备后备方式。
 
-**In-memory backing (our current choice)**. Fast, simple, lost on reload. Implemented as a `malloc`'d 缓冲区. Scales poorly past a few MiB because it demands contiguous 内核 memory.
+**内存后备（我们目前的选择）**。快速、简单，重新加载时丢失。实现为`malloc`分配的缓冲区。在几MiB以上扩展性差，因为它需要连续的内核内存。
 
-**Page-at-a-time in-memory backing**. `md(4)` uses this internally for large memory disks. Instead of one big 缓冲区, the 驱动程序 keeps an indirection table of page-sized allocations and fills them on demand. This scales to very large sizes and avoids wasting memory on sparse regions, but it is more complex.
+**逐页内存后备**。`md(4)`在内部将其用于大型内存磁盘。不是一个大的缓冲区，驱动程序维护一个页大小分配的间接表并按需填充。这可以扩展到非常大的大小，避免在稀疏区域浪费内存，但更复杂。
 
-**Vnode backing**. The 驱动程序 opens a file in the host 文件系统 and uses it as the backing store. `mdconfig -t vnode` is the classic example. Reads and writes go through the host's 文件系统, which gives persistence at the cost of speed and of a dependency on the host 文件系统's correctness. This is how FreeBSD often boots from a memory-disk image embedded in the 内核: the 内核 loads the image, presents it as `/dev/md0`, and the root 文件系统 runs on it.
+**Vnode后备**。驱动程序在主机文件系统中打开一个文件并将其用作后备存储。`mdconfig -t vnode`是经典示例。读写经过主机的文件系统，以速度和对主机文件系统正确性的依赖为代价提供持久性。这是FreeBSD经常从嵌入内核的内存磁盘镜像启动的方式：内核加载镜像，将其呈现为`/dev/md0`，根文件系统在其上运行。
 
-**Swap backing**. The 驱动程序 uses a swap-backed VM object as the backing store. `mdconfig -t swap` uses this. It provides persistence across reboots only to the extent that swap is persistent, which on most systems it is not. But it provides a very large sparse address space without consuming physical memory until touched, which is useful for scratch storage.
+**交换后备**。驱动程序使用交换支持的VM对象作为后备存储。`mdconfig -t swap`使用这种方式。它只在交换是持久性的程度上提供跨重启的持久性，而在大多数系统上交换不是持久性的。但它提供了非常大的稀疏地址空间，而不在被触及之前消耗物理内存，这对于临时存储很有用。
 
-For this chapter, we will stick with the in-memory option. It is the simplest, it is enough for the labs, and it demonstrates every other concept cleanly. We will discuss how to switch to vnode-backed storage as an exercise, and we will point to `md(4)` for those who want to see a full-featured implementation.
+在本章中，我们将坚持使用内存选项。它是最简单的，对实验足够了，并且干净地演示了每个其他概念。我们将讨论如何切换到vnode后备存储作为练习，并向那些想看到完整功能实现的人指出`md(4)`。
 
-### Saving and Restoring the Buffer
+### 保存和恢复缓冲区
 
-If we want our 设备 to remember its contents across reloads, without changing the backing approach, we can save the 缓冲区 to a file on unload and restore it on load. This is not elegant, but it is direct, and it illustrates the contract clearly: the 驱动程序 is responsible for getting the backing bytes into memory before the first BIO arrives and for flushing them to safety before the last BIO leaves.
+如果我们想让设备在重新加载后记住其内容，而不改变后备方式，我们可以在卸载时将缓冲区保存到文件中，在加载时恢复它。这不够优雅，但很直接，它清楚地说明了契约：驱动程序负责在第一个BIO到达之前将后备字节放入内存，并在最后一个BIO离开之前将它们刷新到安全的地方。
 
-In our case, the mechanics would look like this.
+在我们的情况下，机制大致如下。
 
-On module load, after allocating the backing 缓冲区 but before calling `disk_create`, optionally read a file on the host 文件系统 into the 缓冲区. On module unload, after `disk_destroy` has completed, optionally write the 缓冲区 back to that file.
+在模块加载时，在分配后备缓冲区之后但在调用`disk_create`之前，可选择将主机文件系统上的文件读入缓冲区。在模块卸载时，在`disk_destroy`完成后，可选择将缓冲区写回该文件。
 
-Doing this cleanly from inside the 内核 requires the vnode API. The 内核 provides `vn_open`, `vn_rdwr`, and `vn_close`, which together let a module read or write a path in the host 文件系统. These are not APIs we want to use casually, because they are not designed for high-throughput I/O from inside a 驱动程序, and because they run on whatever 文件系统 happens to be 挂载ed at that path, which is not always safe. But for a one-shot save and restore at load and unload time, they are acceptable.
+从内核内部干净地执行此操作需要vnode API。内核提供`vn_open`、`vn_rdwr`和`vn_close`，它们共同让模块读取或写入主机文件系统中的路径。这些不是我们想随意使用的API，因为它们不是为驱动程序内部的高吞吐量I/O设计的，而且它们运行在挂载到该路径的任何文件系统上，这并不总是安全的。但对于加载和卸载时的一次性保存和恢复，它们是可以接受的。
 
-For teaching purposes we will not implement this. The correct way to persist a 块设备's contents is to use a real backing store, not to snapshot a RAM 缓冲区. But understanding the technique helps clarify the contract.
+出于教学目的，我们不会实现这个。持久化块设备内容的正确方式是使用真正的后备存储，而不是快照RAM缓冲区。但理解该技术有助于澄清契约。
 
-### The Contract With Upper Layers
+### 与上层的契约
 
-Whatever your backing store, the contract with upper layers is precise.
+无论你的后备存储是什么，与上层的契约都是精确的。
 
-**A BIO_WRITE that completes successfully must be visible to all subsequent BIO_READ requests**, regardless of 缓冲区ing layers. Our in-memory 驱动程序 satisfies this because `memcpy` is the visible effect.
+**成功完成的BIO_WRITE必须对所有后续的BIO_READ请求可见**，无论中间有什么缓冲层。我们的内存驱动程序满足这一点，因为`memcpy`是可见的效果。
 
-**A BIO_FLUSH that completes successfully must have made all previously successful BIO_WRITE requests durable**. Our in-memory 驱动程序 satisfies this trivially because there is no lower layer between our `memcpy` and the backing memory; all writes are "durable" in the sense we can offer. A real disk 驱动程序 typically issues a cache-flush command to the hardware in response to `BIO_FLUSH`.
+**成功完成的BIO_FLUSH必须使所有先前成功的BIO_WRITE请求变为持久的**。我们的内存驱动程序平凡地满足这一点，因为我们的`memcpy`和后备内存之间没有更低的层；在我们能提供的意义上，所有写入都是"持久的"。真正的磁盘驱动程序通常在响应`BIO_FLUSH`时向硬件发出缓存刷新命令。
 
-**A BIO_DELETE may discard data but must not corrupt neighbouring 块**. Our in-memory 驱动程序 satisfies this by zeroing only the requested range. A real SSD 驱动程序 might issue TRIM for the range; a real HDD 驱动程序 typically has no hardware support for DELETE and can safely ignore it.
+**BIO_DELETE可以丢弃数据但不能损坏相邻块**。我们的内存驱动程序通过仅清零请求的范围来满足这一点。真正的SSD驱动程序可能为该范围发出TRIM；真正的HDD驱动程序通常没有DELETE的硬件支持，可以安全地忽略它。
 
-**A BIO_READ must return the media contents or an error; it must not return uninitialised memory, stale cached data from a different transaction, or random bytes**. Our in-memory 驱动程序 satisfies this by zeroing the backing on allocation and writing only through the strategy function.
+**BIO_READ必须返回介质内容或错误；它不能返回未初始化的内存、来自不同事务的陈旧缓存数据或随机字节**。我们的内存驱动程序通过在分配时清零后备存储并仅通过策略函数写入来满足这一点。
 
-If you keep these four rules in mind as you design a new 驱动程序, you will avoid nearly every correctness bug that plagues new 存储驱动程序.
+如果你在设计新驱动程序时牢记这四条规则，你将避免困扰新存储驱动程序的几乎每一个正确性bug。
 
-### What md(4) Does Differently
+### md(4)的不同之处
 
-The 内核's `md(4)` 驱动程序 is a mature, multi-type memory-disk 驱动程序. It supports five backing types: malloc, preload, swap, vnode, and null. Each type has its own strategy function that knows how to serve requests for that backing kind. Reading `/usr/src/sys/dev/md/md.c` is a valuable follow-up to this chapter because it shows how a real 驱动程序 handles all of the cases we are glossing over.
+内核的`md(4)`驱动程序是一个成熟的、多类型的内存磁盘驱动程序。它支持五种后备类型：malloc、preload、swap、vnode和null。每种类型都有自己的策略函数，知道如何为该后备类型服务请求。阅读`/usr/src/sys/dev/md/md.c`是本章有价值的后续，因为它展示了真正的驱动程序如何处理我们略过的所有情况。
 
-A few specific things `md(4)` does that we do not.
+`md(4)`做了一些我们没有做的具体事情。
 
-`md(4)` uses a dedicated worker thread per unit. Incoming BIOs are queued on the softc, and the worker thread dequeues them one by one and dispatches them. This lets the strategy function be very simple: just enqueue and signal. It also isolates 块ing work in the worker, which matters for the vnode backing type because `vn_rdwr` can 块.
+`md(4)`为每个单元使用一个专用的工作线程。传入的BIO被排队在softc上，工作线程逐个出列并分派它们。这使得策略函数非常简单：只需入队和发信号。它还将阻塞工作隔离在工作线程中，这对vnode后备类型很重要，因为`vn_rdwr`可能阻塞。
 
-`md(4)` uses `DEV_BSHIFT` (which is `9`, meaning 512-byte 扇区) consistently and uses integer arithmetic rather than floating point to handle offsets. This is standard practice in the 块 layer.
+`md(4)`一致使用`DEV_BSHIFT`（即`9`，表示512字节扇区），并使用整数算术而不是浮点来处理偏移。这是块层的标准做法。
 
-`md(4)` has a full ioctl surface for configuration. The `mdconfig` tool talks to the 内核 through ioctls on `/dev/mdctl`, and the 驱动程序 supports `MDIOCATTACH`, `MDIOCDETACH`, `MDIOCQUERY`, and `MDIOCRESIZE`. We have not implemented anything comparable, because for our pseudo 设备 the configuration is baked in at compile time.
+`md(4)`有一个完整的ioctl配置接口。`mdconfig`工具通过`/dev/mdctl`上的ioctl与内核通信，驱动程序支持`MDIOCATTACH`、`MDIOCDETACH`、`MDIOCQUERY`和`MDIOCRESIZE`。我们没有实现任何类似的东西，因为对于我们的伪设备，配置是在编译时固定的。
 
-`md(4)` uses `DISK_VERSION_06`, which is the current version of the `g_disk` ABI. Our 驱动程序 does the same, through the `DISK_VERSION` macro.
+`md(4)`使用`DISK_VERSION_06`，这是`g_disk` ABI的当前版本。我们的驱动程序通过`DISK_VERSION`宏做同样的事情。
 
-If you want to see a production-quality pseudo 块设备, `md(4)` is the canonical reference. Almost everything we are building would, in a real 驱动程序, grow to resemble the shape of `md(4)` over time.
+如果你想看到一个生产质量的伪块设备，`md(4)`是规范的参考。我们正在构建的几乎所有东西，在真正的驱动程序中，最终都会随着时间推移而类似于`md(4)`的形状。
 
-### A Note on Swap-Backed Memory
+### 关于交换支持的内存的说明
 
-One technique worth naming, even though we will not use it here, is swap-backed memory. Instead of a `malloc`'d 缓冲区, a 驱动程序 can allocate a VM object of type `OBJT_SWAP` and map pages from it on demand. The pages are backed by swap space, which means they can be paged out when the system is under memory pressure and paged back in when touched. This gives you a very large, sparse, on-demand backing store that behaves like RAM when hot and like disk when cold.
+有一种值得提及的技术，尽管我们不会在这里使用它，那就是交换支持的内存。不是用`malloc`分配的缓冲区，驱动程序可以分配一个`OBJT_SWAP`类型的VM对象并按需映射页面。页面由交换空间支持，这意味着它们可以在系统内存压力大时被换出，在被触及 时换入。这给你一个非常大的、稀疏的、按需的后备存储，热时行为像RAM，冷时行为像磁盘。
 
-`md(4)` uses exactly this approach for its swap-backed memory disks. The swap VM object acts as a backing store that the 内核's VM subsystem manages for us, without the 驱动程序 needing to allocate contiguous physical memory up front. The `OBJT_SWAP` object can hold terabytes of addressable space on a system with only gigabytes of RAM, because most of that space is never touched.
+`md(4)`正是对其交换支持的内存磁盘使用了这种方法。交换VM对象作为后备存储，由内核的VM子系统为我们管理，驱动程序不需要预先分配连续的物理内存。`OBJT_SWAP`对象可以持有TB级的可寻址空间，而系统上只有GB级的RAM，因为该空间的大部分从未被触及。
 
-If you ever need to prototype a 块设备 larger than a few hundred MiB, swap-backed memory is likely the right tool. The VM API for it lives in `/usr/src/sys/vm/swap_pager.c`. Reading it is not light work, but it is educational.
+如果你需要原型化一个大于几百MiB的块设备，交换支持的内存可能是正确的工具。它的VM API位于`/usr/src/sys/vm/swap_pager.c`。阅读它不是轻松的工作，但很有教育意义。
 
-### A Note on Preloaded Images
+### 关于预加载镜像的说明
 
-FreeBSD has a mechanism called **preloaded modules**. During boot, the loader can bring in not just 内核模块 but also arbitrary data blobs, which are made available to the 内核 through `preload_fetch_addr` and `preload_fetch_size`. `md(4)` uses this to expose preloaded 文件系统 images as `/dev/md*` 设备, which is one of the ways FreeBSD can boot entirely from a memory-disk root.
+FreeBSD有一个称为**预加载模块**的机制。在启动期间，加载器不仅可以引入内核模块，还可以引入任意数据blob，这些通过`preload_fetch_addr`和`preload_fetch_size`对内核可用。`md(4)`使用它将预加载的文件系统镜像暴露为`/dev/md*`设备，这是FreeBSD可以完全从内存磁盘根启动的方式之一。
 
-Preloaded images are not a persistence mechanism per se. They are a way to ship data with a 内核模块. But they are often used in embedded systems, where the root 文件系统 is too precious to live on writable storage.
+预加载镜像本身不是持久化机制。它们是与内核模块一起发布数据的一种方式。但它们经常用于嵌入式系统，其中根文件系统太珍贵而不能存储在可写存储上。
 
-### A Small Extension: Persisting Across Module Reloads Only
+### 小扩展：仅在模块重新加载时持久化
 
-We are not going to add real persistence to our 驱动程序, but this is a good moment to talk about what it would actually take to make a backing store survive a module unload and reload within the same 内核 boot. The naive first idea, and one that beginners reach for quickly, is to put the backing pointer in a file-scope `static` variable and simply not free it in the unload handler. Let us look at why that does not work and what does.
+我们不会向驱动程序添加真正的持久性，但现在是讨论后备存储在同一内核启动中存活模块卸载和重新加载实际需要什么的好时机。最天真的第一个想法（也是初学者很快会想到的）是将后备指针放在文件作用域的`static`变量中，并在卸载处理器中简单地不释放它。让我们看看为什么这不起作用以及什么才起作用。
 
-Consider this sketch:
+考虑这个草拟：
 
 ```c
 static uint8_t *myblk_persistent_backing;  /* wishful thinking */
 static size_t   myblk_persistent_size;
 ```
 
-The intuition is that if we allocate `myblk_persistent_backing` on first 附加 and refuse to free it on 分离, a subsequent `kldload` will see the pointer still set and reuse the 缓冲区. The problem is that this picture ignores how a KLD is actually loaded and unloaded. When `kldunload` removes our module, the 内核 reclaims the module's text, data, and `.bss` segments along with the rest of its image. Our static pointer does not persist in some stable location; it vanishes together with the module. When `kldload` then brings the module back, the 内核 allocates a fresh `.bss`, zeroes it, and our pointer starts life as `NULL` again. The `malloc`'d 缓冲区 we allocated on the previous 附加 is still sitting in 内核 heap somewhere, but we have lost every handle to it. We have leaked it.
+直觉是，如果我们在首次附加时分配`myblk_persistent_backing`并拒绝在分离时释放它，随后的`kldload`将看到指针仍然设置并重用缓冲区。问题在于，这个图景忽略了KLD实际是如何加载和卸载的。当`kldunload`移除我们的模块时，内核回收模块的文本、数据和`.bss`段以及其映像的其余部分。我们的静态指针不会持久存在于某个稳定的位置；它与模块一起消失。当`kldload`随后带回模块时，内核分配一个新的`.bss`，将其清零，我们的指针从`NULL`开始。我们在上次附加时分配的`malloc`缓冲区仍然在内核堆中某处，但我们已经丢失了对它的每个句柄。我们泄漏了它。
 
-`SYSUNINIT` does not help either, because in a KLD context it fires on `kldunload`, not on some later "final tear-down" event. Registering a `SYSUNINIT` to free the 缓冲区 would free it on every unload, which is exactly what we did not want. There is no KLD-level hook that means "the module file is really, truly being removed from memory for good" distinct from plain `kldunload`.
+`SYSUNINIT`也没有帮助，因为在KLD上下文中，它在`kldunload`时触发，而不是在某个稍后的"最终拆解"事件上。注册`SYSUNINIT`来释放缓冲区会在每次卸载时释放它，这正是我们不想要的。没有KLD级别的钩子意味着"模块文件真的、确实要从内存中永久移除"与普通的`kldunload`不同。
 
-Two techniques actually achieve cross-unload persistence, and both are used by `md(4)` in production. The first is a **file-backed store**. Instead of allocating a 内核 heap 缓冲区, the 驱动程序 opens a file on an existing 文件系统 using the vnode I/O API (`VOP_READ`, `VOP_WRITE`, and the vnode reference taken via `vn_open`) and services BIOs by reading from and writing to that file. On unload, the 驱动程序 closes the file; on the next load, it re-opens it. The persistence is real because it lives in a 文件系统 whose state is independent of our module. This is exactly what `md -t vnode -f /path/to/image.img` does, and you can study it in `/usr/src/sys/dev/md/md.c`.
+两种技术实际实现了跨卸载持久性，两者都被`md(4)`在生产中使用。第一种是**文件后备存储**。驱动程序不是分配内核堆缓冲区，而是使用vnode I/O API（`VOP_READ`、`VOP_WRITE`和通过`vn_open`获取的vnode引用）在现有文件系统上打开一个文件，并通过读取和写入该文件来服务BIO。卸载时，驱动程序关闭文件；下次加载时，它重新打开。持久性是真实的，因为它存在于状态独立于我们模块的文件系统中。这正是`md -t vnode -f /path/to/image.img`所做的，你可以在`/usr/src/sys/dev/md/md.c`中研究它。
 
-The second technique is a **swap-backed store**. The 驱动程序 allocates a VM object of type `OBJT_SWAP`, as we mentioned earlier, and maps pages from it on demand. The pager lives at a higher level of the 内核 than our module, so the object can outlive any particular `kldunload` as long as something else holds a reference to it. In practice, `md(4)` uses this for swap-backed memory disks, and it ties the object's lifetime to a 内核-wide list rather than to a module instance.
+第二种技术是**交换后备存储**。驱动程序分配一个`OBJT_SWAP`类型的VM对象，正如我们之前提到的，并按需从中映射页面。分页器位于比我们模块更高的内核级别，因此只要其他东西持有对它的引用，对象就可以比任何特定的`kldunload`存活更久。在实践中，`md(4)`将此用于交换支持的内存磁盘，它将对象的生命周期绑定到内核范围的列表而不是模块实例。
 
-For our teaching 驱动程序, we will not implement either technique. The point of showing this discussion is to make sure you understand why the apparent shortcut does not work, so that you do not spend an afternoon debugging a 缓冲区 that keeps disappearing after `kldunload`. If you want to experiment with real cross-unload persistence, read `md.c` carefully, particularly the `MD_VNODE` and `MD_SWAP` branches in `mdstart_vnode` and `mdstart_swap`, and note how the backing objects are 附加ed to the per-unit `struct md_s` rather than to module-scope globals. That structural choice is what makes those backends work across module lifecycles.
+对于我们的教学驱动程序，我们不会实现任何一种技术。展示这个讨论的目的是确保你理解为什么明显的快捷方式不起作用，这样你就不会花一下午时间调试在`kldunload`后不断消失的缓冲区。如果你想实验真正的跨卸载持久性，仔细阅读`md.c`，特别是`mdstart_vnode`和`mdstart_swap`中的`MD_VNODE`和`MD_SWAP`分支，并注意后备对象是如何附加到每单元的`struct md_s`而不是模块范围的全局变量。这个结构选择正是让那些后端跨模块生命周期工作的原因。
 
-### Sketching a Vnode-Backed Strategy Function
+### 草拟vnode后备的策略函数
 
-To make the earlier discussion concrete, let us sketch what a vnode-backed strategy function looks like at the code level. We are not going to drop this into our teaching 驱动程序. We are showing it so that you can see what the "real" solution involves and can recognise the same shape in `md.c` when you read it.
+为了让前面的讨论更具体，让我们草拟一个vnode后备的策略函数在代码级别是什么样子的。我们不会将这个放入教学驱动程序中。我们展示它是为了让你能看到"真正的"解决方案涉及什么，并在阅读`md.c`时能认出相同的形状。
 
-The idea is that the per-unit softc holds a reference to a vnode, acquired at 附加 time from a path provided by the administrator. The strategy function translates each BIO into a `vn_rdwr` call at the right offset and completes the BIO based on the result.
+其理念是，每单元的softc持有对vnode的引用，在附加时从管理员提供的路径获取。策略函数将每个BIO转换为正确偏移处的`vn_rdwr`调用，并根据结果完成BIO。
 
-Attach acquires the vnode:
+附加获取vnode：
 
 ```c
 static int
@@ -1768,9 +1768,9 @@ myblk_vnode_attach(struct myblk_softc *sc, const char *path)
 }
 ```
 
-`vn_open` looks up the path and returns a locked, referenced vnode. We then drop the lock, because we want to hold a reference without 块ing other operations, and we hang the vnode pointer on our softc. We also keep a reference to the credentials we will use for subsequent I/O.
+`vn_open`查找路径并返回一个锁定的、已引用的vnode。然后我们释放锁，因为我们想在不阻塞其他操作的情况下持有引用，并将vnode指针挂在我们的softc上。我们还保留了用于后续I/O的凭据引用。
 
-The strategy function services BIOs against the vnode:
+策略函数对vnode服务BIO：
 
 ```c
 static void
@@ -1816,9 +1816,9 @@ myblk_vnode_strategy(struct bio *bp)
 }
 ```
 
-Notice how the shape of the switch is identical to our RAM-backed strategy function. The only difference is what the case arms do: instead of `memcpy` into a 缓冲区, we call `vn_rdwr` against a vnode. The 框架 above us, GEOM and the 缓冲区 cache, does not know or care which backend we chose.
+注意switch的形状与我们RAM后备策略函数完全相同。唯一的区别是case分支做什么：不是对缓冲区进行`memcpy`，而是对vnode调用`vn_rdwr`。我们上面的框架，GEOM和缓冲区缓存，不知道也不关心我们选择了哪个后端。
 
-Detach releases the vnode:
+分离释放vnode：
 
 ```c
 static void
@@ -1837,86 +1837,86 @@ myblk_vnode_detach(struct myblk_softc *sc)
 }
 ```
 
-`vn_close` releases the vnode reference and, if this was the last reference, allows the vnode to be recycled. The credentials are reference-counted the same way.
+`vn_close`释放vnode引用，如果这是最后一个引用，则允许vnode被回收。凭据以相同的方式引用计数。
 
-Why does this give us cross-unload persistence? Because the state we care about, namely the contents of the backing store, lives in a file on a real 文件系统 whose lifetime is completely independent of our module. When we call `kldunload`, the vnode reference is released and the file closes; its contents on disk are preserved by the 文件系统. When we call `kldload` again and 附加, we open the file again and pick up where we left off.
+为什么这给我们跨卸载持久性？因为我们关心的状态（即后备存储的内容）存在于真正文件系统上的文件中，其生命周期完全独立于我们的模块。当我们调用`kldunload`时，vnode引用被释放，文件关闭；其在磁盘上的内容由文件系统保留。当我们再次调用`kldload`并附加时，我们再次打开文件并从上次离开的地方继续。
 
-The remaining subtleties are substantial. Error paths need to release the vnode if `vn_open` succeeded but subsequent registration steps failed. Calls to `vn_rdwr` can sleep, which means the strategy function must not be called from a context that disallows sleeping; in practice, that is why `md(4)` uses a dedicated worker thread for vnode-backed units. Reading a file can race with the administrator modifying it, so production 驱动程序 usually take measures to detect concurrent external changes. `VOP_FSYNC` is not free, so a fast path that batches writes before flushing is typical. And the vnode lifetime itself is bound by VFS's own reference counting, which interacts with 卸载 of the containing 文件系统.
+剩余的微妙之处相当多。如果`vn_open`成功但后续的注册步骤失败，错误路径需要释放vnode。对`vn_rdwr`的调用可能睡眠，这意味着策略函数不能从不允许睡眠的上下文调用；在实践中，这就是为什么`md(4)`为vnode后备单元使用专用工作线程。读取文件可能与管理员修改它竞争，所以生产驱动程序通常采取措施检测并发的外部更改。`VOP_FSYNC`不是免费的，因此在刷新之前批量写入的快速路径是典型的。而且vnode生命周期本身受VFS自己的引用计数约束，这与其所含文件系统的卸载交互。
 
-We will not add this to our teaching 驱动程序, but when you read `mdstart_vnode` in `/usr/src/sys/dev/md/md.c`, you will recognise every one of these issues handled carefully and explicitly.
+我们不会将此添加到教学驱动程序中，但当你阅读`/usr/src/sys/dev/md/md.c`中的`mdstart_vnode`时，你会认出这些问题中每一个都被仔细和明确地处理了。
 
 ### 总结 Section 7
 
-Persistence is a layered concept. Durability, consistency, and crash safety are all part of what a real storage 设备 must provide, and different backing stores give different subsets of those guarantees. For a teaching 驱动程序, a `malloc`'d in-memory 缓冲区 is a reasonable choice, and we can add "survives module reload" semantics without much code by 分离ing the 缓冲区 from the per-instance softc.
+持久性是一个分层概念。持久性、一致性和崩溃安全都是真正的存储设备必须提供的，不同的后备存储提供这些保证的不同子集。对于教学驱动程序，`malloc`分配的内存缓冲区是合理的选择，我们可以通过将缓冲区与每实例的softc分离来添加"存活模块重新加载"的语义，而不需要太多代码。
 
-For production, the techniques grow more elaborate: page-at-a-time allocation, swap-backed VM objects, vnode-backed files, dedicated worker threads, BIO_FLUSH coordination, and careful handling of every error path. `md(4)` is the canonical example in the FreeBSD tree, and reading it is strongly recommended.
+对于生产环境，技术变得更加精细：逐页分配、交换支持的VM对象、vnode支持的文件、专用工作线程、BIO_FLUSH协调和每个错误路径的仔细处理。`md(4)`是FreeBSD源码树中的规范示例，强烈建议阅读。
 
-In the next section, we will focus on the teardown path in detail. We will look at how GEOM coordinates 卸载, 分离, and cleanup; how access counts gate the module unload path; and how our 驱动程序 should behave when something goes wrong mid-teardown. Storage 卸载 bugs are some of the nastier kinds of 内核 bug, and careful attention here pays off for the rest of your 驱动程序-writing career.
+在下一节中，我们将详细关注拆解路径。我们将了解GEOM如何协调卸载、分离和清理；访问计数如何门控模块卸载路径；以及我们的驱动程序在拆解中途出现问题时应该如何表现。存储卸载bug是一些更棘手的内核bug类型，在这里的仔细关注将在你的驱动程序编写生涯的剩余时间里得到回报。
 
-## Section 8: Safe Un挂载 and Cleanup
+## 第8节：安全卸载与清理
 
-Storage 驱动程序 handle the end of their lives with more care than character 驱动程序 because the stakes are higher. When a character 驱动程序 unloads cleanly, the worst thing that can happen is that an open session is torn down, possibly with some bytes in flight being lost. When a 存储驱动程序 unloads while a 文件系统 is 挂载ed on it, the worst thing that can happen is that the 内核 panics on the next BIO, and the user is left with a 文件系统 image that may or may not have been in a consistent state when the 驱动程序 disappeared.
+存储驱动程序比字符驱动程序更加小心地处理其生命终结，因为风险更高。当字符驱动程序干净地卸载时，可能发生的最坏情况是一个打开的会话被拆除，可能有一些飞行中的字节丢失。当存储驱动程序在文件系统挂载在其上时卸载，可能发生的最坏情况是内核在下一次BIO时崩溃，用户留下一个在驱动程序消失时可能或可能未处于一致状态的文件系统镜像。
 
-The good news is that the 内核's defences make the catastrophic case almost impossible if you use `g_disk` correctly. The refusal of `kldunload` to proceed when the GEOM access count is non-zero, which we saw in Section 6, is the primary safety net. But it is not the only concern. This section walks through the teardown path in detail so that you know what to expect, what to implement, and what to test.
+好消息是，如果你正确使用`g_disk`，内核的防御措施使灾难性情况几乎不可能发生。`kldunload`在GEOM访问计数非零时拒绝继续，这是我们在第6节中看到的主要安全网。但这不是唯一的关注点。本节详细遍历拆解路径，以便你知道该期望什么、该实现什么和该测试什么。
 
-### The Expected Teardown Sequence
+### 预期的拆卸序列
 
-The nominal sequence of events when a user wants to remove a 存储驱动程序 is as follows.
+当用户想要移除存储驱动程序时，事件的名义序列如下。
 
-1. The user 卸载s every 文件系统 that is 挂载ed on the 设备.
-2. The user closes any program that has `/dev/myblk0` open for raw access.
-3. The user calls `kldunload`.
-4. The module unload function calls `disk_destroy`.
-5. `disk_destroy` queues the provider for withering, which runs on the GEOM event thread.
-6. The withering process waits for any in-flight BIO to complete.
-7. The provider is removed from the GEOM topology and the `/dev` node is destroyed.
-8. `disk_destroy` returns control to our unload function.
-9. Our unload function frees the softc and the backing store.
-10. The 内核 unloads the module.
+1. 用户卸载挂载在设备上的每个文件系统。
+2. 用户关闭任何以原始访问方式打开`/dev/myblk0`的程序。
+3. 用户调用`kldunload`。
+4. 模块卸载函数调用`disk_destroy`。
+5. `disk_destroy`将提供者排队等待枯萎，枯萎在GEOM事件线程上运行。
+6. 枯萎过程等待任何飞行中的BIO完成。
+7. 提供者从GEOM拓扑中移除，`/dev`节点被销毁。
+8. `disk_destroy`将控制返回给我们的卸载函数。
+9. 我们的卸载函数释放softc和后备存储。
+10. 内核卸载模块。
 
-Each step has its own failure modes. Let us walk through them.
+每个步骤都有自己的故障模式。让我们逐个遍历它们。
 
 ### Step 1: Un挂载
 
-The user runs `u挂载 /mnt/myblk`. VFS asks UFS to flush the 文件系统, which causes the 缓冲区 cache to issue any pending writes to GEOM, which routes them to our 驱动程序. Our strategy function services the writes and calls `biodone`. The 缓冲区 cache reports success; UFS disposes of its in-memory state; VFS releases the 挂载 point. The consumer that UFS had 附加ed to our provider is 分离ed. The access count drops.
+用户运行`umount /mnt/myblk`。VFS请求UFS刷新文件系统，这导致缓冲区缓存向GEOM发出任何待处理的写入，GEOM将它们路由到我们的驱动程序。我们的策略函数服务写入并调用`biodone`。缓冲区缓存报告成功；UFS处置其内存状态；VFS释放挂载点。UFS附加到我们提供者的消费者被分离。访问计数下降。
 
-Our 驱动程序 does not do anything special during this phase. We keep handling BIOs as they arrive until UFS stops issuing them.
+我们的驱动程序在此阶段不做任何特殊处理。我们继续按到达顺序处理BIO，直到UFS停止发出它们。
 
-### Step 2: Close Raw Access
+### 步骤2：关闭原始访问
 
-The user ensures that no program holds `/dev/myblk0` open. If a `dd` is running, kill it. If a shell has the 设备 open via `exec`, close that. Until every open handle is released, the access count will remain non-zero on at least one of the `r`, `w`, or `e` counters.
+用户确保没有程序持有打开的`/dev/myblk0`。如果有`dd`在运行，杀掉它。如果有shell通过`exec`打开了设备，关闭它。在释放每个打开句柄之前，访问计数将在`r`、`w`或`e`计数器中的至少一个上保持非零。
 
-Again, our 驱动程序 does nothing special. The `close(2)` calls on `/dev/myblk0` propagate through `devfs`, through GEOM's character-设备 integration, and release their access. No BIOs are issued for close.
+同样，我们的驱动程序不做任何特殊处理。对`/dev/myblk0`的`close(2)`调用通过`devfs`、通过GEOM的字符设备集成传播，并释放它们的访问权限。关闭不会发出BIO。
 
-### Step 3: kldunload
+### 步骤3：kldunload
 
-The user runs `kldunload myblk`. The 内核's module subsystem calls our unload function with `MOD_UNLOAD`. Our unload function calls `myblk_分离_unit`, which calls `disk_destroy`.
+用户运行`kldunload myblk`。内核的模块子系统以`MOD_UNLOAD`调用我们的卸载函数。我们的卸载函数调用`myblk_detach_unit`，后者调用`disk_destroy`。
 
-At this point, our 驱动程序 is about to stop existing. We must not be holding any lock that could 块, we must not be 块ing on our own worker threads (we do not have any in this design), and we must not be issuing new BIOs. Nothing we do now should cause new work for the 内核.
+此时，我们的驱动程序即将停止存在。我们不能持有任何可能阻塞的锁，我们不能在我们自己的工作线程上阻塞（我们在本设计中没有任何工作线程），我们不能发出新的BIO。我们现在做的任何事情都不应该给内核带来新的工作。
 
-### Step 4: disk_destroy
+### 步骤4：disk_destroy
 
-`disk_destroy` is the point of no return. Reading the source in `/usr/src/sys/geom/geom_disk.c` reveals that it does three things:
+`disk_destroy`是不可逆的点。阅读`/usr/src/sys/geom/geom_disk.c`中的源码发现它做三件事：
 
-1. It sets a flag on the disk to indicate that destruction is in progress.
-2. It queues a GEOM event that will actually dismantle the provider.
-3. It waits for the event to complete.
+1. 它在磁盘上设置一个标志，表示销毁正在进行。
+2. 它排队一个GEOM事件，该事件将实际拆解提供者。
+3. 它等待事件完成。
 
-While we are waiting, the GEOM event thread picks up the event and walks our geom. If the access counts are zero, the event proceeds. If they are not zero, the event panics with a message about trying to destroy a disk that still has users.
+在我们等待期间，GEOM事件线程拾取事件并遍历我们的geom。如果访问计数为零，事件继续。如果它们不为零，事件会以试图销毁仍有用户的磁盘的消息崩溃。
 
-This is where the importance of Step 1 and Step 2 shows up. If you skip them and try to unload while the 文件系统 is 挂载ed, the panic happens here. Fortunately, `g_disk` refuses to reach the panic because the module subsystem has already refused the unload earlier, but if you were to bypass the module subsystem and call `disk_destroy` directly from some other context, this is the check that protects the 内核.
+这就是步骤1和步骤2的重要性所在。如果你跳过它们并试图在文件系统挂载时卸载，崩溃就在这里发生。幸运的是，`g_disk`拒绝到达崩溃，因为模块子系统已经早些时候拒绝了卸载，但如果你绕过模块子系统并从其他上下文直接调用`disk_destroy`，这就是保护内核的检查。
 
-### Step 5 to 7: Withering
+### 步骤5到7：枯萎
 
-The GEOM withering process is how providers are removed from the topology. It works by marking the provider as withered, cancelling any BIOs that were queued but not yet delivered, waiting for any in-flight BIOs to complete, removing the provider from the geom's provider list, and then removing the geom from the class. The `/dev` node is removed as part of this.
+GEOM枯萎过程是提供者从拓扑中移除的方式。它的工作方式是将提供者标记为枯萎、取消已排队但尚未交付的任何BIO、等待任何飞行中的BIO完成、从geom的提供者列表中移除提供者，然后从类中移除geom。`/dev`节点作为此过程的一部分被移除。
 
-During withering, the strategy function may still be called for BIOs that were in flight before the withering started. Our strategy function will handle them normally, because our 驱动程序 does not know or care that withering is in progress. The 框架 is responsible for ensuring no new BIOs are issued after the point of no return.
+在枯萎期间，对于在枯萎开始之前飞行中的BIO，策略函数仍然可能被调用。我们的策略函数将正常处理它们，因为我们的驱动程序不知道也不关心枯萎正在进行。框架负责确保在不可逆点之后不会发出新的BIO。
 
-If our 驱动程序 had worker threads, a queue, or other internal state, we would need to coordinate with withering carefully. `md(4)` is a good example of a 驱动程序 that does this: its worker thread watches for a shutdown flag and drains its queue before exiting. Since our 驱动程序 is entirely synchronous and single-threaded, we do not have this complication.
+如果我们的驱动程序有工作线程、队列或其他内部状态，我们需要小心地与枯萎协调。`md(4)`是一个这样做的驱动程序的好例子：它的工作线程监视关闭标志并在退出前排干其队列。由于我们的驱动程序完全是同步和单线程的，我们没有这个复杂性。
 
-### Step 8 to 9: Free Resources
+### 步骤8到9：释放资源
 
-Once `disk_destroy` returns, the disk is gone, the provider is gone, and no more BIOs will arrive. It is safe to free the backing store and destroy the 互斥锁.
+`disk_destroy` 返回后，磁盘已消失，提供者已消失，不会再有 BIO 到达。此时可以安全地释放后备存储并销毁互斥锁。
 
 ```c
 static void
@@ -1935,7 +1935,7 @@ myblk_detach_unit(struct myblk_softc *sc)
 }
 ```
 
-Our unload function then destroys the 互斥锁 and frees the softc.
+然后我们的卸载函数销毁互斥锁并释放 softc。
 
 ```c
 case MOD_UNLOAD:
@@ -1950,29 +1950,29 @@ case MOD_UNLOAD:
     return (0);
 ```
 
-### Step 10: Module Unload
+### 步骤10：模块卸载
 
-The module subsystem unloads the `.ko` file. At this point, the 驱动程序 is gone. Any attempt to reference the module by name will fail until the user loads it again.
+模块子系统卸载 `.ko` 文件。此时驱动程序已经消失。任何通过名称引用该模块的尝试都将失败，直到用户再次加载它。
 
-### What Can Go Wrong
+### 可能出现的问题
 
-The happy path is smooth. Let us enumerate the unhappy paths and how to recognise them.
+正常路径是顺利的。让我们列举异常路径以及如何识别它们。
 
-**`kldunload` returns `Device 总线y`**. The 文件系统 is still 挂载ed, or a program still has the raw 设备 open. Un挂载 and close, then retry. This is the most common failure, and it is benign.
+**`kldunload` 返回 `Device busy`**。文件系统仍然挂载着，或者某个程序仍然打开了原始设备。卸载并关闭，然后重试。这是最常见的失败，而且是良性的。
 
-**`disk_destroy` never returns**. Something is holding a BIO that will never complete, and the withering process is waiting for it. In practice, this happens if your strategy function fails to call `biodone` on some path. Look at `procstat -kk` of the `g_event` thread; if it is stuck in `g_waitfor_event`, you have a leaked BIO. The fix is in your strategy function: ensure that every path calls `biodone` exactly once.
+**`disk_destroy` 永不返回**。某个东西持有一个永远不会完成的 BIO，枯萎过程正在等待它。实际上，如果你的策略函数在某条路径上没有调用 `biodone`，就会发生这种情况。查看 `g_event` 线程的 `procstat -kk` 输出；如果它卡在 `g_waitfor_event` 中，你就有一个泄漏的 BIO。修复方法在策略函数中：确保每条路径恰好调用 `biodone` 一次。
 
-**The 内核 panics with "g_disk: destroy with open count"**. Your 驱动程序 called `disk_destroy` while the provider still had users. This should not happen if you only call `disk_destroy` from the module unload path, because the module subsystem refuses to unload 总线y modules. But if you call `disk_destroy` in response to some other event, you must check the access count yourself or tolerate the panic.
+**内核崩溃并显示 "g_disk: destroy with open count"**。你的驱动程序在提供者仍然有用户时调用了 `disk_destroy`。如果你只从模块卸载路径调用 `disk_destroy`，这不应该发生，因为模块子系统拒绝卸载繁忙的模块。但如果你响应其他事件调用 `disk_destroy`，你必须自己检查访问计数或容忍崩溃。
 
-**The 内核 panics with "Freeing free memory"**. Your 驱动程序 tried to free the softc or the backing store twice. Check your 分离 path for race conditions or for early exits that free and then fall through to free again.
+**内核崩溃并显示 "Freeing free memory"**。你的驱动程序试图释放 softc 或后备存储两次。检查你的分离路径是否存在竞争条件或提前退出后又继续执行到释放代码。
 
-**The 内核 panics with "Page fault in 内核 mode"**. Something is dereferencing a freed pointer, most often the backing store after it has been freed while a BIO is still in flight. The fix is to ensure `disk_destroy` completes before freeing anything the strategy function touches.
+**内核崩溃并显示 "Page fault in kernel mode"**。某个东西正在解引用已释放的指针，最常见的是后备存储释放后仍有 BIO 在飞行中。修复方法是确保 `disk_destroy` 在释放策略函数触及的任何内容之前完成。
 
-### The d_gone Callback
+### d_gone回调
 
-There is one more piece of the teardown story worth discussing. The `d_gone` 回调 is invoked when something other than our 驱动程序 decides the disk should go away. The canonical example is hotplug removal: a user yanks a USB drive, the USB stack tells the 存储驱动程序 the 设备 is gone, and the 存储驱动程序 wants to tell GEOM to tear down the disk as gracefully as possible even though I/O will start failing.
+拆卸故事中还有一部分值得讨论。`d_gone` 回调在我们的驱动程序之外的其他东西决定磁盘应该消失时被调用。典型的例子是热插拔移除：用户拔出 USB 驱动器，USB 栈告诉存储驱动程序设备已消失，存储驱动程序希望尽可能优雅地告诉 GEOM 拆卸磁盘，即使 I/O 将开始失败。
 
-Our 驱动程序 is a pseudo 设备; it does not have a physical disappearance event. But 注册ing a `d_gone` 回调 costs nothing and makes the 驱动程序 slightly more ro总线t against future extensions.
+我们的驱动程序是一个伪设备；它没有物理消失事件。但注册 `d_gone` 回调没有任何代价，并且使驱动程序在将来的扩展中更加健壮。
 
 ```c
 static void
@@ -1983,35 +1983,35 @@ myblk_disk_gone(struct disk *dp)
 }
 ```
 
-Register it with `sc->disk->d_gone = myblk_disk_gone;` before `disk_create`. The function is called by `g_disk` when `disk_gone` is invoked. You can trigger it manually during development by calling `disk_gone(sc->disk)` from a test path; you will not usually call it yourself in a pseudo 驱动程序.
+在 `disk_create` 之前用 `sc->disk->d_gone = myblk_disk_gone;` 注册它。该函数在 `disk_gone` 被调用时由 `g_disk` 调用。你可以在开发过程中通过从测试路径调用 `disk_gone(sc->disk)` 来手动触发它；在伪驱动程序中你通常不会自己调用它。
 
-Note the difference between `disk_gone` and `disk_destroy`. `disk_gone` says "this disk has physically vanished; stop accepting I/O and mark the provider as error-returning". `disk_destroy` says "remove this disk from the topology and free its resources". In a 热拔出 path, `disk_gone` is usually called first (by the 总线 驱动程序, when it notices the 设备 is gone), and `disk_destroy` is called later (by the module unload, or by the 总线 驱动程序's 分离 function). Between the two calls, the disk still exists in the topology but all I/O fails. Our 驱动程序 does not implement this dual-phase teardown; a USB mass 存储驱动程序, for instance, must.
+注意 `disk_gone` 和 `disk_destroy` 之间的区别。`disk_gone` 表示"这个磁盘已经物理消失了；停止接受 I/O 并将提供者标记为返回错误"。`disk_destroy` 表示"从拓扑中移除这个磁盘并释放其资源"。在热拔出路径中，`disk_gone` 通常首先被调用（由总线驱动程序调用，当它注意到设备已消失时），`disk_destroy` 稍后被调用（由模块卸载或总线驱动程序的分离函数调用）。在两次调用之间，磁盘仍然存在于拓扑中，但所有 I/O 都会失败。我们的驱动程序不实现这种双阶段拆卸；例如 USB 大容量存储驱动程序则必须实现。
 
-### Testing the Teardown
+### 测试拆卸
 
-Teardown bugs are often discovered not by careful testing but by accident, months later, when some user finds an unusual sequence that triggers them. It is much cheaper to test teardown deliberately.
+拆卸 bug 通常不是通过仔细测试发现的，而是几个月后某个用户找到了触发它们的异常序列时偶然发现的。主动测试拆卸的成本要低得多。
 
-Here are the tests I recommend running on any new 存储驱动程序.
+以下是我建议在任何新存储驱动程序上运行的测试。
 
-**Basic unload**. Load, format, 挂载, 卸载, unload. Verify `dmesg` shows our load and unload messages and nothing else. Repeat ten times to catch slow leaks.
+**基本卸载**。加载、格式化、挂载、卸载文件系统、卸载模块。验证 `dmesg` 显示我们的加载和卸载消息且没有其他内容。重复十次以捕获缓慢的泄漏。
 
-**Unload without 卸载**. Load, format, 挂载. Attempt to unload. Verify the unload is refused. Un挂载, then unload. Verify no lingering state.
+**未卸载文件系统时的卸载**。加载、格式化、挂载。尝试卸载模块。验证卸载被拒绝。卸载文件系统，然后卸载模块。验证没有残留状态。
 
-**Unload under load**. Load, format, 挂载, start a `dd if=/dev/urandom of=/mnt/myblk/stress bs=1m count=64`. While the `dd` runs, attempt to unload. Verify the unload is refused. Wait for `dd` to finish. Un挂载. Unload. Verify clean.
+**负载下的卸载**。加载、格式化、挂载，启动 `dd if=/dev/urandom of=/mnt/myblk/stress bs=1m count=64`。在 `dd` 运行时，尝试卸载模块。验证卸载被拒绝。等待 `dd` 完成。卸载文件系统。卸载模块。验证清理干净。
 
-**Unload with raw open**. Load. In another terminal, run `cat > /dev/myblk0` to hold the 设备 open. Attempt to unload. Verify the unload is refused. Kill the cat. Unload. Verify clean.
+**原始设备打开时的卸载**。加载。在另一个终端中，运行 `cat > /dev/myblk0` 以保持设备打开。尝试卸载模块。验证卸载被拒绝。终止 cat。卸载模块。验证清理干净。
 
-**Reload stress**. Load, unload, load, unload in a tight loop for a minute. If `vmstat -m` or `zpool list` starts showing leaks, investigate.
+**重载压力测试**。在紧凑循环中加载、卸载、加载、卸载一分钟。如果 `vmstat -m` 或 `zpool list` 开始显示泄漏，进行调查。
 
-**Panic on corruption**. This one is harder: deliberately corrupt the module state via a 内核 debugger hook and verify that the 驱动程序 does not silently return bad data. In practice, few beginners do this, and it is not required for a teaching 驱动程序.
+**损坏时的崩溃**。这个比较难：通过内核调试器钩子故意损坏模块状态，并验证驱动程序不会静默返回错误数据。实际上，很少有初学者这样做，教学驱动程序也不需要这样做。
 
-If all of these pass, you have a reasonably ro总线t teardown. Continue testing every change that touches the unload path.
+如果所有这些都通过了，你就有了一个相当健壮的拆卸。每次更改涉及卸载路径的代码时都要继续测试。
 
-### The Idempotency Principle
+### 幂等性原则
 
-A good teardown path is idempotent: calling it twice is no worse than calling it once. This matters because error paths during 附加 may call the teardown before everything has been set up.
+一个好的拆卸路径是幂等的：调用两次不会比调用一次更糟。这很重要，因为附加过程中的错误路径可能在所有内容设置完成之前就调用拆卸。
 
-Write your teardown to check whether each resource was actually allocated before trying to free it.
+编写拆卸函数时，在尝试释放每个资源之前检查它是否确实被分配了。
 
 ```c
 static void
@@ -2033,41 +2033,41 @@ myblk_detach_unit(struct myblk_softc *sc)
 }
 ```
 
-Setting pointers to `NULL` after freeing them is a small discipline that pays off. It makes double-free mistakes obvious at runtime (they become no-ops rather than corruptions), and it makes the teardown function idempotent.
+释放指针后将它们设置为 `NULL` 是一个值得坚持的小习惯。它使双重释放错误在运行时变得明显（它们变成空操作而不是内存损坏），并且使拆卸函数幂等。
 
-### Ordering and Reverse Order
+### 顺序与逆序
 
-A general teardown guideline: free resources in the reverse order of allocation. If 附加 goes `A -> B -> C`, 分离 should go `C -> B -> A`.
+一个通用的拆卸准则：按分配的逆序释放资源。如果附加按 `A -> B -> C` 的顺序进行，分离应该按 `C -> B -> A` 的顺序进行。
 
-In our 驱动程序, 附加 goes `malloc backing -> disk_alloc -> disk_create`. So 分离 goes `disk_destroy -> free backing`. We skip freeing the disk because `disk_destroy` frees it for us.
+在我们的驱动程序中，附加按 `malloc backing -> disk_alloc -> disk_create` 的顺序进行。所以分离按 `disk_destroy -> free backing` 的顺序进行。我们跳过释放磁盘，因为 `disk_destroy` 会替我们释放它。
 
-This pattern is universal. Every well-written teardown function reverses the allocation order. When you see a 分离 that runs in the same order as the 附加, suspect a bug.
+这个模式是通用的。每个编写良好的拆卸函数都逆转分配顺序。当你看到一个分离函数按照与附加相同的顺序运行时，要怀疑存在 bug。
 
-### The MOD_QUIESCE Event
+### MOD_QUIESCE事件
 
-There is a third module event we have not mentioned: `MOD_QUIESCE`. It is delivered before `MOD_UNLOAD` and gives the module a chance to refuse unload if the 驱动程序 is in a state where unloading is unsafe.
+还有一个我们没有提到的第三个模块事件：`MOD_QUIESCE`。它在 `MOD_UNLOAD` 之前传递，给模块一个在驱动程序处于不安全卸载状态时拒绝卸载的机会。
 
-For most 驱动程序, the GEOM access-count check is sufficient, and implementing `MOD_QUIESCE` is not needed. But if your 驱动程序 has internal state that makes unload unsafe independent of GEOM (for example, a cache that must be flushed), `MOD_QUIESCE` is where you decline the unload by returning an error.
+对于大多数驱动程序，GEOM 访问计数检查已经足够，不需要实现 `MOD_QUIESCE`。但如果你的驱动程序有独立于 GEOM 的内部状态使卸载不安全（例如，必须刷新的缓存），`MOD_QUIESCE` 就是你通过返回错误来拒绝卸载的地方。
 
-Our 驱动程序 does not implement `MOD_QUIESCE`. The default behaviour is to accept it silently, which is the right thing for us.
+我们的驱动程序不实现 `MOD_QUIESCE`。默认行为是静默接受它，这对我们来说是正确的。
 
-### Coordinating With Future Worker Threads
+### 与未来工作线程的协调
 
-If you ever add a worker thread to the 驱动程序, the teardown contract changes. You must:
+如果你将来给驱动程序添加工作线程，拆卸契约就会改变。你必须：
 
-1. Signal the worker to stop, typically by setting a flag on the softc.
-2. Wake the worker if it is sleeping, typically with `wakeup` or `cv_signal`.
-3. Wait for the worker to exit, typically with a `kthread_exit`-visible termination flag.
-4. Only then call `disk_destroy`.
-5. Free the softc and backing store.
+1. 通知工作线程停止，通常通过在 softc 上设置一个标志。
+2. 如果工作线程正在睡眠，唤醒它，通常用 `wakeup` 或 `cv_signal`。
+3. 等待工作线程退出，通常通过 `kthread_exit` 可见的终止标志。
+4. 然后才能调用 `disk_destroy`。
+5. 释放 softc 和后备存储。
 
-Skipping any of these steps is a recipe for a panic. The usual failure mode is that the worker thread is sleeping inside a function that touches softc state after the softc has been freed. `md(4)` handles this carefully, and it is worth reading its worker shutdown code if you plan to add a worker to your own 驱动程序.
+跳过这些步骤中的任何一个都会导致崩溃。常见的失败模式是工作线程在 softc 被释放后仍在访问 softc 状态的函数中睡眠。`md(4)` 仔细地处理了这个问题，如果你计划在自己的驱动程序中添加工作线程，值得阅读它的 worker 关闭代码。
 
-### Cleanup in the Face of Errors
+### 错误情况下的清理
 
-One last concern: what happens if 附加 fails partway through? Suppose `disk_alloc` succeeds, but `disk_create` fails. Or suppose we add code that validates the 扇区 size and rejects invalid configurations before calling `disk_create`.
+最后一个关注点：如果附加中途失败怎么办？假设 `disk_alloc` 成功了，但 `disk_create` 失败了。或者假设我们添加了验证扇区大小并在调用 `disk_create` 之前拒绝无效配置的代码。
 
-The pattern for handling this is "single cleanup path". Write the 附加 function so that any failure jumps to a cleanup label that unwinds everything allocated so far, in reverse order.
+处理这种情况的模式是"单一清理路径"。编写附加函数，使任何失败都跳转到一个清理标签，该标签按逆序展开到目前为止分配的所有内容。
 
 ```c
 static int
@@ -2101,25 +2101,25 @@ myblk_attach_unit(struct myblk_softc *sc)
 }
 ```
 
-For our 驱动程序, `disk_alloc` does not fail in practice (it uses `M_WAITOK`), and `disk_create` is a `void` function that queues the real work asynchronously. So the 附加 path cannot really fail. But the pattern of preparing a single cleanup label is worth keeping in mind for 驱动程序 that grow more complex.
+对于我们的驱动程序，`disk_alloc` 实际上不会失败（它使用 `M_WAITOK`），`disk_create` 是一个异步排队实际工作的 `void` 函数。所以附加路径实际上不会失败。但准备单一清理标签的模式对于变得更复杂的驱动程序来说是值得记住的。
 
 ### 总结 Section 8
 
-Safe 卸载 and cleanup for a 存储驱动程序 comes down to a small set of disciplines: handle every BIO through to `biodone`, never hold locks during completion 回调, only call `disk_destroy` when the provider has no users, free resources in the reverse order of allocation, and test the teardown under load. The `g_disk` 框架 handles most of the hard parts; your job is to avoid breaking its invariants.
+存储驱动程序的安全卸载和清理归结为一小组准则：确保每个 BIO 都通过 `biodone` 完成、在完成回调期间不持有锁、只在提供者没有用户时才调用 `disk_destroy`、按分配的逆序释放资源、以及在负载下测试拆卸。`g_disk` 框架处理了大部分困难的部分；你的工作是避免破坏其不变量。
 
-In the next section, we will step back from the teardown specifics and talk about how to let a 存储驱动程序 grow. We will discuss refactoring, versioning, how to support multiple units cleanly, and what to do when the 驱动程序 becomes more than a single source file. These are the habits that turn a teaching 驱动程序 into something you can keep evolving for a long time.
+在下一节中，我们将从拆卸细节中退一步，讨论如何让存储驱动程序成长。我们将讨论重构、版本管理、如何干净地支持多个单元，以及当驱动程序变得超过单个源文件时该怎么做。这些是将教学驱动程序变成你可以长期持续演进的东西的习惯。
 
-## Section 9: Refactoring and Versioning
+## 第9节：重构与版本管理
 
-Our 驱动程序 fits in a single file and solves one problem: it exposes a single pseudo disk of a fixed size, backed by RAM. That is a useful teaching starting point, but it is not where most real 驱动程序 live. A real 存储驱动程序 evolves. It grows ioctl support. It grows multi-unit support. It grows tunable parameters. It splits into multiple source files. Its on-disk representation, if any, goes through format changes. It accumulates a history of compatibility choices.
+我们的驱动程序适合放在一个文件中，解决一个问题：它暴露一个由 RAM 支持的固定大小的伪磁盘。这是一个有用的教学起点，但不是大多数真实驱动程序所处的位置。一个真实的存储驱动程序会演进。它增长 ioctl 支持。它增长多单元支持。它增长可调参数。它拆分为多个源文件。它的磁盘上表示（如果有的话）经历格式变更。它积累了兼容性选择的历史。
 
-This section is about the habits that let a 驱动程序 grow gracefully. We will not add massive new features here; the companion labs and challenges will do that. What we will do is survey the refactoring and versioning questions that arise as any 存储驱动程序 matures, and we will point to the FreeBSD-idiomatic answers for each.
+本节是关于让驱动程序优雅成长的习惯。我们不会在这里添加大量新功能；配套的实验和挑战会做这些。我们要做的是调查任何存储驱动程序成熟时出现的重构和版本管理问题，并指出每种情况的 FreeBSD 惯用答案。
 
-### Multi-Unit Support
+### 多单元支持
 
-Right now our 驱动程序 supports exactly one instance, hardcoded as `myblk0`. If you wanted two or three pseudo disks, the current code would need duplicate softcs and duplicate disk registrations. Real 驱动程序 solve this with a data structure that can hold any number of units.
+目前我们的驱动程序只支持一个实例，硬编码为 `myblk0`。如果你想要两个或三个伪磁盘，当前代码需要重复的 softc 和重复的磁盘注册。真实的驱动程序用可以容纳任意数量单元的数据结构来解决这个问题。
 
-The idiomatic FreeBSD pattern is a global list protected by a lock. The softc is allocated per unit and linked into the list. A loader-time tunable or an ioctl-driven call decides when to create a new unit. The unit number is allocated from a `unrhdr` (unique number range) allocator.
+惯用的 FreeBSD 模式是一个由锁保护的全局列表。softc 按单元分配并链接到列表中。加载器时可调参数或 ioctl 驱动的调用决定何时创建新单元。单元号从 `unrhdr`（唯一编号范围）分配器分配。
 
 A sketch:
 
@@ -2179,59 +2179,59 @@ myblk_destroy_unit(struct myblk_softc *sc)
 }
 ```
 
-The loader initialises the unit pool once, and then individual units can be created and destroyed independently. This is very close to the pattern `md(4)` uses.
+加载器一次性初始化单元池，然后各个单元可以独立创建和销毁。这与 `md(4)` 使用的模式非常接近。
 
-We will not refactor our chapter 驱动程序 to multi-unit yet, because the added code distracts from the other teaching goals. But you should know that this is where the 驱动程序 would go. Supporting multiple units is one of the first extensions real 驱动程序 need.
+我们还不会将本章的驱动程序重构为多单元，因为添加的代码会分散其他教学目标的注意力。但你应该知道这是驱动程序未来发展的方向。支持多个单元是真实驱动程序首先需要的扩展之一。
 
-### Ioctl Surface for Runtime Configuration
+### 运行时配置的ioctl接口
 
-With multiple units comes the need to configure them at runtime. You do not want to compile a new module every time you want a second unit or a different size. The answer is an ioctl on a control 设备.
+有了多个单元，就需要在运行时配置它们。你不想每次想要第二个单元或不同大小时都编译一个新模块。答案是在控制设备上使用 ioctl。
 
-`md(4)` follows this pattern. There is a single `/dev/mdctl` 设备, and `mdconfig(8)` talks to it with ioctls. `MDIOCATTACH` creates a new unit with a specified size and backing type. `MDIOCDETACH` destroys a unit. `MDIOCQUERY` reads the state of a unit. `MDIOCRESIZE` changes the size.
+`md(4)` 遵循这种模式。有一个单独的 `/dev/mdctl` 设备，`mdconfig(8)` 通过 ioctl 与它通信。`MDIOCATTACH` 创建一个具有指定大小和后备类型的新单元。`MDIOCDETACH` 销毁一个单元。`MDIOCQUERY` 读取单元的状态。`MDIOCRESIZE` 更改大小。
 
-For a 驱动程序 of any sophistication, this is the right place to invest. Compile-time configuration via macros is fine for a toy. Runtime configuration via ioctls is what real administrators want.
+对于任何复杂度的驱动程序，这是值得投入的地方。通过宏进行编译时配置对玩具来说没问题。通过 ioctl 进行运行时配置是真正的管理员想要的。
 
-If you were to add this to our 驱动程序, you would:
+如果你要将其添加到我们的驱动程序中，你会：
 
-1. Create a `cdev` for the control 设备 using `make_dev`.
-2. Implement `d_ioctl` on the cdev, switching on a small set of ioctl numbers you define.
-3. Write a user-space tool that issues the ioctls.
+1. 使用 `make_dev` 为控制设备创建一个 `cdev`。
+2. 在 cdev 上实现 `d_ioctl`，根据你定义的一小组 ioctl 号进行分发。
+3. 编写一个发出 ioctl 的用户空间工具。
 
-This is a substantial addition, which is why we mention it here without implementing it. 第28章 and later chapters will revisit this pattern.
+这是一个相当大的添加，这就是为什么我们在这里提到它但没有实现它。第28章及后续章节将重新讨论这种模式。
 
-### Splitting the Source File
+### 拆分源文件
 
-At some point, a 驱动程序 outgrows a single file. The usual decomposition for a FreeBSD 存储驱动程序 is roughly:
+在某个时候，驱动程序会超出单个文件的范围。FreeBSD 存储驱动程序通常的分解大致如下：
 
-- `驱动程序_name.c`: the public module entry, ioctl dispatch, and 附加/分离 wiring.
-- `驱动程序_name_bio.c`: the strategy function and BIO path.
-- `驱动程序_name_backing.c`: the backing-store implementation.
-- `驱动程序_name_util.c`: small helpers, validation, and debug printing.
-- `驱动程序_name.h`: the shared header that declares the softc, enums, and function prototypes.
+- `driver_name.c`：公共模块入口、ioctl 分发和附加/分离连接。
+- `driver_name_bio.c`：策略函数和 BIO 路径。
+- `driver_name_backing.c`：后备存储实现。
+- `driver_name_util.c`：小型辅助函数、验证和调试打印。
+- `driver_name.h`：声明 softc、枚举和函数原型的共享头文件。
 
-The Makefile is updated to list all of them in `SRCS`, and the build system handles the rest. This is the shape of `md(4)`, of `ata(4)`, and of most substantial 驱动程序 in the tree.
+Makefile 被更新以在 `SRCS` 中列出所有文件，构建系统处理其余部分。这是 `md(4)`、`ata(4)` 以及源代码树中大多数重要驱动程序的形态。
 
-We will keep our 驱动程序 in one file for the chapter. But when the challenges or your own extensions push it past, say, 500 lines, a decomposition like the above is the right move. Readers who want a concrete example should look at `/usr/src/sys/dev/ata/`, which splits a complex 驱动程序 across many files along clean lines.
+我们将为本章的驱动程序保持一个文件。但当挑战或你自己的扩展将其推过，比如说，500 行时，像上面那样的分解是正确的选择。想要具体示例的读者应该查看 `/usr/src/sys/dev/ata/`，它沿着清晰的界限将复杂的驱动程序拆分到多个文件中。
 
-### Versioning
+### 版本管理
 
-A 存储驱动程序 has several kinds of versioning to care about.
+存储驱动程序有几种版本管理需要关心。
 
-**Module version**, declared with `MODULE_VERSION(myblk, 1)`. This is a monotonically increasing integer that other modules or userland tools can check. Bump it whenever you change the module's external behaviour in a way that cannot be detected from the code.
+**模块版本**，用 `MODULE_VERSION(myblk, 1)` 声明。这是一个单调递增的整数，其他模块或用户空间工具可以检查。每当你以无法从代码检测到的方式更改模块的外部行为时，就递增它。
 
-**Disk ABI version**, encoded in `DISK_VERSION`. This is the version of the `g_disk` 接口 that your 驱动程序 was compiled against. If the 内核's `g_disk` changes incompatibly, it increments the version, and a 驱动程序 compiled against the old version will fail to 注册. You do not set this directly; you pass the `DISK_VERSION` macro through `disk_create`, and it picks up whatever version the compile found in `geom_disk.h`. You should recompile 驱动程序 against the 内核 you are targeting.
+**磁盘 ABI 版本**，编码在 `DISK_VERSION` 中。这是你的驱动程序编译时所针对的 `g_disk` 接口版本。如果内核的 `g_disk` 发生不兼容更改，它会递增版本，针对旧版本编译的驱动程序将注册失败。你不直接设置它；你通过 `disk_create` 传递 `DISK_VERSION` 宏，它会获取编译时在 `geom_disk.h` 中找到的任何版本。你应该针对你目标的内核重新编译驱动程序。
 
-**On-disk format version**, for 驱动程序 that have any on-disk metadata. If your 驱动程序 stamps a magic number and a version into a reserved 扇区, you must handle upgrades. Our 驱动程序 has no on-disk format, so this does not apply yet, but it would if we added a proper backing-store header.
+**磁盘上格式版本**，用于具有任何磁盘上元数据的驱动程序。如果你的驱动程序在保留扇区中写入魔术号和版本，你必须处理升级。我们的驱动程序没有磁盘上格式，所以这暂时不适用，但如果我们添加了适当的后备存储头，就需要了。
 
-**Ioctl number version**. Once you define ioctls, their numbers are part of the userland ABI. Changing them breaks older userland tools. Use `_IO`, `_IOR`, `_IOW`, `_IOWR` with stable magic letters, and do not repurpose numbers.
+**Ioctl 号版本**。一旦你定义了 ioctl，它们的编号就是用户空间 ABI 的一部分。更改它们会破坏旧的用户空间工具。使用带有稳定魔术字母的 `_IO`、`_IOR`、`_IOW`、`_IOWR`，不要重新使用编号。
 
-For our chapter 驱动程序, the only version we care about right now is the module version. But keeping these four kinds of versioning in mind saves pain later.
+对于我们本章的驱动程序，目前我们关心的唯一版本是模块版本。但记住这四种版本管理可以避免以后的麻烦。
 
-### Debugging and Observability Helpers
+### 调试和可观测性辅助工具
 
-As the 驱动程序 grows, you will want to observe its state more richly than `dmesg` alone allows. Three tools are worth introducing now.
+随着驱动程序的增长，你会想比仅使用 `dmesg` 更丰富地观察其状态。有三个工具值得现在介绍。
 
-**`sysctl` nodes**. FreeBSD's `sysctl(3)` 框架 lets a module publish read-only or read-write variables that user-space tools can query. You create a tree under a chosen name and 附加 values to it. The pattern is standard; in roughly ten lines of code you can expose the number of BIOs serviced, the number of bytes read and written, and the current media size.
+**`sysctl` 节点**。FreeBSD 的 `sysctl(3)` 框架允许模块发布用户空间工具可以查询的只读或读写变量。你在选定的名称下创建一棵树并附加值到它。模式是标准的；大约十行代码就可以暴露已服务的 BIO 数量、读写的字节数和当前媒体大小。
 
 ```c
 SYSCTL_NODE(_dev, OID_AUTO, myblk, CTLFLAG_RD, 0,
@@ -2241,9 +2241,9 @@ SYSCTL_ULONG(_dev_myblk, OID_AUTO, reads, CTLFLAG_RD, &myblk_reads,
     0, "Number of BIO_READ requests serviced");
 ```
 
-**Devstat**. We are already using this through `g_disk`. It gives `iostat` and `gstat` their data. No further work needed.
+**Devstat**。我们已经通过 `g_disk` 使用了这个。它为 `iostat` 和 `gstat` 提供数据。不需要额外工作。
 
-**DTrace 探测**. The `SDT` 框架 lets a module define static DTrace 探测 that incur zero cost when the 探测 is not being watched. These are especially useful in the BIO path because they let you see live request flow without recompiling.
+**DTrace 探针**。`SDT` 框架允许模块定义静态 DTrace 探针，当探针没有被监视时零开销。这些在 BIO 路径中特别有用，因为它们让你无需重新编译就能看到实时请求流。
 
 ```c
 #include <sys/sdt.h>
@@ -2256,63 +2256,63 @@ SDT_PROBE3(myblk, , strategy, request,
     bp->bio_cmd, bp->bio_offset, bp->bio_bcount);
 ```
 
-You can then watch with `dtrace -n 'myblk::strategy:request {...}'`.
+然后你可以用 `dtrace -n 'myblk::strategy:request {...}'` 来监视。
 
-For the chapter 驱动程序 we will not add all of this, but these are the patterns you should reach for as the 驱动程序 grows.
+对于本章的驱动程序，我们不会添加所有这些，但随着驱动程序的增长，这些是你应该使用的模式。
 
-### Naming Stability
+### 命名稳定性
 
-One habit that is easy to overlook: do not rename things casually. The name `myblk` is in the 设备 node, in the module version record, in the devstat name, possibly in sysctl nodes, in DTrace 探测, and in documentation. Renaming it cascades through all of those. For a project 驱动程序, pick a name you can live with forever. `md`, `ada`, `nvd`, `zvol`, and other 存储驱动程序 have kept their names for years because renaming is an ABI-affecting change for user-space tooling.
+一个容易被忽视的习惯：不要随意重命名东西。名称 `myblk` 出现在设备节点中、模块版本记录中、devstat 名称中，可能还出现在 sysctl 节点、DTrace 探针和文档中。重命名它会级联影响到所有这些。对于项目驱动程序，选择一个你可以永远使用的名称。`md`、`ada`、`nvd`、`zvol` 和其他存储驱动程序多年来一直保持它们的名称，因为重命名是对用户空间工具有 ABI 影响的更改。
 
-### Keeping the Teaching Driver Simple
+### 保持教学驱动程序的简洁
 
-Everything in this section is a direction your 驱动程序 might grow in. None of it is required for the teaching 驱动程序 in this chapter. We are pointing at the directions so that you can recognise them when you see them in real 驱动程序 source, and so that when you extend your own 驱动程序 you do not have to invent these patterns from scratch.
+本节中的所有内容都是你的驱动程序可能成长的方向。这些都不是本章教学驱动程序所必需的。我们指出这些方向，以便你在真实驱动程序源代码中看到它们时能够识别，并且当你扩展自己的驱动程序时不必从头发明这些模式。
 
-The companion `myfirst_blk.c` remains a single file at the end of this chapter. Its README documents the extension points, and the challenge exercises add some of them. Beyond that, you are free to keep extending it, and every extension you make will use these patterns in some form.
+配套的 `myfirst_blk.c` 在本章结束时仍是一个单文件。它的 README 记录了扩展点，挑战练习添加了其中一些。除此之外，你可以自由地继续扩展它，你做的每个扩展都将以某种形式使用这些模式。
 
-### A Short Design Patterns Recap
+### 设计模式简要回顾
 
-At this point we have accumulated enough patterns that listing them helps. When you start your next 存储驱动程序, these are the patterns to reach for.
+到目前为止我们已经积累了足够多的模式，列出它们会有帮助。当你开始下一个存储驱动程序时，这些是你应该使用的模式。
 
-**The softc pattern.** One per-instance struct to hold everything the 驱动程序 needs. Pointed at by `d_drv1`. Retrieved inside 回调 via `bp->bio_disk->d_drv1`.
+**softc 模式。** 每个实例一个结构体来保存驱动程序需要的一切。由 `d_drv1` 指向。在回调内通过 `bp->bio_disk->d_drv1` 获取。
 
-**The 附加/分离 pair.** Attach allocates, initialises, and 寄存器. Detach reverses the sequence. Both must be idempotent.
+**附加/分离对。** 附加负责分配、初始化和注册。分离逆转这个序列。两者都必须是幂等的。
 
-**The switch-and-biodone pattern.** Every strategy function switches on `bio_cmd`, services each command, sets `bio_resid`, and calls `biodone` exactly once.
+**switch-and-biodone 模式。** 每个策略函数根据 `bio_cmd` 进行分发，服务每个命令，设置 `bio_resid`，并恰好调用 `biodone` 一次。
 
-**The defensive bounds check.** Validate offset and length against media size, using subtraction to avoid overflow.
+**防御性边界检查。** 根据媒体大小验证偏移量和长度，使用减法避免溢出。
 
-**The coarse lock pattern.** A single 互斥锁 around the hot path is often enough for a teaching 驱动程序. Split it only when performance demands.
+**粗粒度锁模式。** 热路径周围的一个互斥锁通常对教学驱动程序足够了。只在性能需要时才拆分它。
 
-**The reverse-order teardown.** Free resources in the opposite order of allocation.
+**逆序拆卸。** 按分配相反的顺序释放资源。
 
-**The null-after-free pattern.** After freeing a pointer, set it to `NULL`. Catches double-frees.
+**释放后置空模式。** 释放指针后将其设置为 `NULL`。捕获双重释放。
 
-**The single cleanup label.** In 附加 functions that can fail, all failures jump to a single cleanup label that unwinds state so far.
+**单一清理标签。** 在可能失败的附加函数中，所有失败都跳转到一个清理标签，展开到目前为止的状态。
 
-**The versioned ABI.** Pass `DISK_VERSION` to `disk_create`. Declare `MODULE_VERSION`. Use `MODULE_DEPEND` on every 内核模块 you rely on.
+**版本化 ABI。** 将 `DISK_VERSION` 传递给 `disk_create`。声明 `MODULE_VERSION`。对你依赖的每个内核模块使用 `MODULE_DEPEND`。
 
-**The deferred-work pattern.** Work that must 块 (like vnode I/O) belongs in a worker thread, not in `d_strategy`.
+**延迟工作模式。** 必须阻塞的工作（如 vnode I/O）属于工作线程，而不是 `d_strategy`。
 
-**The observability-first habit.** Add `printf`, `sysctl`, or DTrace 探测 as you build. Observability retrofitted late is harder than observability designed in.
+**可观测性优先习惯。** 在构建时添加 `printf`、`sysctl` 或 DTrace 探针。后期改造的可观测性比设计时就考虑的可观测性更难。
 
-These are not exhaustive, but they are the patterns you will use most often. Each of them appears somewhere in our 驱动程序, and each of them appears throughout the real FreeBSD storage code.
+这些不是详尽无遗的，但它们是你最常使用的模式。每个模式都出现在我们驱动程序的某个地方，每个模式都出现在真实的 FreeBSD 存储代码中。
 
 ### 总结 Section 9
 
-A maturing 存储驱动程序 grows in predictable directions: multi-unit support, runtime configuration through ioctls, multiple source files, and stable versioning of every 接口 it exposes. None of this has to appear in the first version. Knowing where the growth will happen lets you make early choices that do not need to be undone later.
+一个成熟的存储驱动程序以可预测的方向增长：多单元支持、通过 ioctl 进行运行时配置、多个源文件，以及它暴露的每个接口的稳定版本管理。这些都不必出现在第一个版本中。知道增长将发生在哪里可以让你做出以后不需要撤销的早期选择。
 
-We have now covered every concept the chapter set out to teach. Before the hands-on labs, one more topic deserves a dedicated section, because it will repay you many times over as a 驱动程序 author: observing a running 存储驱动程序. In the next section, we will look at the tools FreeBSD gives you for watching your 驱动程序 in real time and for measuring its behaviour in a disciplined way.
+我们已经涵盖了本章要教授的每个概念。在动手实验之前，还有一个主题值得用专门的章节讨论，因为它作为驱动程序作者会回报你很多次：观察运行中的存储驱动程序。在下一节中，我们将看看 FreeBSD 为你提供的实时监视驱动程序和以有条理的方式测量其行为的工具。
 
-## Section 10: Observability and Measuring Your Driver
+## 第10节：可观测性与测量你的驱动程序
 
-Writing a 存储驱动程序 is mostly a matter of getting the structure right. Once the structure is right, the 驱动程序 just runs. But for the structure to stay right, you must be able to observe what is happening while the 驱动程序 runs. You will want to know how many BIOs per second are hitting the strategy function, how long each one takes, how the latency distribution looks, how much memory the backing store consumes, whether any BIOs are getting retried, and whether any path is leaking completion.
+编写存储驱动程序主要是让结构正确的问题。一旦结构正确，驱动程序就会运行。但要保持结构正确，你必须能够在驱动程序运行时观察正在发生的事情。你会想知道每秒有多少BIO到达策略函数、每个花费多长时间、延迟分布如何、后备存储消耗了多少内存、是否有任何BIO正在被重试，以及是否有任何路径泄漏了完成。
 
-FreeBSD gives you a remarkable set of tools for this, many of which we have already used casually. In this section we will walk through the most important ones in turn, with the goal of making you comfortable enough to reach for the right tool when the next strange symptom appears.
+FreeBSD为此提供了一套出色的工具，其中许多我们已经随意使用过。在本节中，我们将依次介绍最重要的工具，目标是让你在下一个奇怪的症状出现时能够轻松地拿起正确的工具。
 
 ### gstat
 
-`gstat` is the first tool to reach for. It updates a per-provider view of I/O activity in real time, and it shows you exactly what is happening at the GEOM layer.
+`gstat` 是首选工具。它实时更新每个提供者的 I/O 活动视图，向你展示 GEOM 层正在发生的具体情况。
 
 ```console
 # gstat -I 1
@@ -2322,26 +2322,26 @@ dT: 1.002s  w: 1.000s
     0      0      0      0    0.0      0      0    0.0    0.0| myblk0
 ```
 
-The columns, from left to right, are:
+各列从左到右依次是：
 
-- `L(q)`: queue length. The number of BIOs currently outstanding on this provider.
-- `ops/s`: total operations per second, regardless of direction.
-- `r/s`: reads per second.
-- `kBps` (for reads): read throughput in kilobytes per second.
-- `ms/r`: average read latency, in milliseconds.
-- `w/s`: writes per second.
-- `kBps` (for writes): write throughput in kilobytes per second.
-- `ms/w`: average write latency, in milliseconds.
-- `%总线y`: the percentage of time the provider was not idle.
-- `Name`: the provider name.
+- `L(q)`：队列长度。当前在此提供者上未完成的BIO数量。
+- `ops/s`：每秒总操作数，无论方向。
+- `r/s`：每秒读取数。
+- `kBps`（读取）：以每秒千字节为单位的读取吞吐量。
+- `ms/r`：平均读取延迟，以毫秒为单位。
+- `w/s`：每秒写入数。
+- `kBps`（写入）：以每秒千字节为单位的写入吞吐量。
+- `ms/w`：平均写入延迟，以毫秒为单位。
+- `%busy`：提供者非空闲的时间百分比。
+- `Name`：提供者名称。
 
-For a 驱动程序 you have just built, `gstat` tells you at a glance whether the 内核 is sending traffic to your 设备 and how your 驱动程序 is performing relative to real disks. If the numbers look wildly different from what you expect, you have a starting point for investigation.
+对于你刚构建的驱动程序，`gstat` 让你一眼就能看出内核是否正在向你的设备发送流量，以及你的驱动程序相对于真实磁盘的表现如何。如果数字与你期望的大不相同，你就有了调查的起点。
 
-`gstat -p` shows only providers (the default). `gstat -c` shows only consumers, which is less useful for 驱动程序 debugging. `gstat -f <regex>` filters by name. `gstat -b` batches the output one screen at a time instead of refreshing in place.
+`gstat -p` 仅显示提供者（默认）。`gstat -c` 仅显示消费者，这对驱动程序调试不太有用。`gstat -f <regex>` 按名称过滤。`gstat -b` 逐屏批处理输出而不是原地刷新。
 
 ### iostat
 
-`iostat` has a more traditional style but provides the same underlying data. It is useful when you want a text log rather than an interactive display.
+`iostat` 具有更传统的风格，但提供相同的底层数据。当你想要文本日志而不是交互式显示时，它很有用。
 
 ```console
 # iostat -x myblk0 1
@@ -2351,11 +2351,11 @@ myblk0       0     128       0     512   0.0   0.1   0.0   0.1    0   2
 myblk0       0     128       0     512   0.0   0.1   0.0   0.1    0   2
 ```
 
-`iostat` can watch multiple 设备 at once and can be redirected to a log file for later analysis. For quick live views, `gstat` is usually better.
+`iostat` 可以同时监视多个设备，并且可以重定向到日志文件以供后续分析。对于快速实时查看，`gstat` 通常更好。
 
 ### diskinfo
 
-`diskinfo` is less about live traffic and more about static properties. We have already used it to confirm our media size.
+`diskinfo` 较少关注实时流量，更多关注静态属性。我们已经用它确认了我们的媒体大小。
 
 ```console
 # diskinfo -v /dev/myblk0
@@ -2368,7 +2368,7 @@ myblk0       0     128       0     512   0.0   0.1   0.0   0.1    0   2
         myblk0          # Disk ident.
 ```
 
-`diskinfo -c` runs a timing test, reading a few hundred megabytes and reporting the sustained rate. This is useful for a first-order performance comparison.
+`diskinfo -c` 运行计时测试，读取几百兆字节并报告持续速率。这对于一阶性能比较很有用。
 
 ```console
 # diskinfo -c /dev/myblk0
@@ -2399,35 +2399,35 @@ Transfer rates:
         inside:        102400 kbytes in  0.017684 sec =  5791 MB/sec
 ```
 
-These numbers are unusually fast because the backing store is RAM. On a real disk they would look very different, and comparing the numbers across 设备 is often the first diagnosis step for performance problems.
+这些数字异常快，因为后备存储是 RAM。在真实磁盘上它们会看起来非常不同，跨设备比较数字通常是性能问题的第一步诊断。
 
 ### sysctl
 
-`sysctl` is how the 内核 exposes its internal variables to user space. Many subsystems publish data through `sysctl`. You can browse the storage-related sysctls with:
+`sysctl` 是内核将其内部变量暴露给用户空间的方式。许多子系统通过 `sysctl` 发布数据。你可以用以下命令浏览与存储相关的 sysctl：
 
 ```console
 # sysctl -a | grep -i kern.geom
 # sysctl -a | grep -i vfs
 ```
 
-Adding your own sysctl tree to your 驱动程序, as we discussed in Section 9, lets you expose whatever metrics your 驱动程序 needs to track, without the ceremony of defining a new tool.
+将你自己的 sysctl 树添加到驱动程序中，正如我们在第9节中讨论的，让你可以暴露驱动程序需要跟踪的任何指标，而无需定义新工具的繁文缛节。
 
 ### vmstat
 
-`vmstat -m` shows memory allocation by `MALLOC_DEFINE` tag. Our 驱动程序 uses `M_MYBLK`, so we can see how much memory our 驱动程序 has allocated.
+`vmstat -m` 按 `MALLOC_DEFINE` 标签显示内存分配。我们的驱动程序使用 `M_MYBLK`，所以我们可以看到我们的驱动程序分配了多少内存。
 
 ```console
 # vmstat -m | grep myblk
        myblk     1  32768K         -       12  32K,32M
 ```
 
-The columns are type, number of allocations, current size, protection requests, total requests, and possible sizes. For a 驱动程序 that holds a 32 MiB backing store, the current size of 32 MiB is exactly what we expect. If it grew over time without an equivalent decrease on unload, we would have a leak.
+各列是类型、分配数量、当前大小、保护请求、总请求和可能的大小。对于持有 32 MiB 后备存储的驱动程序，当前大小 32 MiB 正是我们期望的。如果它随时间增长而在卸载时没有相应的减少，我们就有了泄漏。
 
-`vmstat -z` shows zone allocator statistics. Much storage-related state lives in zones (GEOM providers, BIOs, disk structures), and `vmstat -z` is where to look if you suspect GEOM-level leaks.
+`vmstat -z` 显示区域分配器统计。许多与存储相关的状态存在于区域中（GEOM 提供者、BIO、磁盘结构），如果你怀疑 GEOM 级别的泄漏，`vmstat -z` 是查看的地方。
 
 ### procstat
 
-`procstat` shows per-thread 内核 stacks. It is indispensable when something is stuck.
+`procstat` 显示每线程的内核栈。当某些东西卡住时，它是不可或缺的。
 
 ```console
 # procstat -kk -t $(pgrep -x g_event)
@@ -2435,30 +2435,30 @@ The columns are type, number of allocations, current size, protection requests, 
     4 100038 geom                -                   mi_switch sleepq_switch ...
 ```
 
-If the `g_event` thread is sleeping, the GEOM layer is idle. If it is stuck in a function with your 驱动程序's name on its stack, you have a BIO that is not completing.
+如果 `g_event` 线程正在睡眠，GEOM 层是空闲的。如果它卡在一个栈上有你的驱动程序名称的函数中，你就有一个没有完成的 BIO。
 
 ```console
 # procstat -kk $(pgrep -x kldload)
 ```
 
-If `kldload` or `kldunload` is stuck, this shows you exactly where. Most often the culprit is a `disk_destroy` waiting for BIOs to drain.
+如果 `kldload` 或 `kldunload` 卡住了，这会精确地显示在哪里。最常见的罪魁祸首是等待 BIO 排空的 `disk_destroy`。
 
-### DTrace for the Block Layer
+### 块层的DTrace
 
-We introduced DTrace briefly in Section 6 and in Lab 7. Here let us go a little deeper, because DTrace is the single most effective tool for understanding live storage behaviour.
+我们在第6节和实验7中简要介绍了 DTrace。这里让我们深入一点，因为 DTrace 是理解实时存储行为的最有效工具。
 
-The Function Boundary Tracing (FBT) provider lets you place 探测 on the entry and return of nearly any 内核 function. For our 驱动程序's strategy function, the 探测 name is `fbt::myblk_strategy:entry` for the entry and `fbt::myblk_strategy:return` for the return.
+函数边界跟踪（FBT）提供者允许你在几乎所有内核函数的入口和返回处放置探针。对于我们驱动程序的策略函数，探针名称是 `fbt::myblk_strategy:entry` 用于入口，`fbt::myblk_strategy:return` 用于返回。
 
-A simple one-liner that counts BIOs by command:
+一个按命令计数 BIO 的简单单行命令：
 
 ```console
 # dtrace -n 'fbt::myblk_strategy:entry \
     { @c[args[0]->bio_cmd] = count(); }'
 ```
 
-When you interrupt the script (with `Ctrl-C`), it prints a count per command value. `BIO_READ` is 1, `BIO_WRITE` is 2, `BIO_DELETE` is 3, `BIO_GETATTR` is 4, and `BIO_FLUSH` is 5. (The exact numbers are in `/usr/src/sys/sys/bio.h`.)
+当你中断脚本（用 `Ctrl-C`）时，它按命令值打印计数。`BIO_READ` 是 1，`BIO_WRITE` 是 2，`BIO_DELETE` 是 3，`BIO_GETATTR` 是 4，`BIO_FLUSH` 是 5。（具体数字在 `/usr/src/sys/sys/bio.h` 中。）
 
-A latency histogram:
+延迟直方图：
 
 ```console
 # dtrace -n '
@@ -2469,49 +2469,49 @@ fbt::myblk_strategy:return /self->t/ {
 }'
 ```
 
-This gives you a log-scale histogram of how long each strategy-function execution took. For our in-memory 驱动程序, most buckets should be in the hundreds-of-nanoseconds range; anything in the millisecond range for an in-memory 驱动程序 is suspicious.
+这给你一个每次策略函数执行时间的对数刻度直方图。对于我们的内存驱动程序，大多数桶应该在数百纳秒范围内；对于内存驱动程序来说，毫秒范围内的任何东西都是可疑的。
 
-A breakdown of I/O size:
+I/O 大小的分布：
 
 ```console
 # dtrace -n 'fbt::myblk_strategy:entry \
     { @sz = quantize(args[0]->bio_bcount); }'
 ```
 
-This shows you the distribution of BIO sizes. For a UFS-backed 文件系统, you should see peaks at 4 KiB, 8 KiB, 16 KiB, and 32 KiB. For a raw `dd` with `bs=1m`, you should see a peak at 1 MiB (or the `MAXPHYS` cap, whichever is smaller).
+这显示 BIO 大小的分布。对于 UFS 文件系统，你应该看到在 4 KiB、8 KiB、16 KiB 和 32 KiB 处有峰值。对于使用 `bs=1m` 的原始 `dd`，你应该看到在 1 MiB（或 `MAXPHYS` 上限，以较小者为准）处有峰值。
 
-DTrace is extraordinarily capable. The one-liners above barely scratch the surface. Two books to pick up, if you want to go deeper, are the original Sun "DTrace Guide" and Brendan Gregg's "DTrace Book". Both are older than FreeBSD 14.3 but the fundamentals still apply.
+DTrace 的能力非凡。上面的单行命令只是冰山一角。如果你想深入了解，可以阅读 Sun 原始的 "DTrace Guide" 和 Brendan Gregg 的 "DTrace Book"。两者都比 FreeBSD 14.3 老，但基本原理仍然适用。
 
-### kgdb and Crash Dumps
+### kgdb和崩溃转储
 
-When your 驱动程序 panics, FreeBSD can capture a crash dump. Configure the dump 设备 in `/etc/rc.conf` (typically `dumpdev="AUTO"`) and verify with `dumpon`.
+当你的驱动程序崩溃时，FreeBSD 可以捕获崩溃转储。在 `/etc/rc.conf` 中配置转储设备（通常是 `dumpdev="AUTO"`）并用 `dumpon` 验证。
 
-After a panic, reboot. `/var/crash/vmcore.last` (a symlink) points to the most recent dump. `kgdb /boot/内核/内核 /var/crash/vmcore.last` opens the dump for inspection. Useful commands inside `kgdb`:
+崩溃后，重新启动。`/var/crash/vmcore.last`（一个符号链接）指向最近的转储。`kgdb /boot/kernel/kernel /var/crash/vmcore.last` 打开转储以供检查。`kgdb` 中有用的命令：
 
-- `bt`: backtrace of the thread that panicked.
-- `info threads`: list all threads in the crashed system.
-- `thread N` then `bt`: backtrace of thread N.
-- `print *var`: inspect a variable.
-- `list function`: show source around a function.
+- `bt`：崩溃线程的回溯。
+- `info threads`：列出崩溃系统中的所有线程。
+- `thread N` 然后 `bt`：线程 N 的回溯。
+- `print *var`：检查变量。
+- `list function`：显示函数周围的源代码。
 
-If you have compiled your module with debugging symbols (the default for most 内核 configurations), `kgdb` can show you source-level variables in your own code. This is a transformative capability once you get used to it.
+如果你编译模块时包含了调试符号（大多数内核配置的默认值），`kgdb` 可以在你自己的代码中显示源代码级别的变量。一旦你习惯了，这是一种变革性的能力。
 
 ### ktrace
 
-`ktrace` is a user-space-oriented tool, but it can be useful for storage debugging when you want to see exactly what system calls a user program is making. If `newfs_ufs` is behaving oddly, you can trace it:
+`ktrace` 是一个面向用户空间的工具，但当你想确切看到用户程序正在发出哪些系统调用时，它对存储调试很有用。如果 `newfs_ufs` 行为异常，你可以跟踪它：
 
 ```console
 # ktrace -f /tmp/newfs.ktr newfs_ufs /dev/myblk0
 # kdump /tmp/newfs.ktr | head -n 50
 ```
 
-The resulting trace shows the sequence of system calls, their arguments, and their results. For storage tools, this reveals exactly which ioctls are being issued and which file 描述符 are being opened.
+生成的跟踪显示系统调用的序列、参数和结果。对于存储工具，这精确地揭示了正在发出哪些 ioctl 以及正在打开哪些文件描述符。
 
-### dmesg and the Kernel Log
+### dmesg和内核日志
 
-The humble `dmesg` is often the fastest way to diagnose a problem. Our 驱动程序 prints to it on load and unload. The 内核 prints to it on many other events, including GEOM class creation, access-count violations, and panics that the system recovers from.
+简单的 `dmesg` 通常是诊断问题最快的方式。我们的驱动程序在加载和卸载时打印到它。内核在许多其他事件中也打印到它，包括 GEOM 类创建、访问计数违规和系统恢复的崩溃。
 
-Pro tip: redirect `dmesg -a` to a file at the start of each lab session. If something goes wrong you will have a complete log.
+专业提示：在每个实验会话开始时将 `dmesg -a` 重定向到文件。如果出了问题，你将有一个完整的日志。
 
 ```console
 # dmesg -a > /tmp/session.log
@@ -2520,26 +2520,26 @@ Pro tip: redirect `dmesg -a` to a file at the start of each lab session. If some
 # diff /tmp/session.log /tmp/session-final.log
 ```
 
-This gives you a precise log of what the 内核 reported during your session.
+这给你一个精确的日志，记录内核在你的会话期间报告了什么。
 
-### A Simple Measurement Recipe
+### 简单的测量方法
 
-Here is a recipe you can use to produce a one-page performance profile of your 驱动程序.
+以下是一个可以用来生成驱动程序一页性能概要的方法。
 
-1. Load the 驱动程序.
-2. Run `diskinfo -c /dev/myblk0` and record the three transfer-rate numbers.
-3. Format the 设备 and 挂载 it.
-4. In one terminal, start `gstat -I 1 -f myblk0 -b` redirected to a file.
-5. In another terminal, run `dd if=/dev/zero of=/mnt/myblk/stress bs=1m count=128`.
-6. Stop `gstat` after `dd` completes and save the log.
-7. Parse the log with `awk` to extract the peak ops/s, the peak throughput, and the average latency.
-8. Un挂载 and unload.
+1. 加载驱动程序。
+2. 运行 `diskinfo -c /dev/myblk0` 并记录三个传输速率数字。
+3. 格式化设备并挂载它。
+4. 在一个终端中，启动 `gstat -I 1 -f myblk0 -b` 并重定向到文件。
+5. 在另一个终端中，运行 `dd if=/dev/zero of=/mnt/myblk/stress bs=1m count=128`。
+6. `dd` 完成后停止 `gstat` 并保存日志。
+7. 用 `awk` 解析日志以提取峰值 ops/s、峰值吞吐量和平均延迟。
+8. 卸载文件系统并卸载模块。
 
-This recipe scales. For a real 驱动程序 you would automate it, run it on a matrix of 块 sizes, and plot the results. For a teaching 驱动程序, running it once or twice gives you a feeling for the numbers and a baseline to compare against after future changes.
+这个方法可以扩展。对于真实驱动程序，你会自动化它，在块大小的矩阵上运行，并绘制结果。对于教学驱动程序，运行一两次就能让你对数字有感觉，并在未来的更改后有一个比较基准。
 
-### Comparing Against md(4)
+### 与md(4)的比较
 
-One of the most useful exercises is to load `md(4)` in the same configuration as your 驱动程序 and compare.
+最有用的练习之一是以与你的驱动程序相同的配置加载 `md(4)` 并进行比较。
 
 ```console
 # mdconfig -a -t malloc -s 32m
@@ -2547,33 +2547,33 @@ md0
 # diskinfo -c /dev/md0
 ```
 
-The numbers will likely be within a small factor of your 驱动程序's. If they are very different, something interesting is going on. The usual differences are:
+数字可能在你驱动程序的一个小倍数范围内。如果它们非常不同，就有一些有趣的事情发生。通常的差异是：
 
-- `md(4)` uses a worker thread that receives BIOs from the strategy function and processes them in a separate context. This adds a small 挂载 of latency per BIO but allows higher concurrency.
-- `md(4)` uses page-at-a-time backing, which is slightly slower per byte for sequential I/O but scales to much larger sizes.
-- `md(4)` supports more BIO commands and attributes than our 驱动程序.
+- `md(4)` 使用工作线程接收来自策略函数的 BIO 并在单独的上下文中处理它们。这为每个 BIO 增加了一点延迟，但允许更高的并发性。
+- `md(4)` 使用逐页后备，对于顺序 I/O 每字节稍慢，但可以扩展到更大的大小。
+- `md(4)` 支持比我们的驱动程序更多的 BIO 命令和属性。
 
-Comparing against `md(4)` is a form of debugging: if your 驱动程序 is much slower or much faster than `md(4)` on the same workload, either you have done something unusual, or you have uncovered a difference worth understanding.
+与 `md(4)` 比较是一种调试形式：如果你的驱动程序在相同工作负载上比 `md(4)` 慢得多或快得多，要么你做了一些不寻常的事情，要么你发现了一个值得理解的差异。
 
 ### 总结 Section 10
 
-Observability is not an afterthought. For a 存储驱动程序, it is how you keep your bearings. `gstat`, `iostat`, `diskinfo`, `sysctl`, `vmstat`, `procstat`, and DTrace are the tools you will reach for most often. `kgdb` and crash dumps are your backstop when things go catastrophically wrong.
+可观测性不是事后的想法。对于存储驱动程序，它是你保持方向的方式。`gstat`、`iostat`、`diskinfo`、`sysctl`、`vmstat`、`procstat` 和 DTrace 是你最常使用的工具。`kgdb` 和崩溃转储是当事情灾难性地出错时的后盾。
 
-Learn these tools now, while the 驱动程序 is simple, because they will be the same tools you use when the 驱动程序 is complex. A developer who can observe a running 驱动程序 is much more effective than one who can only read source.
+现在就学习这些工具，当驱动程序还简单的时候，因为当驱动程序变得复杂时，它们将是你使用的相同工具。一个能够观察运行中驱动程序的开发者比只能阅读源代码的开发者要有效得多。
 
-We have now covered every concept the chapter set out to teach, plus observability and measurement. Before we move on to the hands-on labs, let us spend some time reading real FreeBSD source. The case studies that follow anchor everything we have learned in code from the tree.
+我们现在已经涵盖了本章要教授的每个概念，加上可观测性和测量。在我们进入动手实验之前，让我们花一些时间阅读真实的 FreeBSD 源代码。接下来的案例研究将我们从源代码树中学到的一切锚定在实际代码中。
 
-## Case Studies in Real FreeBSD Storage Code
+## 真实FreeBSD存储代码案例研究
 
-Reading production 驱动程序 source is the fastest way to internalise patterns. In this section we will walk through excerpts from three real 驱动程序 in `/usr/src/sys/`, with commentary that points out what each excerpt is doing and why. The excerpts are short on purpose; we will not read every line of each 驱动程序. We will pick the lines that matter.
+阅读生产驱动程序源代码是内化模式最快的方式。在本节中，我们将遍历`/usr/src/sys/`中三个真实驱动程序的摘录，并附有注释指出每个摘录在做什么以及为什么。摘录故意简短；我们不会阅读每个驱动程序的每一行。我们会挑选重要的行。
 
-Open the files alongside the text and follow along. The point is for you to see the same patterns in our 驱动程序 reappearing in real 驱动程序, under different names and with different constraints.
+打开文件并跟着文本一起阅读。关键是要让你看到我们驱动程序中的相同模式在不同的名称和不同的约束下重新出现在真实驱动程序中。
 
-### Case Study 1: g_zero.c
+### 案例研究1：g_zero.c
 
-`g_zero.c` is the simplest GEOM class in the tree. It is a read-always-zero, write-discard provider, with no real backing store and no real work to do. Its purpose is to give you a standard "null disk" you can test against. It is also an excellent teaching reference because it exercises the full `g_class` API in fewer than 150 lines.
+`g_zero.c` 是源代码树中最简单的 GEOM 类。它是一个读取始终返回零、写入被丢弃的提供者，没有真正的后备存储，也没有真正的工作要做。它的目的是为你提供一个标准的"空磁盘"用于测试。它也是一个优秀的教学参考，因为它在不到 150 行中使用了完整的 `g_class` API。
 
-Let us look at its strategy function, called `g_zero_start`.
+让我们看看它的策略函数，叫做 `g_zero_start`。
 
 ```c
 static void
@@ -2595,11 +2595,11 @@ g_zero_start(struct bio *bp)
 }
 ```
 
-Three behaviours, with `BIO_GETATTR` intentionally folded into the default case. Reads get zeroed. Writes are silently accepted. Anything else, including attribute queries, gets `EOPNOTSUPP`. The real `/usr/src/sys/geom/zero/g_zero.c` also handles `BIO_DELETE` in the successful-write path; our simplified excerpt above drops that case so you can see the shape clearly. Notice the call to `g_io_deliver` rather than `biodone`. That is because `g_zero` is a class-level GEOM module, not a `g_disk` module. `g_io_deliver` is the class-level completion call; `biodone` is the `g_disk` wrapper.
+三种行为，`BIO_GETATTR` 被故意折叠到 default 情况中。读取返回零。写入被静默接受。其他任何操作（包括属性查询）都得到 `EOPNOTSUPP`。真实的 `/usr/src/sys/geom/zero/g_zero.c` 还在成功写入路径中处理 `BIO_DELETE`；我们上面简化的摘录省略了该情况以便你能清楚地看到结构。注意调用的是 `g_io_deliver` 而不是 `biodone`。这是因为 `g_zero` 是一个类级别的 GEOM 模块，而不是 `g_disk` 模块。`g_io_deliver` 是类级别的完成调用；`biodone` 是 `g_disk` 的包装。
 
-If you re-read our 驱动程序's strategy function side by side with this, you will see the same structure: a switch on `bio_cmd`, a case for each supported operation, a default error path. Our 驱动程序 has more cases and it has a real backing store, but the shape is identical.
+如果你并排重新阅读我们驱动程序的策略函数和这个，你会看到相同的结构：对 `bio_cmd` 的 switch、每个支持操作的一个 case、一个默认错误路径。我们的驱动程序有更多的 case 并且有真正的后备存储，但结构是相同的。
 
-The `init` function that `g_zero` 寄存器 with the class is also small:
+`g_zero` 向类注册的 `init` 函数也很小：
 
 ```c
 static void
@@ -2615,15 +2615,15 @@ g_zero_init(struct g_class *mp)
 }
 ```
 
-When the `g_zero` module is loaded, this runs. It creates a new geom under the class, points the `start` method at the strategy function, uses the standard access handler, and creates a provider. That is everything it takes to expose `/dev/gzero`.
+当 `g_zero` 模块被加载时，这会运行。它在类下创建一个新的 geom，将 `start` 方法指向策略函数，使用标准访问处理器，并创建一个提供者。这就是暴露 `/dev/gzero` 所需的全部。
 
-In our 驱动程序, `g_disk` does the equivalent of all this when `disk_create` is called. You can see here, once more, what `g_disk` is abstracting away. For most disk 驱动程序 that is a good trade; for `g_zero`, which does not want `g_disk`'s disk-specific features, using the class API directly is the better fit.
+在我们的驱动程序中，当调用 `disk_create` 时，`g_disk` 做了所有这些的等价工作。你可以在这里再次看到 `g_disk` 抽象掉了什么。对于大多数磁盘驱动程序来说，这是一个好的交易；对于 `g_zero`，它不想要 `g_disk` 的磁盘特定功能，直接使用类 API 更合适。
 
-### Case Study 2: md.c, the Malloc Strategy Function
+### 案例研究2：md.c的malloc策略函数
 
-`md(4)` is a memory-disk 驱动程序 with several backing types. The malloc backing type is the closest to our 驱动程序, and its strategy function is worth reading in detail.
+`md(4)` 是一个具有多种后备类型的内存磁盘驱动程序。malloc 后备类型与我们的驱动程序最接近，其策略函数值得详细阅读。
 
-Here is a simplified version of what happens when `md(4)`'s worker thread picks up a BIO for a `MD_MALLOC`-type disk. (In real `md(4)`, this is the function `mdstart_malloc`.)
+以下是 `md(4)` 的工作线程为 `MD_MALLOC` 类型磁盘拾取 BIO 时发生情况的简化版本。（在真实的 `md(4)` 中，这是函数 `mdstart_malloc`。）
 
 ```c
 static int
@@ -2660,17 +2660,17 @@ mdstart_malloc(struct md_s *sc, struct bio *bp)
 }
 ```
 
-The key difference from our 驱动程序 is the page-at-a-time backing. `md(4)` does not allocate one big 缓冲区. It allocates 4 KiB pages on demand and indexes them through a data structure inside the softc. The benefit is that memory disks can be much larger than a single contiguous `malloc` would allow, and sparse regions (never written) consume no memory.
+与我们驱动程序的关键区别是逐页后备。`md(4)` 不分配一个大缓冲区。它按需分配 4 KiB 页面并通过 softc 内部的数据结构索引它们。好处是内存磁盘可以比单个连续 `malloc` 允许的大得多，稀疏区域（从未写入的）不消耗内存。
 
-The cost is that every BIO may span multiple pages, so the strategy function has to loop. Each iteration copies `len` bytes into the current page, decrements `resid`, advances `offset`, and either exits when `resid` hits zero or moves on to the next page.
+代价是每个 BIO 可能跨越多个页面，所以策略函数必须循环。每次迭代将 `len` 字节复制到当前页面，递减 `resid`，推进 `offset`，当 `resid` 达到零时退出或移动到下一个页面。
 
-Our 驱动程序 avoids this complexity at the cost of supporting only contiguous backing, which is fine up to a few tens of megabytes but not beyond.
+我们的驱动程序避免了这种复杂性，代价是只支持连续后备，这在几十兆字节以内没问题，但更远就不行了。
 
-If you wanted to extend our 驱动程序 to match `md(4)`'s scale, the page-at-a-time pattern is the direction you would go. It is straightforward once you have `md(4)` in front of you as a reference.
+如果你想扩展我们的驱动程序以匹配 `md(4)` 的规模，逐页模式是你应该去的方向。一旦你有 `md(4)` 作为参考，这是很直接的。
 
-### Case Study 3: md.c, the Module Load Path
+### 案例研究3：md.c的模块加载路径
 
-Another piece of `md(4)` worth studying is how it bootstraps its class and sets up the control 设备.
+`md(4)` 另一个值得研究的部分是它如何引导其类并设置控制设备。
 
 ```c
 static void
@@ -2692,22 +2692,22 @@ g_md_init(struct g_class *mp __unused)
 }
 ```
 
-The `g_md_init` function runs once per 内核 boot, when the `md(4)` class is first instantiated. It handles any memory disks that the loader preloaded into memory (so that the 内核 can boot from a memory-disk root) and it creates the control 设备 `/dev/mdctl` through which `mdconfig` will later talk to the 驱动程序.
+`g_md_init` 函数在每次内核启动时运行一次，当 `md(4)` 类首次被实例化时。它处理加载器预加载到内存中的任何内存磁盘（以便内核可以从内存磁盘根启动），并创建控制设备 `/dev/mdctl`，`mdconfig` 稍后将通过它与驱动程序通信。
 
-Compare this to our loader, which is a simple `moduledata_t` that calls `disk_create` directly. `md(4)` does not create any memory disks by default. It only creates them in response to preload events or in response to `MDIOCATTACH` ioctls on the control 设备.
+与我们的加载器比较，它是一个直接调用 `disk_create` 的简单 `moduledata_t`。`md(4)` 默认不创建任何内存磁盘。它只在响应预加载事件或控制设备上的 `MDIOCATTACH` ioctl 时创建它们。
 
-The pattern here is generalisable. If you want a 存储驱动程序 that creates units on demand rather than at load time, you:
+这里的模式是可泛化的。如果你想要一个按需创建单元而不是在加载时创建的存储驱动程序，你会：
 
-1. Register the class (or, for `g_disk`-based 驱动程序, set up the infrastructure).
-2. Create a control 设备 with a cdevsw that supports ioctls.
-3. Implement create, destroy, and query ioctls.
-4. Write a user-space tool that talks to the control 设备.
+1. 注册类（或者对于基于 `g_disk` 的驱动程序，设置基础设施）。
+2. 创建一个支持 ioctl 的带有 cdevsw 的控制设备。
+3. 实现创建、销毁和查询 ioctl。
+4. 编写一个与控制设备通信的用户空间工具。
 
-`md(4)` is the canonical example. Other 驱动程序, like `geli(4)` and `gmirror(4)`, use a slightly different pattern because they are GEOM transformation classes rather than disk 驱动程序, but the overall shape is similar.
+`md(4)` 是典型的例子。其他驱动程序，如 `geli(4)` 和 `gmirror(4)`，使用略有不同的模式，因为它们是 GEOM 转换类而不是磁盘驱动程序，但整体结构相似。
 
-### Case Study 4: The new总线 Side of a Real Storage Driver
+### 案例研究4：真实存储驱动程序的 newbus 侧
 
-For contrast, let us look briefly at how a real hardware-backed 存储驱动程序 附加. The `ada(4)` 驱动程序, for example, is a CAM-based ATA 驱动程序. Its 附加 path is not directly visible as a single function, because CAM mediates between the 驱动程序 and the hardware, but the end of the chain looks like this (abbreviated from `/usr/src/sys/cam/ata/ata_da.c`):
+作为对比，让我们简要看看真实硬件支持的存储驱动程序如何附加。例如 `ada(4)` 驱动程序是一个基于 CAM 的 ATA 驱动程序。它的附加路径不能直接作为单个函数看到，因为 CAM 在驱动程序和硬件之间进行中介，但链的末端看起来像这样（摘自 `/usr/src/sys/cam/ata/ata_da.c`）：
 
 ```c
 static void
@@ -2737,35 +2737,35 @@ adaregister(struct cam_periph *periph, void *arg)
 }
 ```
 
-The structure is identical to ours: fill in a `struct disk` and call `disk_create`. The differences are:
+结构与我们完全相同：填充`struct disk`并调用`disk_create`。区别在于：
 
-- `d_strategy` is `adastrategy`, which translates BIOs into ATA commands and issues them to the controller via CAM.
-- `d_dump` is implemented, because `ada(4)` supports 内核 crash dumps. Our 驱动程序 does not implement this.
-- The fields like `d_扇区ize` and `d_mediasize` come from hardware probing, not from macros.
+- `d_strategy`是`adastrategy`，它将BIO转换为ATA命令并通过CAM发给控制器。
+- `d_dump`已实现，因为`ada(4)`支持内核崩溃转储。我们的驱动程序没有实现它。
+- `d_sectorsize`和`d_mediasize`等字段来自硬件探测，而不是宏定义。
 
-From `g_disk`'s perspective, however, `ada0` and our `myblk0` are the same kind of thing. Both are disks. Both receive BIOs. Both are completed with `biodone`. The difference is in where the bytes actually go.
+但从`g_disk`的角度看，`ada0`和我们的`myblk0`是同一种东西。两者都是磁盘。两者都接收BIO。两者都通过`biodone`完成。区别只在于字节实际去了哪里。
 
-This is the uniformity that `g_disk` provides. Your 驱动程序 can choose any backing technology, and as long as it fills in `struct disk` correctly, it looks like any other disk to the rest of the 内核.
+这就是`g_disk`提供的统一性。你的驱动程序可以选择任何后备技术，只要正确填充`struct disk`，它对内核的其余部分看起来就像任何其他磁盘一样。
 
-### Takeaways from the Case Studies
+### 案例研究要点
 
-Three patterns become clearer after reading these excerpts.
+阅读这些摘录后，三个模式变得更加清晰。
 
-First, the strategy function is always a switch on `bio_cmd`. The cases vary, but the switch is always there. Memorise this pattern: incoming BIO -> switch -> case per command -> completion. It is the heart of every 存储驱动程序.
+第一，策略函数始终是对`bio_cmd`的switch。各个case不同，但switch始终存在。记住这个模式：传入BIO -> switch -> 每个命令一个case -> 完成。它是每个存储驱动程序的核心。
 
-Second, `g_disk` 驱动程序 are structurally identical at the registration level. Whether the 驱动程序 is a RAM disk or a real SATA drive, the registration code looks the same. The differences are in what happens when the BIO arrives.
+第二，`g_disk`驱动程序在注册层面结构完全相同。无论驱动程序是RAM磁盘还是真正的SATA驱动器，注册代码看起来都一样。区别在于BIO到达时发生了什么。
 
-Third, more sophisticated 驱动程序 enqueue work to a dedicated thread. Our 驱动程序 does not, because it can do its work synchronously in any thread. Drivers that do slow or 块ing work must enqueue, because strategy functions run in the caller's thread context.
+第三，更复杂的驱动程序将工作排队到专用线程。我们的驱动程序不会，因为它可以在任何线程中同步完成工作。执行慢速或阻塞工作的驱动程序必须排队，因为策略函数在调用者的线程上下文中运行。
 
-With these patterns in mind, you can now read almost any 存储驱动程序 in the FreeBSD tree and follow its overall structure, even if specific details about hardware or sub-框架 require further study.
+掌握了这些模式，你现在可以阅读FreeBSD源码树中几乎任何存储驱动程序并理解其整体结构，即使有关硬件或子系统的具体细节需要进一步研究。
 
-We have now covered every concept the chapter set out to teach, plus observability, measurement, and a few real case studies. In the next part of the chapter, we will put this knowledge to work through hands-on labs. The labs build on the 驱动程序 you have been writing and on the skills you have been using, and they take you from the minimum working 驱动程序 through persistence, 挂载, and cleanup scenarios. Let us begin.
+我们现在已经涵盖了本章要教授的每个概念，加上可观测性、测量和一些真实案例研究。在下一部分中，我们将通过动手实验将这些知识付诸实践。实验建立在你一直在编写的驱动程序和你一直在使用的技能之上，带你从最小可工作驱动程序经历持久性、挂载和清理场景。让我们开始吧。
 
 ## 动手实验
 
-Each lab is a self-contained checkpoint. They are designed to be done in order, but you can revisit any lab later if you want to practise a specific skill. Every lab has a companion folder under `examples/part-06/ch27-storage-vfs/`, which contains the reference implementation and the artifacts you would produce if you typed the code by hand.
+每个实验都是一个自包含的检查点。它们按顺序设计，但你可以在以后重新访问任何实验来练习特定技能。每个实验在`examples/part-06/ch27-storage-vfs/`下都有配套文件夹，其中包含参考实现和你手动输入代码时会产生的工作产物。
 
-Before you start, make sure you have the chapter's 驱动程序 building cleanly against your local 内核. From a fresh checkout of the examples tree:
+开始之前，确保本章的驱动程序能针对你的本地内核干净地构建。从示例树的全新检出开始：
 
 ```console
 # cd examples/part-06/ch27-storage-vfs
@@ -2774,15 +2774,15 @@ Before you start, make sure you have the chapter's 驱动程序 building cleanly
 myblk.ko
 ```
 
-If that works, you are ready. If not, revisit the Makefile and the advice in 第26章, section "Your Build Environment".
+如果这成功了，你就准备好了。如果没有，重新检查Makefile和第26章"你的构建环境"一节中的建议。
 
-### Lab 1: Explore GEOM on a Running System
+### 实验1：在运行中的系统上探索GEOM
 
-**Goal.** Build comfort with the GEOM inspection tools before you touch any code.
+**目标。**在接触任何代码之前建立对GEOM检查工具的熟悉度。
 
-**What you do.**
+**你做什么。**
 
-On your FreeBSD 14.3 system, run the following commands and take notes in your lab logbook.
+在你的FreeBSD 14.3系统上，运行以下命令并在实验日志中做笔记。
 
 ```console
 # geom disk list
@@ -2792,21 +2792,21 @@ On your FreeBSD 14.3 system, run the following commands and take notes in your l
 # diskinfo -v /dev/ada0   # or whatever your primary disk is called
 ```
 
-**What you look for.**
+**你观察什么。**
 
-Identify every `DISK` class geom. For each, note its provider name, its media size, its 扇区 size, and its current mode. Notice which geoms have 分区ing layers on top and which do not. If your system has `geli` or `zfs`, notice the chain of classes.
+识别每个`DISK`类的geom。对每个，记录其提供者名称、媒体大小、扇区大小和当前模式。注意哪些geom上面有分区层，哪些没有。如果你的系统有`geli`或`zfs`，注意类的链条。
 
-**Stretch question.** Which of your geoms have non-zero access counts right now? Which ones are free? What would happen if you tried to run `newfs_ufs` on each?
+**延伸问题。**你哪些geom目前有非零访问计数？哪些是空闲的？如果你尝试在每个上面运行`newfs_ufs`会发生什么？
 
-**Reference implementation.** `examples/part-06/ch27-storage-vfs/lab01-explore-geom/README.md` contains a suggested walkthrough and a sample output transcript from a typical system.
+**参考实现。**`examples/part-06/ch27-storage-vfs/lab01-explore-geom/README.md`包含建议的演练和典型系统的示例输出记录。
 
-### Lab 2: Build the Skeleton Driver
+### 实验2：构建骨架驱动程序
 
-**Goal.** Get the Section 3 skeleton 驱动程序 compiling and loading on your system.
+**目标。**让第3节的骨架驱动程序在你的系统上编译和加载。
 
-**What you do.**
+**你做什么。**
 
-Copy `examples/part-06/ch27-storage-vfs/lab02-skeleton/myfirst_blk.c` and its `Makefile` into a working directory. Build it.
+将`examples/part-06/ch27-storage-vfs/lab02-skeleton/myfirst_blk.c`及其`Makefile`复制到工作目录。构建它。
 
 ```console
 # cp -r examples/part-06/ch27-storage-vfs/lab02-skeleton /tmp/myblk
@@ -2830,21 +2830,21 @@ Unload it.
 # ls /dev/myblk0
 ```
 
-**What you look for.**
+**你观察什么。**
 
-Confirm that the 内核 printed your `myblk: loaded` message. Confirm that `/dev/myblk0` appeared. Confirm that `geom disk list` reported the expected media size. Confirm that the node disappeared after unload.
+确认内核打印了你的`myblk: loaded`消息。确认`/dev/myblk0`出现了。确认`geom disk list`报告了预期的媒体大小。确认卸载后节点消失了。
 
-**Stretch question.** What happens if you try `newfs_ufs -N /dev/myblk0` with the skeleton 驱动程序? Can you read the output? Why does the dry run succeed even though real writes would fail?
+**延伸问题。**如果你在骨架驱动程序上尝试`newfs_ufs -N /dev/myblk0`会发生什么？你能读懂输出吗？为什么干运行会成功，即使真正的写入会失败？
 
-### Lab 3: Implement the BIO Handler
+### 实验3：实现BIO处理器
 
-**Goal.** Add the working strategy function from Section 5 to the skeleton 驱动程序.
+**目标。**将第5节的可工作策略函数添加到骨架驱动程序中。
 
-**What you do.**
+**你做什么。**
 
-Starting from the skeleton, implement `myblk_strategy` with support for `BIO_READ`, `BIO_WRITE`, `BIO_DELETE`, and `BIO_FLUSH`. Allocate the backing 缓冲区 in `myblk_附加_unit` and free it in `myblk_分离_unit`.
+从骨架开始，实现`myblk_strategy`，支持`BIO_READ`、`BIO_WRITE`、`BIO_DELETE`和`BIO_FLUSH`。在`myblk_attach_unit`中分配后备缓冲区，在`myblk_detach_unit`中释放它。
 
-Build, load, and test.
+构建、加载和测试。
 
 ```console
 # dd if=/dev/zero of=/dev/myblk0 bs=4096 count=16
@@ -2855,21 +2855,21 @@ Build, load, and test.
 # cmp /tmp/a /tmp/b
 ```
 
-**What you look for.**
+**你观察什么。**
 
-The last `cmp` must succeed with no output. If it prints `differ: byte N`, your strategy function is racing or returning stale data.
+最后的`cmp`必须成功且没有输出。如果它打印`differ: byte N`，你的策略函数存在竞争或返回陈旧数据。
 
-**Stretch question.** Put a `printf` in the strategy function that reports `bio_cmd`, `bio_offset`, and `bio_bcount`. Run `dd if=/dev/myblk0 of=/dev/null bs=1m count=1` and look at `dmesg`. What size did `dd` actually issue? Do you see fragmentation?
+**延伸问题。**在策略函数中放一个`printf`，报告`bio_cmd`、`bio_offset`和`bio_bcount`。运行`dd if=/dev/myblk0 of=/dev/null bs=1m count=1`并查看`dmesg`。`dd`实际发出了什么大小？你看到分片了吗？
 
-**Reference implementation.** `examples/part-06/ch27-storage-vfs/lab03-bio-handler/myfirst_blk.c`.
+**参考实现。**`examples/part-06/ch27-storage-vfs/lab03-bio-handler/myfirst_blk.c`。
 
-### Lab 4: Increase Size and Mount UFS
+### 实验4：增加大小并挂载UFS
 
-**Goal.** Increase the backing store to 32 MiB and 挂载 UFS on the 设备.
+**目标。**将后备存储增加到32 MiB并在设备上挂载UFS。
 
-**What you do.**
+**你做什么。**
 
-Change `MYBLK_MEDIASIZE` to `(32 * 1024 * 1024)` and rebuild. Load the module. Format and 挂载.
+将`MYBLK_MEDIASIZE`改为`(32 * 1024 * 1024)`并重新构建。加载模块。格式化并挂载。
 
 ```console
 # newfs_ufs /dev/myblk0
@@ -2884,21 +2884,21 @@ Change `MYBLK_MEDIASIZE` to `(32 * 1024 * 1024)` and rebuild. Load the module. F
 # kldunload myblk
 ```
 
-**What you look for.**
+**你观察什么。**
 
-Verify that the file survives an 卸载-and-re挂载. Verify that the access counts in `geom disk list` are zero after 卸载. Verify that `kldunload` succeeds cleanly.
+验证文件在卸载和重新挂载后仍然存在。验证`geom disk list`中的访问计数在卸载后为零。验证`kldunload`干净地成功。
 
-**Stretch question.** Watch `gstat -I 1` while running `dd if=/dev/zero of=/mnt/myblk/big bs=1m count=16`. Can you see the writes arrive in bursts? What size are the individual BIOs? Hint: UFS's default 块 size is typically 32 KiB on a 文件系统 this small.
+**延伸问题。**在运行`dd if=/dev/zero of=/mnt/myblk/big bs=1m count=16`时观察`gstat -I 1`。你能看到写入以突发方式到达吗？单个BIO的大小是多少？提示：UFS在这个大小的文件系统上默认块大小通常是32 KiB。
 
-**Reference implementation.** `examples/part-06/ch27-storage-vfs/lab04-挂载-ufs/myfirst_blk.c`.
+**参考实现。**`examples/part-06/ch27-storage-vfs/lab04-mount-ufs/myfirst_blk.c`。
 
-### Lab 5: Observing Real Cross-Reload Persistence with md(4)
+### 实验5：用md(4)观察真正的跨重载持久性
 
-**Goal.** Confirm experimentally that cross-reload persistence requires external backing, as Section 7 argued, by using `md(4)`'s vnode mode as a control.
+**目标。**通过使用`md(4)`的vnode模式作为对照，实验性地确认跨重载持久性需要外部后备，正如第7节所论证的。
 
-**What you do.**
+**你做什么。**
 
-First, demonstrate that our RAM-backed `myblk` loses its 文件系统 on reload. Load, format, 挂载, write, 卸载, unload, reload, 挂载 again, and observe the empty 文件系统.
+首先，演示我们的RAM后备`myblk`在重载时会丢失其文件系统。加载、格式化、挂载、写入、卸载、卸载模块、重新加载、再次挂载，观察空的文件系统。
 
 ```console
 # kldload ./myblk.ko
@@ -2912,9 +2912,9 @@ First, demonstrate that our RAM-backed `myblk` loses its 文件系统 on reload.
 # ls /mnt/myblk
 ```
 
-The `ls` should show an empty or fresh UFS directory; the `token.txt` is gone because the backing 缓冲区 was reclaimed by the 内核 when the module unloaded.
+`ls`应该显示一个空的或全新的UFS目录；`token.txt`消失了，因为模块卸载时后备缓冲区被内核回收了。
 
-Now do the same sequence with `md(4)`'s vnode backend, which uses a real file on disk:
+现在用`md(4)`的vnode后端做同样的序列，它使用磁盘上的真实文件：
 
 ```console
 # truncate -s 64m /var/tmp/mdimage.img
@@ -2930,51 +2930,51 @@ Now do the same sequence with `md(4)`'s vnode backend, which uses a real file on
 persistent
 ```
 
-**What you look for.**
+**你观察什么。**
 
-The first sequence loses the file; the second preserves it. The difference is that `md9` is backed by a real file on disk, whose state survives regardless of what happens inside the 内核. Contrast this with `myblk0`, which is backed by 内核 heap that disappears on `kldunload`.
+第一个序列丢失了文件；第二个序列保留了它。区别在于`md9`由磁盘上的真实文件支持，其状态独立于内核内部发生的事情而存在。这与`myblk0`形成对比，后者由`kldunload`时消失的内核堆支持。
 
-**Stretch question.** Read the `MD_VNODE` branch of `mdstart_vnode` in `/usr/src/sys/dev/md/md.c`. Identify where the vnode reference is stored (hint: it lives on the per-unit `struct md_s`, not a module-scope global). Explain in your own words why that design is what lets the backing survive module lifecycles.
+**延伸问题。**阅读`/usr/src/sys/dev/md/md.c`中`mdstart_vnode`的`MD_VNODE`分支。识别vnode引用存储在哪里（提示：它存在于每单元的`struct md_s`上，而不是模块范围的全局变量）。用你自己的话解释为什么那个设计让后备存储能够跨越模块生命周期。
 
-**Reference implementation.** `examples/part-06/ch27-storage-vfs/lab05-persistence/README.md` walks through both sequences and their diagnostic output.
+**参考实现。**`examples/part-06/ch27-storage-vfs/lab05-persistence/README.md`走过了两个序列及其诊断输出。
 
-### Lab 6: Safe Un挂载 Under Load
+### 实验6：负载下的安全卸载
 
-**Goal.** Verify that the teardown path handles an active 文件系统 correctly.
+**目标。**验证拆卸路径正确处理活跃的文件系统。
 
-**What you do.**
+**你做什么。**
 
-Load the module, format it, 挂载 it. In one terminal, start a stress loop.
+加载模块、格式化、挂载。在一个终端中，启动压力循环。
 
 ```console
 # while true; do dd if=/dev/urandom of=/mnt/myblk/stress bs=4k \
     count=512 2>/dev/null; sync; done
 ```
 
-In another terminal, attempt to unload.
+在另一个终端中，尝试卸载。
 
 ```console
 # kldunload myblk
 kldunload: can't unload file: Device busy
 ```
 
-Stop the stress loop. Un挂载. Unload.
+停止压力循环。卸载文件系统。卸载模块。
 
-**What you look for.**
+**你观察什么。**
 
-The initial unload must fail gracefully. After 卸载, the final unload must succeed. `dmesg` must not show any 内核 warnings.
+初始卸载必须优雅地失败。卸载文件系统后，最终卸载必须成功。`dmesg`不能显示任何内核警告。
 
-**Stretch question.** Instead of killing the stress loop, try `u挂载 /mnt/myblk` directly. Does UFS let you 卸载 while writes are in flight? What is the error, and what does it mean?
+**延伸问题。**与其杀死压力循环，直接尝试`umount /mnt/myblk`。UFS在你写入进行中时允许卸载吗？错误是什么，意味着什么？
 
-**Reference implementation.** `examples/part-06/ch27-storage-vfs/lab06-safe-卸载/` includes a test script that performs the sequence above and reports failures.
+**参考实现。**`examples/part-06/ch27-storage-vfs/lab06-safe-unload/`包含执行上述序列并报告失败的测试脚本。
 
-### Lab 7: Observing BIO Traffic with DTrace
+### 实验7：用DTrace观察BIO流量
 
-**Goal.** Use DTrace to see the BIO path as it happens.
+**目标。**使用DTrace实时查看BIO路径。
 
-**What you do.**
+**你做什么。**
 
-With the 驱动程序 loaded and a 文件系统 挂载ed, run the following DTrace one-liner in one terminal:
+在驱动程序加载且文件系统挂载的情况下，在一个终端中运行以下DTrace单行命令：
 
 ```console
 # dtrace -n 'fbt::myblk_strategy:entry { \
@@ -2985,85 +2985,85 @@ With the 驱动程序 loaded and a 文件系统 挂载ed, run the following DTra
 }'
 ```
 
-In another terminal, create and read files on the 挂载ed 文件系统.
+在另一个终端中，在挂载的文件系统上创建和读取文件。
 
-**What you look for.**
+**你观察什么。**
 
-Note which BIO commands you see and in what quantities. Note the typical offsets and lengths. Compare the patterns from `dd` traffic versus `cp` traffic versus `tar` traffic. Note how `cp` or `mv` might produce very different BIO patterns depending on what the 缓冲区 cache decides to flush.
+注意你看到哪些BIO命令以及数量。注意典型的偏移量和长度。比较来自`dd`流量、`cp`流量和`tar`流量的模式。注意`cp`或`mv`如何根据缓冲区缓存决定刷新什么而产生非常不同的BIO模式。
 
-**Stretch question.** Issue `sync` while the DTrace is running. What BIO commands does `sync` cause? What about `newfs_ufs`?
+**延伸问题。**在DTrace运行时发出`sync`。`sync`导致哪些BIO命令？`newfs_ufs`呢？
 
-**Reference implementation.** `examples/part-06/ch27-storage-vfs/lab07-dtrace/README.md` with sample DTrace output and notes.
+**参考实现。**`examples/part-06/ch27-storage-vfs/lab07-dtrace/README.md`包含示例DTrace输出和笔记。
 
-### Lab 8: Adding a getattr Attribute
+### 实验8：添加getattr属性
 
-**Goal.** Implement a `d_getattr` 回调 that responds to `GEOM::ident`.
+**目标。**实现一个响应`GEOM::ident`的`d_getattr`回调。
 
-**What you do.**
+**你做什么。**
 
-Add the `myblk_getattr` function from Section 5 to the 驱动程序, and 注册 it on the disk before `disk_create`. Rebuild, reload, and check `diskinfo -v /dev/myblk0`.
+将第5节中的`myblk_getattr`函数添加到驱动程序中，并在`disk_create`之前在磁盘上注册它。重新构建、重新加载并检查`diskinfo -v /dev/myblk0`。
 
-**What you look for.**
+**你观察什么。**
 
-The `ident` field should now show `MYBLK0` instead of `(null)`.
+`ident`字段现在应该显示`MYBLK0`而不是`(null)`。
 
-**Stretch question.** What other attributes might a 文件系统 query? Look at `/usr/src/sys/geom/geom.h` for named attributes like `GEOM::rotation_rate`. Try implementing that too.
+**延伸问题。**文件系统还可能查询哪些属性？查看`/usr/src/sys/geom/geom.h`中的命名属性如`GEOM::rotation_rate`。也尝试实现它。
 
-**Reference implementation.** `examples/part-06/ch27-storage-vfs/lab08-getattr/myfirst_blk.c`.
+**参考实现。**`examples/part-06/ch27-storage-vfs/lab08-getattr/myfirst_blk.c`。
 
-### Lab 9: Exploring md(4) for Comparison
+### 实验9：探索md(4)进行比较
 
-**Goal.** Read a real FreeBSD 存储驱动程序 and identify the patterns we have used.
+**目标。**阅读一个真实的FreeBSD存储驱动程序并识别我们使用过的模式。
 
-**What you do.**
+**你做什么。**
 
-Open `/usr/src/sys/dev/md/md.c`. It is a long file. Do not try to read every line. Instead, find and understand these specific things:
+打开`/usr/src/sys/dev/md/md.c`。这是一个长文件。不要试图阅读每一行。相反，找到并理解以下具体内容：
 
-1. The `g_md_class` structure at the top of the file.
-2. The `struct md_s` softc.
-3. The `mdstart_malloc` function that handles BIO_READ and BIO_WRITE for `MD_MALLOC` memory disks.
-4. The worker-thread pattern in `md_kthread` (or its equivalent in your version).
-5. The `MDIOCATTACH` ioctl handler that creates new units on demand.
+1. 文件顶部的`g_md_class`结构。
+2. `struct md_s` softc。
+3. 处理`MD_MALLOC`内存磁盘的BIO_READ和BIO_WRITE的`mdstart_malloc`函数。
+4. `md_kthread`中的工作线程模式（或你版本中的等效实现）。
+5. 按需创建新单元的`MDIOCATTACH` ioctl处理器。
 
-Compare each of these to the corresponding code in our 驱动程序.
+将每项与我们驱动程序中的对应代码进行比较。
 
-**What you look for.**
+**你观察什么。**
 
-Spot the differences. Where does `md(4)` have features we do not? Where does our 驱动程序 have the same mechanism in simpler form? Where would you need to extend our 驱动程序 to add one of `md(4)`'s features?
+发现差异。`md(4)`在哪里有我们没有的功能？我们的驱动程序在哪里以更简单的形式拥有相同的机制？你需要在哪里扩展我们的驱动程序以添加`md(4)`的功能之一？
 
-**Reference notes.** `examples/part-06/ch27-storage-vfs/lab09-md-comparison/NOTES.md` contains a mapped walkthrough of the relevant sections of `md.c` for FreeBSD 14.3.
+**参考笔记。**`examples/part-06/ch27-storage-vfs/lab09-md-comparison/NOTES.md`包含FreeBSD 14.3的`md.c`相关章节的映射演练。
 
-### Lab 10: Break It On Purpose
+### 实验10：故意破坏它
 
-**Goal.** Induce known failure modes so that you can recognise them quickly in real work.
+**目标。**诱发已知故障模式，以便你在真实工作中能快速识别它们。
 
-**What you do.**
+**你做什么。**
 
-Take a clean copy of the completed 驱动程序 from Lab 8. In separate copies (do not mix the breakages together), introduce the following bugs one at a time, rebuild, load, and observe.
+获取实验8中完成的驱动程序的干净副本。在单独的副本中（不要将破坏混在一起），逐一引入以下bug，重新构建、加载并观察。
 
-**Breakage 1: Forget biodone.** Comment out the `biodone(bp)` call in the `BIO_READ` case. Load, 挂载, and run `cat` on a file. The `cat` will hang forever. Attempt to kill it with `Ctrl-C`; it may not respond. Use `procstat -kk` on the stuck PID to see where the process is waiting. This is the classic leaked-BIO symptom.
+**破坏1：忘记biodone。**注释掉`BIO_READ` case中的`biodone(bp)`调用。加载、挂载并对一个文件运行`cat`。`cat`将永远挂起。尝试用`Ctrl-C`杀死它；它可能不响应。对卡住的PID使用`procstat -kk`查看进程在哪里等待。这是经典的泄漏BIO症状。
 
-**Breakage 2: Free backing before disk_destroy.** In `myblk_分离_unit`, swap the order so that `free(sc->backing, ...)` comes before `disk_destroy(sc->disk)`. Load, format, 挂载, 卸载, and try to unload. If no BIO is in flight during the unload window, you will escape unharmed. If any BIO is in flight (use a running `dd` to ensure this), you will panic with a page fault.
+**破坏2：在disk_destroy之前释放后备存储。**在`myblk_detach_unit`中，交换顺序使`free(sc->backing, ...)`在`disk_destroy(sc->disk)`之前。加载、格式化、挂载、卸载并尝试卸载模块。如果在卸载窗口期间没有BIO在飞行中，你会安然无恙。如果有任何BIO在飞行中（用运行中的`dd`确保这一点），你将因页面错误而崩溃。
 
-**Breakage 3: Skip bio_resid.** Remove the `bp->bio_resid = 0` line from the `BIO_READ` case. Load, format, 挂载, and create a file. Read it back. Depending on what garbage was in `bio_resid` at allocation time, the 文件系统 may report incorrect read sizes and may log errors. Sometimes it works; sometimes it does not. This is the characteristic intermittent failure of a forgotten `bio_resid`.
+**破坏3：跳过bio_resid。**从`BIO_READ` case中删除`bp->bio_resid = 0`行。加载、格式化、挂载并创建一个文件。读回它。根据`bio_resid`在分配时的垃圾内容，文件系统可能报告不正确的读取大小并可能记录错误。有时它能工作；有时不行。这是被遗忘的`bio_resid`的特征性间歇性故障。
 
-**Breakage 4: Off-by-one bounds.** Change the bounds check from `offset > sc->backing_size` to `offset >= sc->backing_size`. This rejects valid reads at the last offset. Load, format, 挂载. Try to write a file that extends to the very last 块. Observe whether UFS notices; whether `dd` notices; what error is reported.
+**破坏4：差一的边界检查。**将边界检查从`offset > sc->backing_size`改为`offset >= sc->backing_size`。这拒绝了最后一个偏移量处的有效读取。加载、格式化、挂载。尝试写入一个延伸到最后一个块的文件。观察UFS是否注意到；`dd`是否注意到；报告了什么错误。
 
-**What you look for.**
+**你观察什么。**
 
-In each case, describe in your logbook what you observed, which tool revealed the problem (dmesg, `procstat`, `gstat`, panic trace), and what the fix would be. Then apply the fix and confirm normal operation.
+在每种情况下，在你的日志中描述你观察到了什么、哪个工具揭示了问题（dmesg、`procstat`、`gstat`、panic跟踪），以及修复应该是什么。然后应用修复并确认正常操作。
 
-**Stretch question.** What sequence of commands reliably reproduces each failure? Can you write a shell script that deterministically triggers Breakage 1 or Breakage 2?
+**延伸问题。**什么命令序列可以可靠地重现每个故障？你能写一个确定性地触发破坏1或破坏2的shell脚本吗？
 
-**Reference notes.** `examples/part-06/ch27-storage-vfs/lab10-break-on-purpose/BREAKAGES.md` contains short descriptions and a test script for each failure mode.
+**参考笔记。**`examples/part-06/ch27-storage-vfs/lab10-break-on-purpose/BREAKAGES.md`包含每个故障模式的简短描述和测试脚本。
 
-### Lab 11: Measure Under Varying Block Sizes
+### 实验11：在不同块大小下测量
 
-**Goal.** Understand how BIO size affects throughput.
+**目标。**理解BIO大小如何影响吞吐量。
 
-**What you do.**
+**你做什么。**
 
-With the 驱动程序 loaded and a 文件系统 挂载ed, run `dd` with progressively larger 块 sizes and time each run.
+在驱动程序加载且文件系统挂载的情况下，使用逐渐增大的块大小运行`dd`并计时每次运行。
 
 ```console
 # for bs in 512 4096 32768 131072 524288 1048576; do
@@ -3074,19 +3074,19 @@ done
 
 Record the throughput in each case.
 
-**What you look for.**
+**你观察什么。**
 
-Throughput should increase as 块 size increases, then plateau at or near `d_maxsize` (typically 128 KiB). Very small 块 sizes will be dominated by per-BIO overhead.
+吞吐量应该随着块大小增加而增加，然后在`d_maxsize`（通常为128 KiB）附近达到平台。非常小的块大小将主要受每BIO开销支配。
 
-**Stretch question.** At what 块 size does the curve visibly plateau? Why?
+**延伸问题。**在什么块大小下曲线明显达到平台？为什么？
 
-### Lab 12: Race Test With Two Processes
+### 实验12：两个进程的竞争测试
 
-**Goal.** Observe how the 驱动程序 handles simultaneous access from multiple processes.
+**目标。**观察驱动程序如何处理来自多个进程的同时访问。
 
-**What you do.**
+**你做什么。**
 
-With the 驱动程序 loaded and a 文件系统 挂载ed, run two `dd` processes in parallel writing to different files.
+在驱动程序加载且文件系统挂载的情况下，并行运行两个`dd`进程写入不同文件。
 
 ```console
 # dd if=/dev/urandom of=/mnt/myblk/a bs=4k count=1024 &
@@ -3096,557 +3096,557 @@ With the 驱动程序 loaded and a 文件系统 挂载ed, run two `dd` processes
 
 Record the combined throughput.
 
-**What you look for.**
+**你观察什么。**
 
-Both writes should complete without corruption. Verify with `md5` or `sha256` on each file. The combined throughput may be slightly less than twice the single-process throughput because of lock contention in our coarse 互斥锁.
+两个写入都应该完成且没有损坏。用每个文件的`md5`或`sha256`验证。合并吞吐量可能略低于两倍的单进程吞吐量，因为我们粗粒度互斥锁的锁竞争。
 
-**Stretch question.** Does removing the 互斥锁 affect throughput? Does it cause corruption? Why or why not?
+**延伸问题。**移除互斥锁是否影响吞吐量？是否导致损坏？为什么是或为什么不是？
 
-### A Word on Lab Discipline
+### 关于实验纪律
 
-Every lab is small, and none of them is an exam. If you get stuck, the reference implementation is there for you to compare against. Do not copy-paste it as your first attempt, though. The copying is not the skill. The skill is in typing, reading, diagnosing, and verifying.
+每个实验都很小，没有一个是考试。如果你卡住了，参考实现就在那里供你比较。但不要把复制粘贴作为你的第一次尝试。复制不是技能。技能在于输入、阅读、诊断和验证。
 
-Keep your logbook open. Record what you ran, what you saw, and what surprised you. Storage bugs often repeat across projects, and your future self will thank your current self for the notes.
+保持你的日志打开。记录你运行了什么、看到了什么和什么让你惊讶。存储bug经常跨项目重复，你未来的自己会感谢现在的自己做的笔记。
 
 ## 挑战练习
 
-The challenge exercises stretch the 驱动程序 a little further. Each one is scoped to something a beginner can accomplish with the material already covered in the chapter, combined with a thoughtful reading of FreeBSD source. They are not timed. Take your time. Open the source tree. Consult manual pages. Compare your solution to `md(4)` when in doubt.
+挑战练习将驱动程序推得更远一些。每一个都限定在初学者可以凭借本章已涵盖的材料结合对FreeBSD源码的仔细阅读来完成的范围内。它们不是计时的。慢慢来。打开源码树。查阅手册页。有疑问时与`md(4)`比较。
 
-Every challenge below has a stub folder under `examples/part-06/ch27-storage-vfs/`, but no reference solution is provided. The point is to work through them yourself. Solutions are left as follow-ups that you can compare with peers or post in your study notes.
+下面的每个挑战在`examples/part-06/ch27-storage-vfs/`下都有桩文件夹，但没有提供参考解决方案。重点是自己解决它们。解决方案作为后续留给你与同行比较或发布在你的学习笔记中。
 
-### Challenge 1: Expose a Read-Only Mode
+### 挑战1：暴露只读模式
 
-Add a module-load tunable that lets the 驱动程序 come up in read-only mode. In read-only mode, `BIO_WRITE` and `BIO_DELETE` should fail with `EROFS`. `newfs_ufs` should refuse to format the 设备, and `挂载` without `-r` should refuse to 挂载 it.
+添加一个模块加载时可调参数，让驱动程序以只读模式启动。在只读模式下，`BIO_WRITE`和`BIO_DELETE`应以`EROFS`失败。`newfs_ufs`应拒绝格式化设备，不带`-r`的`mount`应拒绝挂载。
 
-Hint. The tunable can be a `sysctl_int` bound to a static variable. `TUNABLE_INT` is another way, used at load time only. Your strategy function can check the variable before dispatching writes. Remember that changing the mode at runtime while a 文件系统 is 挂载ed is a recipe for corruption; you can either disallow the change or document that the tunable only takes effect at module load.
+提示。可调参数可以是绑定到静态变量的`sysctl_int`。`TUNABLE_INT`是另一种方式，仅在加载时使用。你的策略函数可以在分派写入之前检查该变量。记住，在文件系统挂载时运行时更改模式是数据损坏的根源；你可以禁止更改或记录可调参数仅在模块加载时生效。
 
-### Challenge 2: Implement a Second Unit
+### 挑战2：实现第二个单元
 
-Add support for exactly two units: `myblk0` and `myblk1`. Each should have its own backing store of its own size. Do not try to implement fully dynamic unit allocation; just hardcode two softcs and two 附加 calls in the module loader.
+添加对恰好两个单元的支持：`myblk0`和`myblk1`。每个应该有自己的后备存储和自己的大小。不要尝试实现完全动态的单元分配；只需在模块加载器中硬编码两个softc和两个附加调用。
 
-Hint. Move the backing allocation, disk allocation, and disk creation into `myblk_附加_unit` parameterised by unit number and size, and call it twice from the loader. Make sure the 分离 path walks both units.
+提示。将后备分配、磁盘分配和磁盘创建移入按单元号和大小参数化的`myblk_attach_unit`中，并从加载器中调用两次。确保分离路径遍历两个单元。
 
-### Challenge 3: Honour BIO_DELETE with a Sysctl Counter
+### 挑战3：用Sysctl计数器响应BIO_DELETE
 
-Extend `BIO_DELETE` handling to also bump a `sysctl` counter that reports total bytes deleted. Verify with `sysctl dev.myblk` while running `fstrim /mnt/myblk` or while `dd` writes and overwrites files.
+扩展`BIO_DELETE`处理，同时递增一个`sysctl`计数器，报告已删除的总字节数。在运行`fstrim /mnt/myblk`或`dd`写入和覆盖文件时用`sysctl dev.myblk`验证。
 
-Hint. UFS by default does not issue `BIO_DELETE`. To see delete traffic, 挂载 with `-o trim`. You can verify the trim flow with your DTrace one-liner from Lab 7.
+提示。UFS默认不发出`BIO_DELETE`。要看到删除流量，用`-o trim`挂载。你可以用实验7中的DTrace单行命令验证trim流。
 
-### Challenge 4: Respond to BIO_GETATTR for rotation_rate
+### 挑战4：响应BIO_GETATTR查询rotation_rate
 
-Extend `myblk_getattr` to answer `GEOM::rotation_rate` with `DISK_RR_NON_ROTATING` (defined in `/usr/src/sys/geom/geom_disk.h`). Verify with `gpart show` and `diskinfo -v` that the 设备 reports as non-rotating.
+扩展`myblk_getattr`以用`DISK_RR_NON_ROTATING`（在`/usr/src/sys/geom/geom_disk.h`中定义）回答`GEOM::rotation_rate`。用`gpart show`和`diskinfo -v`验证设备报告为非旋转。
 
-Hint. The attribute is returned as a plain `u_int`. Look at how `md(4)` handles `BIO_GETATTR` for comparable attributes.
+提示。属性作为普通`u_int`返回。看看`md(4)`如何为类似属性处理`BIO_GETATTR`。
 
-### Challenge 5: Resizing the Device
+### 挑战5：调整设备大小
 
-Add an ioctl that lets user space resize the backing store while nothing is 挂载ed. If a 文件系统 is 挂载ed, the ioctl must fail with `EBUSY`. If the resize succeeds, update `d_mediasize` and notify GEOM so that `diskinfo` reports the new size.
+添加一个ioctl，让用户空间在未挂载任何东西时调整后备存储大小。如果文件系统已挂载，ioctl必须以`EBUSY`失败。如果调整大小成功，更新`d_mediasize`并通知GEOM，以便`diskinfo`报告新大小。
 
-Hint. Look at `md(4)`'s `MDIOCRESIZE` handling for the pattern. This is a non-trivial challenge; take your time and test with throwaway 文件系统. Do not attempt this on any backing that you would be sad to lose.
+提示。查看`md(4)`的`MDIOCRESIZE`处理了解模式。这是一个非平凡的挑战；慢慢来，用一次性的文件系统测试。不要在你舍不得丢失的后备上尝试这个。
 
-### Challenge 6: A Write Counter and Rate Display
+### 挑战6：写入计数器和速率显示
 
-Add per-second write-byte counters, exposed via `sysctl`, and a small user-space shell script that reads the sysctl every second and prints a human-readable rate. This is useful for testing and it gives you experience wiring metrics through the 内核's observability machinery.
+添加每秒写入字节计数器，通过`sysctl`暴露，以及一个小的用户空间shell脚本，每秒读取sysctl并打印人类可读的速率。这对测试有用，也给你提供将指标接入内核可观测性机制的经验。
 
-Hint. Use `atomic_add_long` on the counters. The shell script is a one-liner in `while true` loops.
+提示。在计数器上使用`atomic_add_long`。shell脚本是一个`while true`循环中的单行命令。
 
-### Challenge 7: A Fixed Pattern Backing Store
+### 挑战7：固定模式后备存储
 
-Implement a backing-store mode where reads always return a fixed byte pattern and writes are silently discarded. This is similar to `g_zero` but with a configurable pattern byte. It is useful for stress-testing the layers above when you do not care about data content.
+实现一种后备存储模式，读取总是返回固定的字节模式，写入被静默丢弃。这类似于`g_zero`，但具有可配置的模式字节。当你不关心数据内容时，它对压力测试上面的层很有用。
 
-Hint. Branch on a mode variable inside the strategy function. Keep the in-memory backing for the normal mode and skip the `memcpy` in pattern mode.
+提示。在策略函数内部分支到一个模式变量。正常模式保留内存中的后备，在模式模式下跳过`memcpy`。
 
-### Challenge 8: Write a mdconfig-Like Control Utility
+### 挑战8：编写类似mdconfig的控制工具
 
-Write a small user-space program that talks to a control 设备 on your 驱动程序 (you will need to add one) and can create, destroy, and query units at runtime. The program should accept command-line flags similar to `mdconfig`.
+编写一个小的用户空间程序，与驱动程序上的控制设备（你需要添加一个）通信，并可以在运行时创建、销毁和查询单元。程序应该接受类似`mdconfig`的命令行标志。
 
-Hint. This is a substantial challenge. Start with a single ioctl that prints "hello" and build up from there. `make_dev` on a cdev for your control 设备, then implement `d_ioctl` on that cdev.
+提示。这是一个相当大的挑战。从一个打印"hello"的单个ioctl开始，从那里构建。在你的控制设备上用cdevsw的`make_dev`，然后在该cdev上实现`d_ioctl`。
 
-### Challenge 9: Survive a Simulated Crash
+### 挑战9：在模拟崩溃中存活
 
-Add a mode where the 驱动程序 drops every Nth write silently (pretending the write succeeded but actually doing nothing). Use this to test UFS's resilience to lost writes.
+添加一个模式，驱动程序静默丢弃每第N次写入（假装写入成功但实际上什么也不做）。用这个来测试UFS对丢失写入的弹性。
 
-Hint. This is a dangerous mode. Only run it on throwaway 文件系统. You should be able to reproduce interesting `fsck_ffs` repair scenarios with it. Be ready to explain to yourself why this mode is only safe on pseudo 设备 you can regenerate from scratch.
+提示。这是一个危险的模式。只在一次性的文件系统上运行。你应该能用它重现有趣的`fsck_ffs`修复场景。准备好向自己解释为什么这个模式只在你可以从零重新生成的伪设备上是安全的。
 
-### Challenge 10: Understand md(4) Well Enough to Teach It
+### 挑战10：足够理解md(4)以至于能教授它
 
-Write a one-page explanation of how `md(4)` creates a new unit in response to `MDIOCATTACH`. Cover the ioctl path, the softc allocation, the backing-type-specific initialisation, the `g_disk` wiring, and the worker thread creation. This is a reading challenge rather than a coding challenge, but it is one of the most useful exercises you can do to deepen your grasp of the storage stack.
+写一页关于`md(4)`如何响应`MDIOCATTACH`创建新单元的说明。涵盖ioctl路径、softc分配、特定于后备类型的初始化、`g_disk`连接和工作线程创建。这是一个阅读挑战而不是编码挑战，但它是对加深你对存储栈理解最有用的练习之一。
 
-Hint. `/usr/src/sys/dev/md/md.c` and `/usr/src/sbin/mdconfig/mdconfig.c` are the two files to read. Pay attention to the `struct md_ioctl` structure in `/usr/src/sys/sys/mdioctl.h`, because that is the ABI between user space and the 内核.
+提示。`/usr/src/sys/dev/md/md.c`和`/usr/src/sbin/mdconfig/mdconfig.c`是两个要阅读的文件。注意`/usr/src/sys/sys/mdioctl.h`中的`struct md_ioctl`结构，因为那是用户空间和内核之间的ABI。
 
-### When to Attempt Challenges
+### 何时尝试挑战
 
-You do not need to do all of them. Pick one or two that speak to something you are curious about or something you can imagine using later. A single carefully-done challenge is worth more than five half-done ones. The reference `md(4)` implementation will be there whenever you want to compare your approach to a production 驱动程序.
+你不需要做所有挑战。选择一两个你对其中某个东西感到好奇或你能想象以后会用到的东西。一个仔细完成的挑战比五个半完成的挑战更有价值。参考`md(4)`实现会在你想将自己的方法与生产驱动程序比较时始终在那里。
 
-## Troubleshooting
+## 故障排除
 
-Storage 驱动程序 have a particular family of failure modes. Some of them are obvious as they happen. Others are silent at first and become obvious only after reboot, sometimes with data corruption in between. This section lists the symptoms you are most likely to see while working through the chapter and the labs, along with the usual causes and fixes. Use it as a reference when things go wrong, and read it through at least once before you start, because it is much easier to recognise a failure mode the second time.
+存储驱动程序有一族特定的故障模式。有些在发生时就显而易见。其他则一开始是静默的，只有在重启后才变得明显，有时中间还会出现数据损坏。本节列出了你在学习本章和做实验时最可能看到的症状，以及常见原因和修复方法。当出现问题时将其用作参考，在开始之前至少通读一次，因为第二次识别故障模式要容易得多。
 
-### `kldload` Succeeds but No /dev Node Appears
+### `kldload`成功但没有/dev节点出现
 
-**Symptom.** `kldload` returns zero. `kldstat` shows the module loaded. But `/dev/myblk0` does not exist.
+**症状。**`kldload`返回零。`kldstat`显示模块已加载。但`/dev/myblk0`不存在。
 
-**Likely causes.**
+**可能原因。**
 
-- You forgot to call `disk_create`. The softc is allocated, the disk is allocated, but the disk is not 注册ed with GEOM.
-- You called `disk_create` with `d_name` set to a null pointer or an empty string.
-- You called `disk_create` with `d_mediasize` set to zero. `g_disk` silently refuses to create a provider with zero size.
-- You called `disk_create` before filling in the fields. The 框架 captures the field values at registration time and does not re-read them later.
+- 你忘记调用`disk_create`。softc已分配，磁盘已分配，但磁盘未向GEOM注册。
+- 你用`d_name`设置为空指针或空字符串调用了`disk_create`。
+- 你用`d_mediasize`设置为零调用了`disk_create`。`g_disk`静默拒绝创建零大小的提供者。
+- 你在填充字段之前调用了`disk_create`。框架在注册时捕获字段值，之后不会重新读取。
 
-**Fix.** Check the 内核 message 缓冲区 with `dmesg`. `g_disk` prints a diagnostic when it rejects a registration. Fix the field value and rebuild.
+**修复。**用`dmesg`检查内核消息缓冲区。`g_disk`在拒绝注册时打印诊断信息。修复字段值并重新构建。
 
-### `kldload` Fails with "module version mismatch"
+### `kldload`失败并显示"module version mismatch"
 
-**Symptom.** Loading the module reports `kldload: can't load ./myblk.ko: No such file or directory` or a more explicit error about version mismatch.
+**症状。**加载模块报告`kldload: can't load ./myblk.ko: No such file or directory`或更明确的版本不匹配错误。
 
-**Likely causes.**
+**可能原因。**
 
-- You compiled against a different 内核 than the one currently running.
-- You changed `DISK_VERSION` on your own, which you should never do.
-- You forgot `MODULE_VERSION(myblk, 1)`.
+- 你针对与当前运行内核不同的内核编译了模块。
+- 你自己修改了`DISK_VERSION`，你不应该这样做。
+- 你忘记添加`MODULE_VERSION(myblk, 1)`。
 
-**Fix.** Check `uname -a` and the 内核 version your build chose. Recompile against the running 内核.
+**修复。**检查`uname -a`和你的构建选择的内核版本。针对运行中的内核重新编译。
 
-### `diskinfo` Prints the Wrong Size
+### `diskinfo`打印错误的大小
 
-**Symptom.** `diskinfo -v /dev/myblk0` prints a size that does not match `MYBLK_MEDIASIZE`.
+**症状。**`diskinfo -v /dev/myblk0`打印的大小与`MYBLK_MEDIASIZE`不匹配。
 
-**Likely causes.**
+**可能原因。**
 
-- You set `d_mediasize` to the wrong expression. A common off-by-one is setting it to the 扇区 count rather than the byte count.
-- You have `MYBLK_MEDIASIZE` defined as something other than `(size * 1024 * 1024)` and the macro is being interpreted differently than you intended. Parenthesise aggressively.
+- 你将`d_mediasize`设置为错误的表达式。一个常见的差一错误是将其设置为扇区计数而不是字节数。
+- 你的`MYBLK_MEDIASIZE`定义为非`(size * 1024 * 1024)`的值，宏被以不同于你意图的方式解释。积极使用括号。
 
-**Fix.** Print the size in your load message and sanity-check against `diskinfo -v`.
+**修复。**在加载消息中打印大小并与`diskinfo -v`进行合理性检查。
 
-### `newfs_ufs` Fails with "Device not configured"
+### `newfs_ufs`失败并显示"Device not configured"
 
-**Symptom.** `newfs_ufs /dev/myblk0` prints `newfs: /dev/myblk0: Device not configured`.
+**症状。**`newfs_ufs /dev/myblk0`打印`newfs: /dev/myblk0: Device not configured`。
 
-**Likely causes.**
+**可能原因。**
 
-- Your strategy function is still the placeholder that returns `ENXIO` for everything. `ENXIO` is mapped to the `Device not configured` message by `errno`.
+- 你的策略函数仍然是返回`ENXIO`的占位符。`ENXIO`被`errno`映射为`Device not configured`消息。
 
-**Fix.** Implement the strategy function from Section 5.
+**修复。**实现第5节中的策略函数。
 
-### `newfs_ufs` Hangs
+### `newfs_ufs`挂起
 
-**Symptom.** `newfs_ufs /dev/myblk0` starts up but never completes.
+**症状。**`newfs_ufs /dev/myblk0`启动但从不完成。
 
-**Likely causes.**
+**可能原因。**
 
-- Your strategy function does not call `biodone` on some path. `newfs_ufs` issues a BIO, waits for its completion, and will wait forever if completion never comes.
-- Your strategy function calls `biodone` twice on some path. The first call returns success; the second call usually panics, but in some cases the BIO state is corrupted enough to hang.
+- 你的策略函数在某条路径上没有调用`biodone`。`newfs_ufs`发出一个BIO，等待其完成，如果完成永远不会到来就会永远等待。
+- 你的策略函数在某条路径上调用了两次`biodone`。第一次调用返回成功；第二次调用通常会导致崩溃，但在某些情况下BIO状态损坏足以导致挂起。
 
-**Fix.** Audit your strategy function. Every control-flow path must end with exactly one call to `biodone(bp)`. A useful pattern is to use a single exit point at the end of the function.
+**修复。**审计你的策略函数。每个控制流路径必须恰好以一次`biodone(bp)`调用结束。一个有用的模式是在函数末尾使用单一退出点。
 
-### `挂载` Fails with "bad super块"
+### `mount`失败并显示"bad super block"
 
-**Symptom.** `挂载 /dev/myblk0 /mnt/myblk` reports `挂载: /dev/myblk0: bad magic`.
+**症状。**`mount /dev/myblk0 /mnt/myblk`报告`mount: /dev/myblk0: bad magic`。
 
-**Likely causes.**
+**可能原因。**
 
-- Your strategy function is returning wrong data for some offsets. The super块 is at offset 65536, and UFS validates it carefully.
-- Your bounds check is rejecting a legitimate read.
-- Your `memcpy` is copying from the wrong address (usually an off-by-one in the offset arithmetic).
+- 你的策略函数在某些偏移量返回错误数据。超级块在偏移65536处，UFS仔细验证它。
+- 你的边界检查拒绝了合法的读取。
+- 你的`memcpy`从错误的地址复制（通常是偏移算术中的差一错误）。
 
-**Fix.** Write a known pattern to the 设备 with `dd`, then read it back with `dd` at various offsets and compare with `cmp`. If the pattern round-trips, the basic I/O is correct. If not, find the first offset where it diverges and inspect the code at the corresponding bounds check or address arithmetic.
+**修复。**用`dd`向设备写入已知模式，然后用`dd`在不同偏移量读回并用`cmp`比较。如果模式正确往返，基本I/O是正确的。如果不正确，找到第一个出现偏差的偏移量并检查相应边界检查或地址算术处的代码。
 
-### `kldunload` Hangs
+### `kldunload`挂起
 
-**Symptom.** `kldunload myblk` does not return.
+**症状。**`kldunload myblk`不返回。
 
-**Likely causes.**
+**可能原因。**
 
-- A BIO is in flight and your strategy function never calls `biodone`. `disk_destroy` is waiting for the BIO to complete.
-- You added a worker thread and it is sleeping inside a function that will never be awakened.
+- 一个BIO在飞行中，你的策略函数从未调用`biodone`。`disk_destroy`正在等待BIO完成。
+- 你添加了工作线程，它在一个永远不会被唤醒的函数中睡眠。
 
-**Fix.** Run `procstat -kk` in another terminal. Look at the `g_event` thread's stack and at any of your 驱动程序's threads. If they are stuck in a `sleep` or `waitfor` state, you have a leaked BIO or a misbehaving worker.
+**修复。**在另一个终端中运行`procstat -kk`。查看`g_event`线程的栈和你驱动程序线程的任何栈。如果它们卡在`sleep`或`waitfor`状态，你有一个泄漏的BIO或行为不当的工作线程。
 
-### `kldunload` Returns "Device 总线y"
+### `kldunload`返回"Device busy"
 
-**Symptom.** `kldunload myblk` reports `Device 总线y` and exits.
+**症状。**`kldunload myblk`报告`Device busy`并退出。
 
-**Likely causes.**
+**可能原因。**
 
-- A 文件系统 is still 挂载ed on `/dev/myblk0`.
-- A program still has `/dev/myblk0` open for raw access.
-- A `dd` from a previous terminal session is still running in the background.
+- 文件系统仍然挂载在`/dev/myblk0`上。
+- 一个程序仍然以原始访问方式打开了`/dev/myblk0`。
+- 之前终端会话的`dd`仍然在后台运行。
 
-**Fix.** Run `挂载 | grep myblk` to check for active 挂载s. Run `fuser /dev/myblk0` to find open handles. Un挂载, close, then unload.
+**修复。**运行`mount | grep myblk`检查活跃的挂载。运行`fuser /dev/myblk0`找到打开的句柄。卸载、关闭，然后卸载模块。
 
-### Kernel Panic with "freeing free memory"
+### 内核崩溃并显示"freeing free memory"
 
-**Symptom.** The 内核 panics with a message about freeing already-freed memory, showing a stack trace through your 驱动程序.
+**症状。**内核崩溃，显示关于释放已释放内存的消息，栈跟踪经过你的驱动程序。
 
-**Likely causes.**
+**可能原因。**
 
-- The 分离 path is freeing the softc or the backing twice.
-- A worker thread survived `disk_destroy` and tried to access freed state.
+- 分离路径正在两次释放softc或后备存储。
+- 一个工作线程在`disk_destroy`后仍然存活并试图访问已释放的状态。
 
-**Fix.** Review the 分离 order. Destroy the disk first (which waits for in-flight BIOs), then free the backing, then destroy the 互斥锁, then free the softc. If you added a worker thread, make sure it has exited before any `free` is called.
+**修复。**审查分离顺序。先销毁磁盘（它等待飞行中的BIO），然后释放后备存储，然后销毁互斥锁，然后释放softc。如果你添加了工作线程，确保它在任何`free`被调用之前已经退出。
 
-### Kernel Panic with "vm_fault: 内核 mode"
+### 内核崩溃并显示"vm_fault: kernel mode"
 
-**Symptom.** The 内核 panics with a page fault inside your 驱动程序, typically in the strategy function or in the 分离 path.
+**症状。**内核在你的驱动程序内崩溃，出现页面错误，通常在策略函数或分离路径中。
 
-**Likely causes.**
+**可能原因。**
 
-- You dereferenced a null or freed pointer. The most common case is using `sc->backing` after it has been freed.
-- You confused `bp->bio_data` with `bp->bio_disk` and read from the wrong pointer.
+- 你解引用了一个空指针或已释放的指针。最常见的情况是在`sc->backing`被释放后使用它。
+- 你混淆了`bp->bio_data`和`bp->bio_disk`，从错误的指针读取。
 
-**Fix.** Audit pointer lifetimes. If the backing store is freed during 分离, ensure no BIOs can still reach the strategy function after that point. The order `disk_destroy` -> `free(backing)` is the correct order.
+**修复。**审计指针生命周期。如果后备存储在分离期间被释放，确保之后没有BIO还能到达策略函数。`disk_destroy` -> `free(backing)`是正确的顺序。
 
-### `gstat` Shows No Activity
+### `gstat`显示没有活动
 
-**Symptom.** You are running `dd` or `newfs_ufs` against the 设备, but `gstat -f myblk0` shows zero ops/s.
+**症状。**你正在对设备运行`dd`或`newfs_ufs`，但`gstat -f myblk0`显示零ops/s。
 
-**Likely causes.**
+**可能原因。**
 
-- You are watching the wrong 设备. `gstat -f myblk0` uses a regex; make sure your 设备 name matches.
-- Your 驱动程序 uses a custom GEOM class name that `gstat` is filtering out.
+- 你在观察错误的设备。`gstat -f myblk0`使用正则表达式；确保你的设备名称匹配。
+- 你的驱动程序使用了`gstat`正在过滤掉的自定义GEOM类名。
 
-**Fix.** Run `gstat` without the filter and look for your 设备. Check the name field carefully.
+**修复。**不带过滤器运行`gstat`并查找你的设备。仔细检查名称字段。
 
-### "Operation not supported" for DELETE
+### DELETE的"Operation not supported"
 
-**Symptom.** Mount-with-trim fails or `fstrim` prints "Operation not supported".
+**症状。**带trim挂载失败或`fstrim`打印"Operation not supported"。
 
-**Likely causes.**
+**可能原因。**
 
-- Your strategy function does not handle `BIO_DELETE` and returns `EOPNOTSUPP`.
-- The 文件系统 探测d `BIO_DELETE` support during 挂载 and cached the negative result.
+- 你的策略函数不处理`BIO_DELETE`并返回`EOPNOTSUPP`。
+- 文件系统在挂载期间探测了`BIO_DELETE`支持并缓存了否定结果。
 
-**Fix.** Implement `BIO_DELETE` in the strategy function, then 卸载 and re挂载. Most 文件系统 only 探测 at 挂载 time.
+**修复。**在策略函数中实现`BIO_DELETE`，然后卸载并重新挂载。大多数文件系统只在挂载时探测。
 
-### /dev/myblk0 Does Not Appear Until Several Seconds After kldload
+### /dev/myblk0在kldload几秒后才出现
 
-**Symptom.** Immediately after `kldload`, `ls /dev/myblk0` fails. A few moments later, it succeeds.
+**症状。**`kldload`后，`ls /dev/myblk0`立即失败。片刻后，它成功。
 
-**Likely causes.**
+**可能原因。**
 
-- GEOM processes events asynchronously. `disk_create` queues an event, and the provider is not published until the event thread picks it up.
-- On a system under load, the event queue may be slow.
+- GEOM异步处理事件。`disk_create`将事件排队，直到事件线程拾取它才发布提供者。
+- 在负载下的系统上，事件队列可能很慢。
 
-**Fix.** This is normal behaviour. If your scripts depend on the node existing immediately after `kldload`, add a small sleep or a polling loop.
+**修复。**这是正常行为。如果你的脚本依赖于节点在`kldload`后立即可用，添加一个小延迟或轮询循环。
 
-### Data Written Is Readable but Garbled
+### 写入的数据可读但乱码
 
-**Symptom.** A read after a write returns the right number of bytes but with different content.
+**症状。**写入后读取返回正确数量的字节但内容不同。
 
-**Likely causes.**
+**可能原因。**
 
-- Off-by-one in the backing-store offset arithmetic.
-- A concurrent BIO is overlapping with the one you expect, and your lock is not held for long enough.
-- The strategy function is reading from `bp->bio_data` before the 内核 has finished setting it up (this is extremely unlikely for normal BIOs, but can happen with bugs in how you parse attributes).
+- 后备存储偏移算术中的差一错误。
+- 一个并发的BIO与你期望的重叠，你的锁持有时间不够长。
+- 策略函数在内核完成设置`bp->bio_data`之前从中读取（这对普通BIO极其不可能，但可能在解析属性的方式有bug时发生）。
 
-**Fix.** Add a `printf` to the strategy function that logs the first few bytes before and after the `memcpy`. Repeat the test with a known pattern and look for the mismatch.
+**修复。**在策略函数中添加一个`printf`，记录`memcpy`前后前几个字节。用已知模式重复测试并查找不匹配。
 
-### Backing Store Not Freed, Memory Grows With Every Reload
+### 后备存储未释放，每次重新加载内存增长
 
-**Symptom.** `vmstat -m | grep myblk` shows the allocation bytes growing with each load/unload cycle.
+**症状。**`vmstat -m | grep myblk`显示分配字节在每个加载/卸载周期中增长。
 
-**Likely causes.**
+**可能原因。**
 
-- The `MOD_UNLOAD` handler returned without calling `myblk_分离_unit`, so the `free(sc->backing, M_MYBLK)` was skipped.
-- An error path in `MOD_UNLOAD` returned early before reaching the free. Every error path needs to free or the allocation leaks.
-- A worker thread is holding a reference to the softc and the handler refuses to free while that reference exists.
+- `MOD_UNLOAD`处理器返回时没有调用`myblk_detach_unit`，所以`free(sc->backing, M_MYBLK)`被跳过了。
+- `MOD_UNLOAD`中的错误路径在到达释放之前提前返回。每个错误路径都需要释放，否则分配就会泄漏。
+- 一个工作线程持有softc的引用，处理器在该引用存在时拒绝释放。
 
-**Fix.** Audit the `MOD_UNLOAD` path. `vmstat -m` is a blunt but effective tool. Add a `printf` in the free path to confirm it is being reached.
+**修复。**审计`MOD_UNLOAD`路径。`vmstat -m`是一个粗糙但有效的工具。在释放路径中添加`printf`以确认它被执行。
 
-### `gstat` Shows Very High Queue Length
+### `gstat`显示非常高的队列长度
 
-**Symptom.** `gstat -I 1` shows `L(q)` rising into the tens or hundreds and never returning to zero.
+**症状。**`gstat -I 1`显示`L(q)`上升到数十或数百且从不返回零。
 
-**Likely causes.**
+**可能原因。**
 
-- Your strategy function is slow or 块ing, causing BIOs to queue faster than they are serviced.
-- You added a worker thread but it is scheduled less often than it should be.
-- A synchronisation bottleneck (a heavily contested 互斥锁) is serialising the work.
+- 你的策略函数很慢或阻塞，导致BIO排队速度比处理速度快。
+- 你添加了工作线程但它的调度频率比应该的低。
+- 一个同步瓶颈（严重竞争的互斥锁）正在串行化工作。
 
-**Fix.** Profile with DTrace to find what the strategy function is doing. If the latency per BIO has grown, investigate why. For an in-memory 驱动程序, this should almost never happen; if it does, you have likely introduced a `vn_rdwr` or other 块ing call into the hot path.
+**修复。**用DTrace分析策略函数在做什么。如果每个BIO的延迟增加了，调查原因。对于内存驱动程序，这几乎不应该发生；如果发生了，你可能在热路径中引入了`vn_rdwr`或其他阻塞调用。
 
-### Strategy Function Called With NULL bio_disk
+### 策略函数被调用时bio_disk为NULL
 
-**Symptom.** Kernel panic in the strategy function when dereferencing `bp->bio_disk->d_drv1`.
+**症状。**解引用`bp->bio_disk->d_drv1`时在策略函数中出现内核崩溃。
 
-**Likely causes.**
+**可能原因。**
 
-- The BIO was synthesised incorrectly by code outside your 驱动程序.
-- You are accessing `bp->bio_disk` from the wrong context. In some GEOM paths, `bp->bio_disk` is only valid inside the strategy function of a `g_disk` 驱动程序.
+- BIO被驱动程序外部的代码错误合成。
+- 你在错误的上下文中访问`bp->bio_disk`。在某些GEOM路径中，`bp->bio_disk`只在`g_disk`驱动程序的策略函数内部有效。
 
-**Fix.** If you need to access the softc, do it at the start of the strategy function. Cache the pointer in a local variable. Do not access `bp->bio_disk` from a different thread or from a deferred 回调.
+**修复。**如果你需要访问softc，在策略函数开始时进行。将指针缓存在局部变量中。不要从不同线程或延迟回调中访问`bp->bio_disk`。
 
-### Mysterious I/O Errors After Reload
+### 重新加载后出现神秘的I/O错误
 
-**Symptom.** After `kldunload` and `kldload`, reads return EIO on offsets that worked before the unload.
+**症状。**`kldunload`和`kldload`后，读取在卸载之前有效的偏移量上返回EIO。
 
-**Likely causes.**
+**可能原因。**
 
-- You are working with a file-backed or vnode-backed experiment (from Lab 5 or from your own modifications) and the file's size or contents have been changed between loads.
-- A type mismatch between the saved and new offsets (for instance, changing `d_扇区ize` between loads).
-- `d_mediasize` has changed but the underlying file still reflects the old layout.
+- 你正在使用文件后备或vnode后备的实验（来自实验5或你自己的修改），并且文件的大小或内容在两次加载之间被更改了。
+- 保存的偏移量与新偏移量之间存在类型不匹配（例如，在两次加载之间更改了`d_sectorsize`）。
+- `d_mediasize`已更改但底层文件仍反映旧的布局。
 
-**Fix.** Ensure the backing file and the 驱动程序's geometry agree on both size and 扇区 layout. If you change `d_mediasize` or `d_扇区ize`, regenerate the backing file to match. For a straightforward reload with no changes, the 缓冲区 on a RAM-backed 驱动程序 is always fresh, so mysterious post-reload EIOs usually point to a geometry mismatch rather than data loss.
+**修复。**确保后备文件和驱动程序的几何参数在大小和扇区布局上一致。如果你更改了`d_mediasize`或`d_sectorsize`，重新生成后备文件以匹配。对于没有更改的简单重新加载，RAM后备驱动程序上的缓冲区总是全新的，所以神秘的重新加载后EIO通常指向几何参数不匹配而不是数据丢失。
 
-### Access Count Stuck at Non-Zero After Un挂载
+### 卸载后访问计数卡在非零
 
-**Symptom.** After `u挂载`, `geom disk list` still shows non-zero access counts.
+**症状。**`umount`后，`geom disk list`仍然显示非零访问计数。
 
-**Likely causes.**
+**可能原因。**
 
-- A program still has the raw 设备 open. `fuser /dev/myblk0` will reveal it.
-- The 文件系统 did not 卸载 cleanly. Check `挂载 | grep myblk` to see if it is still 挂载ed.
-- A lingering NFS client or similar is holding the 文件系统 open. Unlikely for a local memory disk, but possible on shared systems.
+- 一个程序仍然打开了原始设备。`fuser /dev/myblk0`会揭示它。
+- 文件系统未干净卸载。检查`mount | grep myblk`看它是否仍然挂载。
+- 一个残留的NFS客户端或类似的东西正在持有文件系统打开。对本地内存磁盘不太可能，但在共享系统上可能。
 
-**Fix.** Find and close the open handle. If `u挂载` reports success but the access count remains, rebooting is the safest recovery.
+**修复。**找到并关闭打开的句柄。如果`umount`报告成功但访问计数保持不变，重启是最安全的恢复方式。
 
-### Driver Loaded But Not Visible in geom -t
+### 驱动程序已加载但在geom -t中不可见
 
-**Symptom.** `kldstat` shows the module loaded, but `geom -t` does not show any geom of our name.
+**症状。**`kldstat`显示模块已加载，但`geom -t`不显示我们名称的任何geom。
 
-**Likely causes.**
+**可能原因。**
 
-- The loader ran but never called `disk_create`.
-- `disk_create` was called but the event thread has not run yet.
+- 加载器运行了但从未调用`disk_create`。
+- `disk_create`被调用了但事件线程尚未运行。
 
-**Fix.** Add a `printf` to confirm `disk_create` ran. Wait one or two seconds after `kldload` before checking, to give the event thread a chance.
+**修复。**添加`printf`确认`disk_create`运行了。`kldload`后等待一两秒再检查，给事件线程一个机会。
 
-### Panic on Second Load
+### 第二次加载时崩溃
 
-**Symptom.** Loading the module once works. Unloading works. Loading a second time panics.
+**症状。**加载模块一次成功。卸载成功。第二次加载时崩溃。
 
-**Likely causes.**
+**可能原因。**
 
-- A `MOD_UNLOAD` handler did not reset all the state that `MOD_LOAD` assumes is fresh.
-- A static pointer holds a reference to a freed structure across the unload boundary; the next load sees a dangling pointer.
-- A GEOM class that was 注册ed on first load did not un注册.
+- `MOD_UNLOAD`处理器没有重置`MOD_LOAD`假设为新的所有状态。
+- 一个静态指针持有对跨卸载边界已释放结构的引用；下一次加载看到悬空指针。
+- 在第一次加载时注册的GEOM类未注销。
 
-**Fix.** Audit your load and unload paths as a matched pair. Every allocation on load needs a corresponding free on unload, and every pointer written on load needs to be cleared on unload. For GEOM classes, `DECLARE_GEOM_CLASS` handles the unregistration for you, but if you bypass it you must do the work.
+**修复。**将你的加载和卸载路径作为匹配对进行审计。加载时的每个分配都需要卸载时相应的释放，加载时写入的每个指针都需要卸载时清除。对于GEOM类，`DECLARE_GEOM_CLASS`为你处理注销，但如果你绕过它，你必须自己做这个工作。
 
-### newfs_ufs Aborts with "File system too small"
+### newfs_ufs中止并显示"File system too small"
 
-**Symptom.** `newfs_ufs /dev/myblk0` aborts with `newfs: /dev/myblk0: 分区 smaller than minimum UFS size`.
+**症状。**`newfs_ufs /dev/myblk0`中止并显示`newfs: /dev/myblk0: partition smaller than minimum UFS size`。
 
-**Likely causes.**
+**可能原因。**
 
-- `MYBLK_MEDIASIZE` is too small for UFS's minimum practical size.
-- You forgot to rebuild the module after changing the size.
+- `MYBLK_MEDIASIZE`对UFS的最小实际大小来说太小了。
+- 你更改大小后忘记重新构建模块。
 
-**Fix.** Ensure the media size is at least a few megabytes. UFS's absolute minimum is around 1 MiB, but practical minimums are 4-8 MiB and comfortable minimums are 32 MiB or more.
+**修复。**确保媒体大小至少有几兆字节。UFS的绝对最小值大约为1 MiB，但实际最小值为4-8 MiB，舒适的最小值为32 MiB或更多。
 
-### 挂载 -o trim Does Not Trigger BIO_DELETE
+### mount -o trim不触发BIO_DELETE
 
-**Symptom.** Mounting with `-o trim` succeeds, but `gstat` shows no delete operations even during heavy deletion.
+**症状。**用`-o trim`挂载成功，但`gstat`在重度删除期间不显示删除操作。
 
-**Likely causes.**
+**可能原因。**
 
-- UFS issues `BIO_DELETE` only on certain patterns; it does not unconditionally trim every freed 块.
-- Your 驱动程序 does not advertise `BIO_DELETE` support in its `d_flags`.
+- UFS仅在某些模式上发出`BIO_DELETE`；它不会无条件地修剪每个释放的块。
+- 你的驱动程序没有在其`d_flags`中声明`BIO_DELETE`支持。
 
-**Fix.** Set `sc->disk->d_flags |= DISKFLAG_CANDELETE;` before `disk_create`. This tells GEOM and 文件系统 that your 驱动程序 supports `BIO_DELETE` and is willing to handle them.
+**修复。**在`disk_create`之前设置`sc->disk->d_flags |= DISKFLAG_CANDELETE;`。这告诉GEOM和文件系统你的驱动程序支持`BIO_DELETE`并愿意处理它们。
 
-### UFS Complains About "Fragment out of bounds"
+### UFS抱怨"Fragment out of bounds"
 
-**Symptom.** After a 挂载, UFS logs an error about a fragment being out of bounds, and file operations start returning EIO.
+**症状。**挂载后，UFS记录关于片段越界的错误，文件操作开始返回EIO。
 
-**Likely causes.**
+**可能原因。**
 
-- Your 驱动程序 is returning wrong data on some offset, and UFS has read a corrupted metadata 块.
-- The backing store was partially overwritten during some other test.
-- Bounds-check arithmetic is returning incorrect ranges.
+- 你的驱动程序在某些偏移量返回错误数据，UFS读取了损坏的元数据块。
+- 后备存储在其他测试期间被部分覆盖。
+- 边界检查算术返回了不正确的范围。
 
-**Fix.** Un挂载, run `fsck_ffs -y /dev/myblk0` to repair, then re-test. If the error recurs with fresh 文件系统, look for offset-computation bugs in the strategy function.
+**修复。**卸载、运行`fsck_ffs -y /dev/myblk0`修复，然后重新测试。如果错误在全新文件系统上重现，在策略函数中寻找偏移计算bug。
 
-### Kernel Printing "interrupt storm" Messages
+### 内核打印"interrupt storm"消息
 
-**Symptom.** `dmesg` shows messages about interrupt storms, and system responsiveness degrades.
+**症状。**`dmesg`显示关于中断风暴的消息，系统响应性下降。
 
-**Likely causes.**
+**可能原因。**
 
-- A real hardware 驱动程序 (not yours) is misbehaving.
-- Your 驱动程序 is fine; this is a different subsystem's problem.
+- 一个真正的硬件驱动程序（不是你的）行为不当。
+- 你的驱动程序没问题；这是另一个子系统的问题。
 
-**Fix.** Verify that the storm is not related to your module. If it is, the issue is almost certainly in an 中断处理程序, which our pseudo 驱动程序 does not have.
+**修复。**验证风暴与你的模块无关。如果是的话，问题几乎可以肯定在中断处理器中，而我们的伪驱动程序没有中断处理器。
 
-### Reboot Hangs on Un挂载 During Shutdown
+### 关机时重启挂在卸载上
 
-**Symptom.** On shutdown, the system hangs while 卸载ing, with a message like "Syncing disks, vnodes remaining...".
+**症状。**关机时，系统在卸载时挂住，显示类似"Syncing disks, vnodes remaining..."的消息。
 
-**Likely causes.**
+**可能原因。**
 
-- A 文件系统 is still 挂载ed on your 设备, and your 驱动程序 is holding a BIO.
-- A syncer thread is stuck waiting for completion.
+- 一个文件系统仍然挂载在你的设备上，你的驱动程序持有一个BIO。
+- 一个同步线程卡在等待完成。
 
-**Fix.** Ensure your 驱动程序 卸载s cleanly before system shutdown. A ro总线t way is to add a `shutdown_post_sync` event handler that 卸载s the 文件系统 and unloads the module. For development, 卸载 and unload manually before issuing `shutdown -r now`.
+**修复。**确保你的驱动程序在系统关机前干净地卸载。一个健壮的方法是添加一个`shutdown_post_sync`事件处理器来卸载文件系统并卸载模块。对于开发，在发出`shutdown -r now`之前手动卸载并卸载模块。
 
-### General Advice
+### 一般建议
 
-Whenever something goes wrong, the first step is to read `dmesg` and look for messages from your own printfs and from 内核 subsystems. The second step is to run `procstat -kk` and look at what threads are doing. The third step is to consult `gstat`, `geom disk list`, and `geom -t` for the storage topology. These three tools will tell you most of what you need in nearly every case.
+每当出现问题时，第一步是阅读`dmesg`并查找来自你自己printf和内核子系统的消息。第二步是运行`procstat -kk`并查看线程在做什么。第三步是查阅`gstat`、`geom disk list`和`geom -t`了解存储拓扑。这三个工具在几乎每种情况下都会告诉你大部分你需要的信息。
 
-If a panic happens, FreeBSD drops you into the debugger. Capture a backtrace with `bt` and a 注册 dump with `show 寄存器`, then reboot with `reboot`. If a crash dump was taken, `kgdb` on `/var/crash/vmcore.last` will let you inspect the state offline. Keeping crash dumps around, at least in a development environment, pays off immediately when you are chasing intermittent bugs.
+如果发生崩溃，FreeBSD会把你放进调试器。用`bt`捕获回溯，用`show registers`进行寄存器转储，然后用`reboot`重启。如果获取了崩溃转储，`kgdb`可以让你离线检查`/var/crash/vmcore.last`上的状态。保留崩溃转储，至少在开发环境中，当你追踪间歇性bug时会立即产生回报。
 
-And above all, when something fails, try to reproduce it. Intermittent bugs in 存储驱动程序 are almost always caused by timing differences in how many BIOs are in flight, how long they take, and when the scheduler decides to run your thread. If you can find a reliable reproduction, you are most of the way to a fix.
+最重要的是，当某个东西失败时，尝试重现它。存储驱动程序中的间歇性bug几乎总是由有多少BIO在飞行中、它们花费多长时间以及调度器何时决定运行你的线程等时间差异引起的。如果你能找到可靠的重现方法，你就距离修复已经走了一大半。
 
 ## 总结
 
-This has been a long chapter. Let us take a moment to step back and see what we have covered.
+这是一章很长的内容。让我们花点时间退后一步，看看我们涵盖了什么。
 
-We started by situating 存储驱动程序 in FreeBSD's layered architecture. The Virtual File System layer sits between system calls and 文件系统, giving every 文件系统 a common shape. `devfs` is itself a 文件系统, providing the `/dev` directory that user-space tools and administrators use to refer to 设备. Storage 驱动程序 do not live inside VFS. They live at the bottom of the stack, below GEOM and below the 缓冲区 cache, and they communicate with the rest of the 内核 through `struct bio`.
+我们从将存储驱动程序置于FreeBSD的分层架构中开始。虚拟文件系统层位于系统调用和文件系统之间，给每个文件系统一个共同的形状。`devfs`本身是一个文件系统，提供用户空间工具和管理员用来引用设备的`/dev`目录。存储驱动程序不在VFS内部。它们位于栈的底部，在GEOM之下，在缓冲区缓存之下，通过`struct bio`与内核的其余部分通信。
 
-We built a working pseudo 块 设备驱动程序 from scratch. In Section 3 we wrote the skeleton that 注册ed a disk with `g_disk` and published a `/dev` node. In Section 4 we explored GEOM's concepts of classes, geoms, providers, and consumers, and we understood how the topology composes and how access counts keep the system safe during teardown. In Section 5 we implemented the strategy function that actually services `BIO_READ`, `BIO_WRITE`, `BIO_DELETE`, and `BIO_FLUSH` against an in-memory backing store. In Section 6 we formatted the 设备 with `newfs_ufs`, 挂载ed a real 文件系统 on it, and saw the two access paths (raw and 文件系统) converge in our strategy function. In Section 7 we surveyed persistence options and added a simple technique for surviving module reloads. In Section 8 we walked through the teardown path in detail and learned how to test it. In Section 9 we looked at the directions a growing 驱动程序 tends to go: multi-unit support, ioctl surfaces, source-file splits, and stable versioning.
+我们从零开始构建了一个可工作的伪块设备驱动程序。在第3节中，我们编写了用`g_disk`注册磁盘并发布`/dev`节点的骨架。在第4节中，我们探索了GEOM的类、geom、提供者和消费者的概念，并理解了拓扑如何组合以及访问计数如何在拆卸期间保持系统安全。在第5节中，我们实现了针对内存后备存储实际服务`BIO_READ`、`BIO_WRITE`、`BIO_DELETE`和`BIO_FLUSH`的策略函数。在第6节中，我们用`newfs_ufs`格式化设备，在其上挂载了真正的文件系统，并看到两条访问路径（原始和文件系统）在我们的策略函数中汇合。在第7节中，我们调查了持久性选项并添加了存活模块重载的简单技术。在第8节中，我们详细遍历了拆卸路径并学习了如何测试它。在第9节中，我们看了增长的驱动程序倾向于去的方向：多单元支持、ioctl表面、源文件拆分和稳定版本管理。
 
-We exercised the 驱动程序 through labs and stretched it with challenges. We collected the common failure modes in a troubleshooting section. And throughout, we kept our eyes on the real FreeBSD source tree, because the goal of this book is not to teach toy 内核 code but to teach the real thing.
+我们通过实验练习了驱动程序，通过挑战扩展了它。我们在故障排除部分收集了常见的故障模式。在整个过程中，我们将目光保持在真实的FreeBSD源码树上，因为本书的目标不是教授玩具内核代码，而是教授真正的代码。
 
-You should now be able to read `md(4)` with real comprehension rather than just staring at it. You should be able to read `g_zero.c` and recognise every function it calls. You should be able to diagnose the common classes of storage-驱动程序 bug by symptom. And you should have a working, if simple, pseudo 块设备 that you wrote yourself.
+你现在应该能够真正理解地阅读`md(4)`，而不仅仅是盯着它看。你应该能够阅读`g_zero.c`并识别它调用的每个函数。你应该能够通过症状诊断存储驱动程序bug的常见类别。你应该有一个可工作的、虽然简单的、你自己编写的伪块设备。
 
-That is a substantial 挂载 of ground covered. Take a moment to notice how far you have come. In 第26章 you knew how to write a character 驱动程序. Now you can also write a 块 驱动程序. The two chapters together give you the foundation for nearly every other kind of 驱动程序 in FreeBSD, because most 驱动程序 are either character-oriented or 块-oriented at the boundary where they meet the rest of the 内核.
+这是覆盖的大量内容。花点时间注意你已经走了多远。在第26章中，你知道如何编写字符驱动程序。现在你也可以编写块驱动程序了。这两章一起为你提供了FreeBSD中几乎所有其他类型驱动程序的基础，因为大多数驱动程序在与内核的其余部分相遇的边界上要么是面向字符的，要么是面向块的。
 
-### A Summary of the Key Moves
+### 关键操作总结
 
-For quick recall, here are the moves that define a minimal 存储驱动程序.
+为了快速回忆，以下是定义最小存储驱动程序的操作。
 
-1. Include the right headers: `sys/bio.h`, `geom/geom.h`, `geom/geom_disk.h`.
-2. Allocate a `struct disk` with `disk_alloc`.
-3. Fill in `d_name`, `d_unit`, `d_strategy`, `d_扇区ize`, `d_mediasize`, `d_maxsize`, and `d_drv1`.
-4. Call `disk_create(sc->disk, DISK_VERSION)`.
-5. In `d_strategy`, switch on `bio_cmd` and service the request. Always call `biodone` exactly once.
-6. In the unload path, call `disk_destroy` before freeing anything the strategy function touches.
-7. Declare `MODULE_DEPEND` on `g_disk`.
-8. Use `MAXPHYS` for `d_maxsize` unless you have a specific reason to be smaller.
-9. Test the unload path under load. Test it with a 挂载ed 文件系统. Test it with a raw `cat` holding the 设备 open.
-10. Read `dmesg`, `gstat`, `geom disk list`, and `procstat -kk` when something goes wrong.
+1. 包含正确的头文件：`sys/bio.h`、`geom/geom.h`、`geom/geom_disk.h`。
+2. 用`disk_alloc`分配`struct disk`。
+3. 填充`d_name`、`d_unit`、`d_strategy`、`d_sectorsize`、`d_mediasize`、`d_maxsize`和`d_drv1`。
+4. 调用`disk_create(sc->disk, DISK_VERSION)`。
+5. 在`d_strategy`中，对`bio_cmd`进行switch并服务请求。始终恰好调用`biodone`一次。
+6. 在卸载路径中，在释放策略函数触及的任何内容之前调用`disk_destroy`。
+7. 声明`MODULE_DEPEND`依赖于`g_disk`。
+8. 除非有特定理由使用更小的值，否则对`d_maxsize`使用`MAXPHYS`。
+9. 在负载下测试卸载路径。在文件系统挂载时测试。在原始`cat`持有设备打开时测试。
+10. 出问题时阅读`dmesg`、`gstat`、`geom disk list`和`procstat -kk`。
 
-These ten moves are the skeleton of every FreeBSD 存储驱动程序 you will ever write. They appear in different clothing in `ada(4)`, in `nvme(4)`, in `mmcsd(4)`, in `zvol(4)`, and in every other 驱动程序 in the tree. Once you see the pattern, the variety across real 驱动程序 becomes much less mysterious.
+这十个操作是你将编写的每个FreeBSD存储驱动程序的骨架。它们在`ada(4)`、`nvme(4)`、`mmcsd(4)`、`zvol(4)`和源码树中的每个其他驱动程序中以不同形式出现。一旦你看到这个模式，真实驱动程序之间的变化就不那么神秘了。
 
-### A Reminder About Raw Access
+### 关于原始访问的提醒
 
-Even with a 文件系统 挂载ed, your 驱动程序 is still reachable as a raw 块设备. `/dev/myblk0` remains a valid handle that tools like `dd`, `diskinfo`, `gstat`, and `dtrace` can use. The two access paths coexist through GEOM's discipline: both paths issue BIOs, both paths respect the access counts, and your strategy function services both without distinguishing between them. That uniformity is the great gift of GEOM to storage-驱动程序 authors.
+即使文件系统已挂载，你的驱动程序仍然可以作为原始块设备访问。`/dev/myblk0`仍然是一个有效的句柄，`dd`、`diskinfo`、`gstat`和`dtrace`等工具可以使用它。两条访问路径通过GEOM的纪律共存：两条路径都发出BIO，两条路径都遵守访问计数，你的策略函数服务两者而不区分它们。这种统一性是GEOM给予存储驱动程序作者的巨大礼物。
 
-### A Reminder About Safety
+### 关于安全的提醒
 
-Working on a shared system while developing a 存储驱动程序 is an invitation for pain. Use a virtual machine, or at the very least a system you can reinstall. Keep a rescue image handy. Keep backups of anything you cannot afford to lose, including code you are in the middle of writing. The chapter's 驱动程序 is well-behaved and should not damage anything, but 驱动程序 you write in the future may not be, and the cost of being prepared is very small compared to the cost of being unprepared.
+在共享系统上开发存储驱动程序是自找麻烦。使用虚拟机，或至少使用一个你可以重新安装的系统。保持救援镜像在手。备份你无法承受丢失的任何东西，包括你正在编写中的代码。本章的驱动程序行为良好，不应该损坏任何东西，但你将来编写的驱动程序可能不会，而且准备的成本与未准备的代价相比非常小。
 
-### Where to Look Next in the FreeBSD Tree
+### 在FreeBSD源码树中接下来看什么
 
-If you want to keep exploring storage before the next chapter, three areas of the tree repay careful reading.
+如果你想在下一章之前继续探索存储，源码树中有三个领域值得仔细阅读。
 
-- `/usr/src/sys/geom/` has the GEOM 框架 itself, including `g_class`, `g_disk`, and many transformation classes like `g_mirror`, `g_stripe`, and `g_eli`.
-- `/usr/src/sys/dev/md/md.c` is the full-featured memory-disk 驱动程序, already mentioned many times in this chapter.
-- `/usr/src/sys/ufs/` is the UFS 文件系统. Not required reading for 驱动程序 work, but it helps to see the layer immediately above yours.
+- `/usr/src/sys/geom/`有GEOM框架本身，包括`g_class`、`g_disk`和许多变换类如`g_mirror`、`g_stripe`和`g_eli`。
+- `/usr/src/sys/dev/md/md.c`是功能齐全的内存磁盘驱动程序，本章已经多次提到。
+- `/usr/src/sys/ufs/`是UFS文件系统。不是驱动程序工作的必读内容，但它有助于了解你上面那层的样子。
 
-Reading these is not a prerequisite for the next chapter. It is a recommendation for your own growth.
+阅读这些不是下一章的先决条件。这是对你自身成长的建议。
 
-## Bridge to the Next Chapter
+## 通向下一章的桥梁
 
-In this chapter we built a 存储驱动程序 from scratch. The data flowing through it was internal to the system: bytes written to a file, bytes read from a file, super块 and cylinder groups and inodes shuffling around in the 缓冲区 cache. No byte ever left the machine. The 驱动程序's entire world was the 内核's own memory and the processes that consume it.
+在本章中，我们从零开始构建了一个存储驱动程序。流经其中的数据是系统内部的：写入文件的字节、从文件读取的字节、在缓冲区缓存中来回移动的超级块、柱面组和inode。没有字节离开过机器。驱动程序的整个世界是内核自己的内存和消费它的进程。
 
-第28章 takes us into a different world. We will write a 网络接口 驱动程序. Network 驱动程序 are transport 驱动程序 like the USB 串行驱动程序 of 第26章 and the 存储驱动程序 of this chapter, but their conversation partner is not a process and not a 文件系统. It is a network stack, and the unit of work is not a byte range and not a 块 but a 数据包. The 数据包 is a structured object with headers and payload, and the 驱动程序 participates in a stack that includes IP, ARP, ICMP, TCP, UDP, and many other protocols.
+第28章将我们带入一个不同的世界。我们将编写一个网络接口驱动程序。网络驱动程序是传输驱动程序，就像第26章的USB串行驱动程序和本章的存储驱动程序一样，但它们的对话伙伴不是进程也不是文件系统。它是一个网络栈，工作单位不是字节范围也不是块，而是数据包。数据包是带有头部和有效载荷的结构化对象，驱动程序参与包括IP、ARP、ICMP、TCP、UDP和许多其他协议在内的栈。
 
-The patterns you have internalised in this chapter will reappear, with different names. Instead of `struct bio`, you will see `struct mbuf`. Instead of `g_disk`, you will see the `ifnet` 接口. Instead of `disk_strategy`, you will see the `if_transmit` and `if_input` hooks. Instead of GEOM providers and consumers, you will see 网络接口 objects linked into the 内核's network stack. The role is the same: a transport 驱动程序 takes requests from above, delivers them below, accepts responses below, and delivers them above.
+你本章内化的模式将以不同的名称重新出现。你将看到`struct mbuf`代替`struct bio`。你将看到`ifnet`接口代替`g_disk`。你将看到`if_transmit`和`if_input`钩子代替`disk_strategy`。你将看到链接到内核网络栈中的网络接口对象代替GEOM提供者和消费者。角色是相同的：传输驱动程序从上面接收请求，向下传递，从下面接受响应，向上传递。
 
-Many of the concerns will also be the same. Locking. Hot unplug. Resource cleanup on 分离. Observability through 内核 tools. Safety in the face of errors. The fundamentals carry over. What changes is the vocabulary, the structure of the unit of work, and some of the specific tools.
+许多关注点也是相同的。锁。热拔出。分离时的资源清理。通过内核工具的可观测性。面对错误时的安全性。基础延续了下来。改变的是词汇、工作单元的结构以及一些特定工具。
 
-Before you move on, take a short break. Unload your 存储驱动程序. Run `kldstat` and confirm that nothing from this chapter is still loaded. Close your lab logbook. Stand up. Refill your coffee. The next chapter is going to be just as substantive as this one, and you will want a clear head.
+在继续之前，短暂休息一下。卸载你的存储驱动程序。运行`kldstat`确认本章的任何东西都不再加载。合上你的实验日志。站起来。续杯咖啡。下一章将与本章一样充实，你需要一个清醒的头脑。
 
-When you come back, 第28章 will start the same way this one did: with a gentle 引言 and a clear picture of where we are going. See you there.
+当你回来时，第28章将以与本章相同的方式开始：一个温和的引言和一幅清晰的路线图。在那里见。
 
 ## 快速参考
 
-The tables below are intended as a quick lookup when you are writing or debugging a 存储驱动程序 and need to remember a name, a command, or a path. They are not a substitute for the full explanations earlier in the chapter.
+下面的表格旨在作为你在编写或调试存储驱动程序时快速查找名称、命令或路径的参考。它们不是本章前面完整解释的替代品。
 
-### Key Headers
+### 关键头文件
 
-| Header | Defines |
-|--------|---------|
-| `sys/bio.h` | `struct bio`, `BIO_READ`, `BIO_WRITE`, `BIO_DELETE`, `BIO_FLUSH`, `BIO_GETATTR` |
-| `geom/geom.h` | `struct g_class`, `struct g_geom`, `struct g_provider`, `struct g_consumer`, topology primitives |
-| `geom/geom_disk.h` | `struct disk`, `DISK_VERSION`, `disk_alloc`, `disk_create`, `disk_destroy`, `disk_gone` |
-| `sys/module.h` | `DECLARE_MODULE`, `MODULE_VERSION`, `MODULE_DEPEND` |
-| `sys/malloc.h` | `MALLOC_DEFINE`, `malloc`, `free`, `M_WAITOK`, `M_NOWAIT`, `M_ZERO` |
-| `sys/lock.h`, `sys/互斥锁.h` | `struct mtx`, `mtx_init`, `mtx_lock`, `mtx_unlock`, `mtx_destroy` |
+| 头文件 | 定义 |
+|--------|------|
+| `sys/bio.h` | `struct bio`、`BIO_READ`、`BIO_WRITE`、`BIO_DELETE`、`BIO_FLUSH`、`BIO_GETATTR` |
+| `geom/geom.h` | `struct g_class`、`struct g_geom`、`struct g_provider`、`struct g_consumer`、拓扑原语 |
+| `geom/geom_disk.h` | `struct disk`、`DISK_VERSION`、`disk_alloc`、`disk_create`、`disk_destroy`、`disk_gone` |
+| `sys/module.h` | `DECLARE_MODULE`、`MODULE_VERSION`、`MODULE_DEPEND` |
+| `sys/malloc.h` | `MALLOC_DEFINE`、`malloc`、`free`、`M_WAITOK`、`M_NOWAIT`、`M_ZERO` |
+| `sys/lock.h`、`sys/mutex.h` | `struct mtx`、`mtx_init`、`mtx_lock`、`mtx_unlock`、`mtx_destroy` |
 
-### Key Structures
+### 关键结构
 
-| Structure | Role |
-|-----------|------|
-| `struct disk` | The `g_disk` representation of a disk. Filled in by the 驱动程序, owned by the 框架. |
-| `struct bio` | One I/O request, passed between GEOM layers and into the 驱动程序's strategy function. |
-| `struct g_provider` | The producer-facing 接口 of a geom. Filesystems and other geoms consume from providers. |
-| `struct g_consumer` | The connection from one geom into another geom's provider. |
-| `struct g_geom` | An instance of a `g_class`. |
-| `struct g_class` | The template from which geoms are created. Defines methods like `init`, `fini`, `start`, `access`. |
+| 结构 | 角色 |
+|------|------|
+| `struct disk` | `g_disk`对磁盘的表示。由驱动程序填充，由框架拥有。 |
+| `struct bio` | 一个I/O请求，在GEOM层之间传递并进入驱动程序的策略函数。 |
+| `struct g_provider` | geom的面向生产者接口。文件系统和其他geom从提供者消费。 |
+| `struct g_consumer` | 从一个geom到另一个geom提供者的连接。 |
+| `struct g_geom` | `g_class`的一个实例。 |
+| `struct g_class` | 创建geom的模板。定义`init`、`fini`、`start`、`access`等方法。 |
 
-### Common BIO Commands
+### 常见BIO命令
 
-| Command | Meaning |
-|---------|---------|
-| `BIO_READ` | Read bytes from the 设备 into a 缓冲区. |
-| `BIO_WRITE` | Write bytes from a 缓冲区 into the 设备. |
-| `BIO_DELETE` | Discard a range of 块. Used for TRIM. |
-| `BIO_FLUSH` | Commit outstanding writes to durable storage. |
-| `BIO_GETATTR` | Query a named attribute from the provider. |
-| `BIO_ZONE` | Zoned-块-设备 operations. Not commonly used. |
+| 命令 | 含义 |
+|------|------|
+| `BIO_READ` | 从设备读取字节到缓冲区。 |
+| `BIO_WRITE` | 从缓冲区写入字节到设备。 |
+| `BIO_DELETE` | 丢弃一个范围的块。用于TRIM。 |
+| `BIO_FLUSH` | 将未完成的写入提交到持久存储。 |
+| `BIO_GETATTR` | 从提供者查询命名属性的值。 |
+| `BIO_ZONE` | 分区块设备操作。不常用。 |
 
-### Common GEOM Tools
+### 常见GEOM工具
 
-| Tool | Purpose |
-|------|---------|
-| `geom disk list` | List 注册ed disks and their providers. |
-| `geom -t` | Show the entire GEOM topology as a tree. |
-| `geom part show` | Show 分区 geoms and their providers. |
-| `gstat` | Live per-provider I/O statistics. |
-| `diskinfo -v /dev/xxx` | Show disk geometry and attributes. |
-| `iostat -x 1` | Live per-设备 throughput and latency. |
-| `dd if=... of=...` | Raw 块 I/O for testing. |
-| `newfs_ufs /dev/xxx` | Create a UFS 文件系统 on a 设备. |
-| `挂载 /dev/xxx /mnt` | Mount a 文件系统. |
-| `u挂载 /mnt` | Un挂载 a 文件系统. |
-| `mdconfig` | Create or destroy memory disks. |
-| `fuser` | Find processes holding a file open. |
-| `procstat -kk` | Show 内核 stack traces for all threads. |
+| 工具 | 用途 |
+|------|------|
+| `geom disk list` | 列出已注册的磁盘及其提供者。 |
+| `geom -t` | 以树形显示整个GEOM拓扑。 |
+| `geom part show` | 显示分区geom及其提供者。 |
+| `gstat` | 实时每提供者I/O统计。 |
+| `diskinfo -v /dev/xxx` | 显示磁盘几何参数和属性。 |
+| `iostat -x 1` | 实时每设备吞吐量和延迟。 |
+| `dd if=... of=...` | 用于测试的原始块I/O。 |
+| `newfs_ufs /dev/xxx` | 在设备上创建UFS文件系统。 |
+| `mount /dev/xxx /mnt` | 挂载文件系统。 |
+| `umount /mnt` | 卸载文件系统。 |
+| `mdconfig` | 创建或销毁内存磁盘。 |
+| `fuser` | 找到持有文件打开的进程。 |
+| `procstat -kk` | 显示所有线程的内核栈跟踪。 |
 
-### Key Callback Typedefs
+### 关键回调类型定义
 
-| Typedef | Purpose |
-|---------|---------|
-| `disk_strategy_t` | Handles BIOs. The core I/O function. Required. |
-| `disk_open_t` | Called when a new access is being granted. Optional. |
-| `disk_close_t` | Called when an access is being released. Optional. |
-| `disk_ioctl_t` | Handles ioctls on the `/dev` node. Optional. |
-| `disk_getattr_t` | Answers `BIO_GETATTR` queries. Optional. |
-| `disk_gone_t` | Notifies the 驱动程序 when the disk is being forced away. Optional. |
+| 类型定义 | 用途 |
+|---------|------|
+| `disk_strategy_t` | 处理BIO。核心I/O函数。必需。 |
+| `disk_open_t` | 当授予新访问时调用。可选。 |
+| `disk_close_t` | 当释放访问时调用。可选。 |
+| `disk_ioctl_t` | 处理`/dev`节点上的ioctl。可选。 |
+| `disk_getattr_t` | 回答`BIO_GETATTR`查询。可选。 |
+| `disk_gone_t` | 当磁盘被强制移除时通知驱动程序。可选。 |
 
-### File and Path Reference
+### 文件和路径参考
 
-| Path | What lives there |
-|------|------------------|
-| `/usr/src/sys/geom/geom_disk.c` | The `g_disk` implementation. |
-| `/usr/src/sys/geom/geom_disk.h` | The public `g_disk` 接口. |
-| `/usr/src/sys/geom/geom.h` | Core GEOM structures and functions. |
-| `/usr/src/sys/sys/bio.h` | The `struct bio` definition. |
-| `/usr/src/sys/dev/md/md.c` | The reference memory-disk 驱动程序. |
-| `/usr/src/sys/geom/zero/g_zero.c` | A minimal GEOM class, useful as a reading reference. |
-| `/usr/src/sys/ufs/ffs/ffs_vfsops.c` | UFS's 挂载 path. Read if you want to see what 挂载 does at the 文件系统 side. |
-| `/usr/src/share/man/man9/disk.9` | The `disk(9)` manual page. |
-| `/usr/src/share/man/man9/g_bio.9` | The `g_bio(9)` manual page. |
+| 路径 | 包含内容 |
+|------|----------|
+| `/usr/src/sys/geom/geom_disk.c` | `g_disk`实现。 |
+| `/usr/src/sys/geom/geom_disk.h` | 公共`g_disk`接口。 |
+| `/usr/src/sys/geom/geom.h` | 核心GEOM结构和函数。 |
+| `/usr/src/sys/sys/bio.h` | `struct bio`定义。 |
+| `/usr/src/sys/dev/md/md.c` | 参考内存磁盘驱动程序。 |
+| `/usr/src/sys/geom/zero/g_zero.c` | 最小GEOM类，作为阅读参考很有用。 |
+| `/usr/src/sys/ufs/ffs/ffs_vfsops.c` | UFS的挂载路径。如果你想看挂载在文件系统侧做了什么就阅读它。 |
+| `/usr/src/share/man/man9/disk.9` | `disk(9)`手册页。 |
+| `/usr/src/share/man/man9/g_bio.9` | `g_bio(9)`手册页。 |
 
-### Common Disk Flags
+### 常见磁盘标志
 
-| Flag | Meaning |
-|------|---------|
-| `DISKFLAG_CANDELETE` | The 驱动程序 handles `BIO_DELETE`. |
-| `DISKFLAG_CANFLUSHCACHE` | The 驱动程序 handles `BIO_FLUSH`. |
-| `DISKFLAG_UNMAPPED_BIO` | The 驱动程序 accepts unmapped BIOs (advanced). |
-| `DISKFLAG_WRITE_PROTECT` | The 设备 is read-only. |
-| `DISKFLAG_DIRECT_COMPLETION` | Completion is safe from any context (advanced). |
+| 标志 | 含义 |
+|------|------|
+| `DISKFLAG_CANDELETE` | 驱动程序处理`BIO_DELETE`。 |
+| `DISKFLAG_CANFLUSHCACHE` | 驱动程序处理`BIO_FLUSH`。 |
+| `DISKFLAG_UNMAPPED_BIO` | 驱动程序接受未映射的BIO（高级）。 |
+| `DISKFLAG_WRITE_PROTECT` | 设备是只读的。 |
+| `DISKFLAG_DIRECT_COMPLETION` | 完成在任何上下文中都是安全的（高级）。 |
 
-These flags are set on `sc->disk->d_flags` before `disk_create`. They let the 内核 make smarter choices about how to issue BIOs to your 驱动程序.
+这些标志在`disk_create`之前设置在`sc->disk->d_flags`上。它们让内核对如何向你的驱动程序发出BIO做出更智能的选择。
 
-### Patterns for d_strategy
+### d_strategy的模式
 
-Here are the three most common shapes of a strategy function.
+以下是策略函数最常见的三种形状。
 
-**Pattern 1: Synchronous, in-memory.** Our 驱动程序 uses this. The function serves the BIO inline and returns after calling `biodone`.
+**模式1：同步、内存中。**我们的驱动程序使用这种方式。函数内联服务BIO并在调用`biodone`后返回。
 
 ```c
 void strategy(struct bio *bp) {
@@ -3660,7 +3660,7 @@ void strategy(struct bio *bp) {
 }
 ```
 
-**Pattern 2: Enqueue to a worker thread.** `md(4)` uses this. The function 附加 the BIO to a queue and signals a worker.
+**模式2：排队到工作线程。**`md(4)`使用这种方式。函数将BIO附加到队列并唤醒工作线程。
 
 ```c
 void strategy(struct bio *bp) {
@@ -3671,9 +3671,9 @@ void strategy(struct bio *bp) {
 }
 ```
 
-The worker dequeues BIOs, services them one at a time (perhaps calling `vn_rdwr` or issuing hardware commands), and completes each with `biodone`.
+工作线程出队BIO，逐个服务它们（可能调用`vn_rdwr`或发出硬件命令），并用`biodone`完成每个。
 
-**Pattern 3: Hardware DMA with interrupt completion.** Real hardware 驱动程序 use this. The function programs the hardware, sets up DMA, and returns. A later 中断处理程序 completes the BIO.
+**模式3：带中断完成的硬件DMA。**真正的硬件驱动程序使用这种方式。函数编程硬件、设置DMA并返回。稍后的中断处理器完成BIO。
 
 ```c
 void strategy(struct bio *bp) {
@@ -3683,13 +3683,13 @@ void strategy(struct bio *bp) {
 }
 ```
 
-Each pattern has trade-offs. Pattern 1 is simplest but cannot 块. Pattern 2 handles 块ing work but adds latency. Pattern 3 is needed for real hardware but requires interrupt handling, which adds a whole other layer of complexity.
+每种模式都有权衡。模式1最简单但不能阻塞。模式2处理阻塞工作但增加延迟。模式3是真正硬件所必需的，但需要中断处理，这增加了整个另一层复杂性。
 
-Our chapter 驱动程序 uses Pattern 1. `md(4)` uses Pattern 2. `ada(4)`, `nvme(4)`, and friends use Pattern 3.
+我们的章节驱动程序使用模式1。`md(4)`使用模式2。`ada(4)`、`nvme(4)`等使用模式3。
 
-### Minimum Registration Sequence
+### 最小注册序列
 
-For the 驱动程序 writer in a hurry, the minimum sequence to 注册 a 块设备 is:
+对于匆忙的驱动程序编写者，注册块设备的最小序列是：
 
 ```c
 sc->disk = disk_alloc();
@@ -3703,7 +3703,7 @@ sc->disk->d_drv1       = sc;
 disk_create(sc->disk, DISK_VERSION);
 ```
 
-And the minimum teardown sequence is:
+最小拆卸序列是：
 
 ```c
 disk_destroy(sc->disk);
@@ -3714,362 +3714,362 @@ free(sc, M_MYBLK);
 
 ## 术语表
 
-**Access count.** A tuple of three counters on a GEOM provider that tracks how many readers, writers, and exclusive holders currently have access to it. Displayed as `rNwNeN` in `geom disk list`.
+**Access count（访问计数）。**GEOM提供者上三个计数器的元组，跟踪当前有多少读取者、写入者和独占持有者正在访问它。在`geom disk list`中显示为`rNwNeN`。
 
-**Attach.** In the New总线 sense, the step where a 驱动程序 takes responsibility for a 设备. In the storage sense, the step where the 驱动程序 calls `disk_create` to 注册 with `g_disk`. The word overloads; use context.
+**Attach（附加）。**在Newbus意义上，驱动程序接管设备的步骤。在存储意义上，驱动程序调用`disk_create`向`g_disk`注册的步骤。这个词有重载；请根据上下文理解。
 
-**Backing store.** The place where the bytes of a storage 设备 actually live. For our 驱动程序, the backing store is a `malloc`'d 缓冲区 in 内核 memory. For real disks, it is the platter or the flash. For `md(4)` in vnode mode, it is a file in the host 文件系统.
+**Backing store（后备存储）。**存储设备字节实际存在的地方。对于我们的驱动程序，后备存储是内核内存中`malloc`分配的缓冲区。对于真正的磁盘，它是盘片或闪存。对于vnode模式的`md(4)`，它是主机文件系统中的文件。
 
-**BIO.** A `struct bio`. The unit of I/O that flows through GEOM.
+**BIO。**一个`struct bio`。流经GEOM的I/O单位。
 
-**BIO_DELETE.** A BIO command that asks the 驱动程序 to discard a range of 块. Used for TRIM on SSDs.
+**BIO_DELETE。**要求驱动程序丢弃一个范围的块的BIO命令。用于SSD上的TRIM。
 
-**BIO_FLUSH.** A BIO command that asks the 驱动程序 to make all previous writes durable before returning.
+**BIO_FLUSH。**要求驱动程序在返回前使所有先前写入持久的BIO命令。
 
-**BIO_GETATTR.** A BIO command that asks the 驱动程序 to return the value of a named attribute.
+**BIO_GETATTR。**要求驱动程序返回命名属性值的BIO命令。
 
-**BIO_READ.** A BIO command that asks the 驱动程序 to read a range of bytes.
+**BIO_READ。**要求驱动程序读取一个范围字节的BIO命令。
 
-**BIO_WRITE.** A BIO command that asks the 驱动程序 to write a range of bytes.
+**BIO_WRITE。**要求驱动程序写入一个范围字节的BIO命令。
 
-**Block 设备.** A 设备 that is addressed in fixed-size 块, with seekable random access. Historically distinct from 字符设备 in BSD; in modern FreeBSD, 块 and character access converge through GEOM but the mental distinction still matters.
+**Block device（块设备）。**以固定大小的块寻址的设备，具有可寻道的随机访问。在BSD中历史上与字符设备不同；在现代FreeBSD中，块和字符访问通过GEOM收敛，但心理上的区分仍然重要。
 
-**Buffer cache.** The 内核 subsystem that holds recently used 文件系统 块 in RAM. Sits between 文件系统 and GEOM. Not to be confused with the page cache; they are related but distinct in FreeBSD.
+**Buffer cache（缓冲区缓存）。**将最近使用的文件系统块保存在RAM中的内核子系统。位于文件系统和GEOM之间。不要与页缓存混淆；它们在FreeBSD中相关但不同。
 
-**Cache coherency.** The property that reads and writes see each other in a consistent order. The strategy function must not return data that is stale relative to recent writes on the same offset.
+**Cache coherency（缓存一致性）。**读写以一致顺序看到彼此的属性。策略函数不能返回相对于同一偏移量上最近写入过时的数据。
 
-**Cdev.** A 字符设备 node as represented by `struct cdev`. Character 驱动程序 create them with `make_dev`. Block 驱动程序 usually do not.
+**Cdev。**由`struct cdev`表示的字符设备节点。字符驱动程序用`make_dev`创建它们。块驱动程序通常不创建。
 
-**Consumer.** The input-facing side of a geom. A consumer 附加 to a provider and issues BIOs into it.
+**Consumer（消费者）。**geom的面向输入的一侧。消费者附加到提供者并向其发出BIO。
 
-**d_drv1.** A generic pointer in `struct disk` where the 驱动程序 stores its private context, typically the softc.
+**d_drv1。**`struct disk`中的通用指针，驱动程序在其中存储其私有上下文，通常是softc。
 
-**d_mediasize.** The total size of the 设备 in bytes.
+**d_mediasize。**设备的总大小（字节）。
 
-**d_maxsize.** The largest single BIO the 驱动程序 can accept. Usually `MAXPHYS` for pseudo 设备.
+**d_maxsize。**驱动程序可以接受的最大单个BIO。对伪设备通常为`MAXPHYS`。
 
-**d_扇区ize.** The size of a 扇区 in bytes. Typically 512 or 4096.
+**d_sectorsize。**扇区大小（字节）。通常为512或4096。
 
-**d_strategy.** The 驱动程序's BIO-handling function.
+**d_strategy。**驱动程序的BIO处理函数。
 
-**Devfs.** A pseudo-文件系统 挂载ed at `/dev` that synthesises file nodes for 内核 设备.
+**Devfs。**挂载在`/dev`的伪文件系统，为内核设备合成文件节点。
 
-**Devstat.** The 内核's 设备 statistics subsystem, used by `iostat`, `gstat`, and others. Storage 驱动程序 using `g_disk` get devstat integration automatically.
+**Devstat。**内核的设备统计子系统，被`iostat`、`gstat`等使用。使用`g_disk`的存储驱动程序自动获得devstat集成。
 
-**Disk_alloc.** Allocates a `struct disk`. Never fails; uses `M_WAITOK` internally.
+**Disk_alloc。**分配`struct disk`。从不失败；内部使用`M_WAITOK`。
 
-**Disk_create.** Registers a filled-in `struct disk` with `g_disk`. The real work is done asynchronously.
+**Disk_create。**向`g_disk`注册填充好的`struct disk`。实际工作异步完成。
 
-**Disk_destroy.** Un寄存器 and destroys a `struct disk`. Waits for in-flight BIOs to complete. Panics if the provider still has users.
+**Disk_destroy。**注销并销毁`struct disk`。等待飞行中的BIO完成。如果提供者仍有用户则崩溃。
 
-**Disk_gone.** Notifies `g_disk` that the underlying media is gone. Used in 热拔出 scenarios. Distinct from `disk_destroy`.
+**Disk_gone。**通知`g_disk`底层介质已消失。用于热拔出场景。与`disk_destroy`不同。
 
-**DISK_VERSION.** The ABI version of the `struct disk` 接口. Defined in `geom_disk.h` and passed to `disk_create`.
+**DISK_VERSION。**`struct disk`接口的ABI版本。在`geom_disk.h`中定义，传递给`disk_create`。
 
-**DTrace.** FreeBSD's dynamic tracing facility. Especially useful for observing BIO traffic.
+**DTrace。**FreeBSD的动态跟踪工具。对观察BIO流量特别有用。
 
-**Event thread.** The single 内核 thread that GEOM uses to process topology events such as creating and destroying geoms. Usually called `g_event` in `procstat` output.
+**Event thread（事件线程）。**GEOM用于处理拓扑事件（如创建和销毁geom）的单一内核线程。在`procstat`输出中通常称为`g_event`。
 
-**Exclusive access.** A kind of access on a provider that forbids other writers. Filesystems acquire exclusive access on the 设备 they 挂载.
+**Exclusive access（独占访问）。**提供者上禁止其他写入者的一种访问类型。文件系统在其挂载的设备上获取独占访问。
 
-**Filesystem.** A concrete implementation of file storage semantics, such as UFS, ZFS, tmpfs, or NFS. Plugs into VFS.
+**Filesystem（文件系统）。**文件存储语义的具体实现，如UFS、ZFS、tmpfs或NFS。插入VFS。
 
-**GEOM.** The FreeBSD 框架 for composable 块-layer transformations. Classes, geoms, providers, and consumers are its main objects.
+**GEOM。**FreeBSD的可组合块层变换框架。类、geom、提供者和消费者是其主要对象。
 
-**g_disk.** The GEOM subsystem that wraps disk-shaped 驱动程序 with a simpler API. Our 驱动程序 uses it.
+**g_disk。**将磁盘形状的驱动程序包装为更简单API的GEOM子系统。我们的驱动程序使用它。
 
-**g_event.** The GEOM event thread that processes topology changes.
+**g_event。**处理拓扑变更的GEOM事件线程。
 
-**g_io_deliver.** The function used at the class level to complete a BIO. `g_disk` calls it for us; our 驱动程序 calls `biodone`.
+**g_io_deliver。**在类级别用于完成BIO的函数。`g_disk`为我们调用它；我们的驱动程序调用`biodone`。
 
-**g_io_request.** The function used at the class level to issue a BIO downward. Only used in 驱动程序 that implement their own GEOM class.
+**g_io_request。**在类级别用于向下发出BIO的函数。仅在实现自己GEOM类的驱动程序中使用。
 
-**Hotplug.** A 设备 that can appear or disappear without reboot.
+**Hotplug（热插拔）。**可以在不重启的情况下出现或消失的设备。
 
-**Ioctl.** A control operation on a 设备, distinct from read or write. In the storage path, ioctls on `/dev/diskN` go through GEOM and may be handled by `g_disk` or by the 驱动程序's `d_ioctl`.
+**Ioctl。**设备上区别于读写的控制操作。在存储路径中，`/dev/diskN`上的ioctl通过GEOM，可能由`g_disk`或驱动程序的`d_ioctl`处理。
 
-**md(4).** The FreeBSD memory-disk 驱动程序. The canonical pseudo 块设备 in the tree, and a recommended reading reference.
+**md(4)。**FreeBSD内存磁盘驱动程序。源码树中规范的伪块设备，推荐的阅读参考。
 
-**Mount.** The act of 附加ing a 文件系统 to a point in the namespace. Calls VFS, which calls the 文件系统's own 挂载 routine, which typically opens a GEOM provider.
+**Mount（挂载）。**将文件系统附加到命名空间中某个点的行为。调用VFS，VFS调用文件系统自己的挂载例程，后者通常打开一个GEOM提供者。
 
-**New总线.** FreeBSD's 总线 框架. Used for character and hardware 驱动程序. Our 存储驱动程序 does not directly use New总线 because it is a pseudo 设备; real 存储驱动程序 almost always do.
+**Newbus。**FreeBSD的总线框架。用于字符和硬件驱动程序。我们的存储驱动程序不直接使用Newbus，因为它是伪设备；真正的存储驱动程序几乎总是使用它。
 
-**Provider.** The output-facing side of a geom. Other geoms or `/dev` nodes consume providers.
+**Provider（提供者）。**geom的面向输出的一侧。其他geom或`/dev`节点消费提供者。
 
-**Softc.** The per-instance state structure of a 驱动程序.
+**Softc。**驱动程序的每实例状态结构。
 
-**Strategy function.** The 驱动程序's BIO handler. Called `d_strategy` in the `struct disk` API.
+**Strategy function（策略函数）。**驱动程序的BIO处理器。在`struct disk` API中称为`d_strategy`。
 
-**Super块.** A small on-disk structure that describes the layout of a 文件系统. UFS's is at offset 65536.
+**Superblock（超级块）。**描述文件系统布局的小型磁盘上结构。UFS的在偏移65536处。
 
-**Topology.** The tree of GEOM classes, geoms, providers, and consumers. Protected by the topology lock.
+**Topology（拓扑）。**GEOM类、geom、提供者和消费者的树。受拓扑锁保护。
 
-**Topology lock.** The global lock protecting the GEOM topology from concurrent modification.
+**Topology lock（拓扑锁）。**保护GEOM拓扑免受并发修改的全局锁。
 
-**UFS.** The Unix File System, FreeBSD's default 文件系统. Lives under `/usr/src/sys/ufs/`.
+**UFS。**Unix文件系统，FreeBSD的默认文件系统。位于`/usr/src/sys/ufs/`下。
 
-**Unit.** A numbered instance of a 驱动程序. `myblk0` is unit 0 of the `myblk` 驱动程序.
+**Unit（单元）。**驱动程序的一个编号实例。`myblk0`是`myblk`驱动程序的单元0。
 
-**VFS.** The Virtual File System layer. Sits between system calls and concrete 文件系统.
+**VFS。**虚拟文件系统层。位于系统调用和具体文件系统之间。
 
-**Vnode.** The 内核's runtime handle on an open file or directory. Lives inside VFS.
+**Vnode。**内核对打开文件或目录的运行时句柄。存在于VFS内部。
 
-**Withering.** The GEOM process of removing a provider from the topology. Queued on the event thread, waits for in-flight BIOs, and finally destroys the provider.
+**Withering（枯萎）。**GEOM从拓扑中移除提供者的过程。在事件线程上排队，等待飞行中的BIO，最终销毁提供者。
 
-**Zone.** In VM-subsystem vocabulary, a pool of fixed-size objects allocated through the UMA (Universal Memory Allocator). Many 内核 structures, including BIOs and GEOM providers, are allocated from zones.
+**Zone（区域）。**在VM子系统词汇中，通过UMA（通用内存分配器）分配的固定大小对象池。许多内核结构，包括BIO和GEOM提供者，从区域分配。
 
-**BIO_ORDERED.** A BIO flag that asks the 驱动程序 to execute this BIO only after all previously issued BIOs have completed. Used for write barriers.
+**BIO_ORDERED。**要求驱动程序仅在所有先前发出的BIO完成后才执行此BIO的BIO标志。用于写屏障。
 
-**BIO_UNMAPPED.** A BIO flag that indicates `bio_data` is not a mapped 内核 virtual address but rather a list of unmapped pages. Drivers that can handle unmapped data should set `DISKFLAG_UNMAPPED_BIO`.
+**BIO_UNMAPPED。**指示`bio_data`不是映射的内核虚拟地址而是未映射页面列表的BIO标志。可以处理未映射数据的驱动程序应设置`DISKFLAG_UNMAPPED_BIO`。
 
-**Direct completion.** Completing a BIO in the same thread that submitted it, without going through a deferred 回调. Usually faster but not always safe.
+**Direct completion（直接完成）。**在提交BIO的同一线程中完成BIO，不经过延迟回调。通常更快但不总是安全的。
 
-**Drivers in Tree.** Drivers that live inside the FreeBSD source tree and are built as part of the standard 内核 build. Contrast with out-of-tree 驱动程序, which are maintained separately.
+**Drivers in Tree（树内驱动程序）。**生活在FreeBSD源码树中并作为标准内核构建一部分构建的驱动程序。与树外驱动程序相对，后者单独维护。
 
-**Out-of-tree 驱动程序.** A 驱动程序 that is not part of the FreeBSD source tree. These need to be compiled against a matching 内核 and may need updates when the 内核's ABI changes.
+**Out-of-tree drivers（树外驱动程序）。**不属于FreeBSD源码树的驱动程序。这些需要针对匹配的内核编译，在内核ABI更改时可能需要更新。
 
-**ABI.** Application Binary Interface. The set of conventions for function calling, structure layout, and type sizes that allow two pieces of compiled code to interoperate. `DISK_VERSION` is one kind of ABI marker.
+**ABI。**应用二进制接口。允许两段编译代码互操作的函数调用、结构布局和类型大小约定的集合。`DISK_VERSION`是一种ABI标记。
 
-**API.** Application Programming Interface. The set of function signatures and types that code uses at the source level. Distinct from ABI: two 内核s with the same API might have different ABIs if they were compiled differently.
+**API。**应用编程接口。代码在源码级别使用的函数签名和类型的集合。与ABI不同：两个具有相同API的内核如果编译方式不同，可能有不同的ABI。
 
-**KPI.** Kernel Programming Interface. FreeBSD's preferred term for the 内核's API. Guarantees about KPI stability are limited; always recompile against the 内核 you are running.
+**KPI。**内核编程接口。FreeBSD对内核API的首选术语。对KPI稳定性的保证是有限的；始终针对你运行的内核重新编译。
 
-**KLD.** Kernel loadable module. The `.ko` file we produce. The "KLD" stands for Kernel Loadable Driver, though modules are not necessarily 驱动程序.
+**KLD。**内核可加载模块。我们产生的`.ko`文件。"KLD"代表Kernel Loadable Driver，虽然模块不一定是驱动程序。
 
-**Module.** See KLD.
+**Module（模块）。**参见KLD。
 
-**Taste.** In GEOM vocabulary, the process of offering a provider to all classes so that each class can decide whether to 附加 to it. Tasting happens automatically when new providers appear.
+**Taste（品尝）。**在GEOM词汇中，将提供者提供给所有类以便每个类决定是否附加到它的过程。新提供者出现时品尝自动发生。
 
-**Retaste.** Forcing GEOM to taste a provider again, usually after its contents have changed. `geom provider retaste` triggers this for one provider; `geom retaste` triggers it globally.
+**Retaste（重新品尝）。**强制GEOM再次品尝提供者，通常在其内容更改后。`geom provider retaste`对单个提供者触发此操作；`geom retaste`全局触发。
 
-**Orphan.** In GEOM vocabulary, a provider whose underlying storage has gone away. Orphans are cleaned up by the event thread.
+**Orphan（孤儿）。**在GEOM词汇中，底层存储已消失的提供者。孤儿由事件线程清理。
 
-**Spoil.** A GEOM concept related to cache invalidation. If a provider's contents change in a way that could invalidate caches, it is said to have been spoiled.
+**Spoil（ spoil）。**与缓存失效相关的GEOM概念。如果提供者的内容以可能使缓存失效的方式更改，则称其已被spoiled。
 
-**Bufobj.** A 内核 object that associates a vnode (or a GEOM consumer) with a 缓冲区 cache. Each 块设备 and each file has one.
+**Bufobj。**将vnode（或GEOM消费者）与缓冲区缓存关联的内核对象。每个块设备和每个文件都有一个。
 
-**bdev_strategy.** A legacy synonym for `d_strategy`. Modern code uses `d_strategy` directly.
+**bdev_strategy。**`d_strategy`的遗留同义词。现代代码直接使用`d_strategy`。
 
-**Schedule.** The act of placing a BIO onto an internal queue for later execution. Distinct from "executing".
+**Schedule（调度）。**将BIO放入内部队列以供稍后执行的行为。与"执行"不同。
 
-**Plug/unplug.** In some 内核s, the plug is a batching mechanism for BIO submission. FreeBSD does not have plug/unplug; it delivers BIOs immediately.
+**Plug/unplug。**在某些内核中，plug是BIO提交的批处理机制。FreeBSD没有plug/unplug；它立即交付BIO。
 
-**Elevator.** A BIO scheduler that sorts BIOs by offset to reduce disk seek time. FreeBSD's GEOM does not implement an elevator at the GEOM layer; it is the 块设备's responsibility, if relevant.
+**Elevator（电梯）。**按偏移量排序BIO以减少磁盘寻道时间的BIO调度器。FreeBSD的GEOM不在GEOM层实现电梯；如果相关的话，这是块设备的责任。
 
-**Super块.** The first metadata 块 of a 文件系统. Describes geometry. At offset 65536 for UFS.
+**Superblock（超级块）。**文件系统的第一个元数据块。描述几何参数。对UFS在偏移65536处。
 
-**Cylinder group.** A UFS concept. The 文件系统 is divided into regions, each with its own inode table and 块 allocation bitmap. Keeps related data physically close on a spinning disk and limits the damage a single bad region can cause.
+**Cylinder group（柱面组）。**UFS概念。文件系统被划分为区域，每个区域有自己的inode表和块分配位图。保持相关数据在旋转磁盘上物理接近，并限制单个坏区域可以造成的损害。
 
-**Inode.** A UFS (and POSIX) structure describing one file: its mode, owner, size, timestamps, and pointers to data 块. Filenames live in directory entries, not in inodes.
+**Inode。**UFS（和POSIX）结构，描述一个文件：其模式、所有者、大小、时间戳和指向数据块的指针。文件名存在于目录条目中，不在inode中。
 
-**Vop_vector.** The dispatch table that a 文件系统 provides to VFS, listing all the operations VFS knows how to ask about (open, close, read, write, lookup, rename, and so on). VFS calls these as indirect function pointers.
+**Vop_vector。**文件系统向VFS提供的分发表，列出VFS知道如何询问的所有操作（打开、关闭、读、写、查找、重命名等）。VFS将这些作为间接函数指针调用。
 
-**Devstat.** A 内核 structure 附加ed to 设备 that records aggregate I/O statistics. `iostat(8)` reads devstat data; `g_disk` allocates and feeds a devstat structure for every disk it creates.
+**Devstat。**附加到设备上记录聚合I/O统计的内核结构。`iostat(8)`读取devstat数据；`g_disk`为其创建的每个磁盘分配并填充devstat结构。
 
-**bp.** Shorthand in 内核 source for a BIO pointer. Used almost universally in strategy functions and completion 回调. When you see `struct bio *bp`, read it as "the current request".
+**bp。**内核源码中BIO指针的简写。在策略函数和完成回调中几乎普遍使用。当你看到`struct bio *bp`时，读作"当前请求"。
 
-**Bread.** Buffer-cache function that reads a 块, consulting the cache first and issuing I/O only on a miss. Used by 文件系统, not by 驱动程序.
+**Bread。**缓冲区缓存函数，读取一个块，先查询缓存，仅在未命中时发出I/O。由文件系统使用，不由驱动程序使用。
 
-**Bwrite.** Buffer-cache function that writes a 块 synchronously. The 文件系统 uses it; your strategy function eventually sees the resulting BIO.
+**Bwrite。**缓冲区缓存函数，同步写入一个块。文件系统使用它；你的策略函数最终看到产生的BIO。
 
-**Getblk.** Buffer-cache function that returns a 缓冲区 for a given 块, allocating it if necessary. Used by 文件系统 as the entry point to both reading and writing.
+**Getblk。**缓冲区缓存函数，返回给定块的缓冲区，必要时分配它。由文件系统用作读取和写入的入口点。
 
-**Bdwrite.** Delayed 缓冲区-cache write. Marks the 缓冲区 dirty but does not issue I/O immediately. Will be written later by the syncer or by 缓冲区 cache pressure.
+**Bdwrite。**延迟缓冲区缓存写入。将缓冲区标记为脏但不立即发出I/O。稍后由syncer或缓冲区缓存压力写入。
 
-**Bawrite.** Asynchronous 缓冲区-cache write. Like `bwrite` but does not wait for completion.
+**Bawrite。**异步缓冲区缓存写入。类似于`bwrite`但不等待完成。
 
-**Syncer.** A 内核 thread that periodically flushes dirty 缓冲区 to their backing 设备. Closing a 文件系统 cleanly requires the syncer to finish.
+**Syncer。**定期将脏缓冲区刷新到其后备设备的内核线程。干净地关闭文件系统需要syncer完成。
 
-**Taskqueue.** A 内核 facility for running 回调 in a separate thread. Useful when your strategy function wants to defer work. Covered in more depth when we discuss 中断处理程序s in later chapters.
+**Taskqueue。**在单独线程中运行回调的内核机制。当你的策略函数想延迟工作时很有用。在后面讨论中断处理器时会更深入地介绍。
 
-**Callout.** A 内核 facility for scheduling a one-shot or periodic 回调 at a given time. Not commonly used in simple 存储驱动程序 but very common in hardware 驱动程序 that implement timeouts.
+**Callout。**在给定时间调度一次性或周期性回调的内核机制。在简单的存储驱动程序中不常用，但在实现超时的硬件驱动程序中非常常见。
 
-**Witness.** A 内核 subsystem that detects lock-order violations and prints warnings. Always enabled in debug 内核s; saves hours of debugging.
+**Witness。**检测锁顺序违规并打印警告的内核子系统。在调试内核中始终启用；节省数小时的调试时间。
 
-**INVARIANTS.** A 内核 compile option that adds runtime assertions. Always enabled in debug 内核s; catches many storage bugs before they become silent corruption.
+**INVARIANTS。**添加运行时断言的内核编译选项。在调试内核中始终启用；在许多存储bug变成静默损坏之前捕获它们。
 
-**Debug 内核.** A 内核 built with `INVARIANTS`, `WITNESS`, and related options. Slower but much safer for 驱动程序 development. Use one during lab work.
+**Debug kernel（调试内核）。**用`INVARIANTS`、`WITNESS`和相关选项构建的内核。较慢但对驱动程序开发更安全。在实验工作中使用一个。
 
-## Frequently Asked Questions
+## 常见问题
 
-### Do I need to support BIO_ORDERED?
+### 我需要支持BIO_ORDERED吗？
 
-For a pseudo 设备 that services BIOs synchronously, no. Each BIO completes before the next one is processed, which trivially preserves ordering. For an asynchronous 驱动程序, you must respect `BIO_ORDERED` by deferring subsequent BIOs until the ordered one completes.
+对于同步服务BIO的伪设备，不需要。每个BIO在处理下一个之前完成，这自然地保留了顺序。对于异步驱动程序，你必须通过延迟后续BIO直到有序BIO完成来尊重`BIO_ORDERED`。
 
-### What is the relationship between d_maxsize and MAXPHYS?
+### d_maxsize和MAXPHYS之间有什么关系？
 
-`d_maxsize` is the maximum BIO size your 驱动程序 can accept. `MAXPHYS` is the compile-time upper bound on BIO size, defined in `/usr/src/sys/sys/param.h`. On 64-bit systems such as amd64 and arm64, `MAXPHYS` is 1 MiB; on 32-bit systems it is 128 KiB. FreeBSD 14.3 also exposes a runtime tunable, `maxphys`, which some subsystems consult through the `MAXPHYS` macro or the `maxphys` variable. Setting `d_maxsize = MAXPHYS` accepts whatever the 内核 is willing to issue. For most pseudo 驱动程序 this is fine.
+`d_maxsize`是你的驱动程序可以接受的最大BIO大小。`MAXPHYS`是BIO大小的编译时上限，在`/usr/src/sys/sys/param.h`中定义。在amd64和arm64等64位系统上，`MAXPHYS`为1 MiB；在32位系统上为128 KiB。FreeBSD 14.3还暴露了一个运行时可调参数`maxphys`，一些子系统通过`MAXPHYS`宏或`maxphys`变量查询它。设置`d_maxsize = MAXPHYS`接受内核愿意发出的任何大小。对大多数伪驱动程序来说这没问题。
 
-### Can my 驱动程序 issue BIOs to itself?
+### 我的驱动程序能向自身发出BIO吗？
 
-Technically yes, but it rarely makes sense. The pattern is used by GEOM transformation classes (they take in BIOs from above and issue new BIOs downward). A `g_disk` 驱动程序 is at the bottom of the stack and has no downward; if you need to split work across multiple backing units, you probably want worker threads rather than nested BIOs.
+技术上可以，但很少有道理。这种模式被GEOM变换类使用（它们从上面接收BIO并向下发出新BIO）。`g_disk`驱动程序位于栈的底部，没有向下的方向；如果你需要跨多个后备单元拆分工作，你可能需要工作线程而不是嵌套BIO。
 
-### Why do some fields in struct disk use u_int and others off_t?
+### 为什么struct disk中有些字段使用u_int，有些使用off_t？
 
-`u_int` is used for unsigned integer sizes that fit in 32 bits (扇区 size, number of heads, etc.). `off_t` is a signed 64-bit type used for byte offsets and sizes that can exceed 32 bits (media size, request offsets). The distinction matters for large disks; a media size of 10 TB requires more than 32 bits.
+`u_int`用于适合32位的无符号整数大小（扇区大小、磁头数等）。`off_t`是有符号64位类型，用于可以超过32位的字节偏移和大小（媒体大小、请求偏移）。这个区别对大磁盘很重要；10 TB的媒体大小需要超过32位。
 
-### Is disk_alloc safe to call at any time?
+### disk_alloc在任何时候调用都安全吗？
 
-`disk_alloc` uses `M_WAITOK` and will sleep if memory is tight. Do not call it while holding a spin lock or a 互斥锁 you cannot release. Call it at 附加 time, outside any lock.
+`disk_alloc`使用`M_WAITOK`，在内存紧张时会睡眠。不要在持有自旋锁或你不能释放的互斥锁时调用它。在附加时、任何锁之外调用它。
 
-### What happens if I call disk_create twice with the same name?
+### 如果我用相同的名称调用disk_create两次会怎样？
 
-`disk_create` will happily create multiple disks with the same name if the unit numbers differ. If both the name and unit number match, GEOM will reject the second registration and the resulting behaviour is implementation-defined. Avoid this case.
+如果单元号不同，`disk_create`会愉快地创建多个同名的磁盘。如果名称和单元号都匹配，GEOM将拒绝第二次注册，产生的行为是实现定义的。避免这种情况。
 
-### Can the strategy function sleep?
+### 策略函数可以睡眠吗？
 
-Technically yes, but it should not. The strategy function runs in the caller's thread context, and sleeping there stalls the caller. For work that must 块, use a worker thread.
+技术上可以，但不应该。策略函数在调用者的线程上下文中运行，在那里睡眠会阻塞调用者。对于必须阻塞的工作，使用工作线程。
 
-### How do I know when all BIOs have finished for a given 文件系统?
+### 我怎么知道给定文件系统的所有BIO何时完成？
 
-You usually do not need to. `u挂载(2)` does the work: it flushes dirty 缓冲区, drains in-flight BIOs, and returns only after the 文件系统 is fully quiesced. After `u挂载` returns, no BIOs will arrive for that 挂载 point unless something else opens the 设备.
+你通常不需要知道。`umount(2)`做这个工作：它刷新脏缓冲区、排干飞行中的BIO，只有在文件系统完全静默后才返回。`umount`返回后，不会有BIO再到达那个挂载点，除非有其他东西打开了设备。
 
-### Can I pass pointers between threads through bio_caller1 or similar fields?
+### 我可以通过bio_caller1或类似字段在线程之间传递指针吗？
 
-Yes. `bio_caller1` and `bio_caller2` are opaque fields meant for the issuer of the BIO to stash context that the completion handler can use. As long as you own the BIO (which you do, because you issued it), the fields are yours. `g_disk` 驱动程序 do not usually need them because the BIO arrives from above and is completed by calling `biodone`, with `g_disk` handling the 回调 routing.
+可以。`bio_caller1`和`bio_caller2`是不透明字段，供BIO的发布者存放完成处理器可以使用的上下文。只要你拥有BIO（你确实拥有，因为你发出了它），这些字段就是你的。`g_disk`驱动程序通常不需要它们，因为BIO从上面到达并通过调用`biodone`完成，`g_disk`处理回调路由。
 
-### My 驱动程序 works on my laptop but not on the server. Why?
+### 我的驱动程序在笔记本上工作但在服务器上不行。为什么？
 
-Possibilities: different 内核 ABI (recompile against the server's 内核), different `MAXPHYS` (should be identical on 14.3 systems but check), different GEOM classes loaded (unlikely but possible), different memory size (your allocation might fail on a smaller system), different clock speed (affecting timing). Compare `uname -a` and `sysctl -a | grep kern.maxphys` to start.
+可能原因：不同的内核ABI（针对服务器的内核重新编译）、不同的`MAXPHYS`（在14.3系统上应该相同但检查一下）、加载了不同的GEOM类（不太可能但可能）、不同的内存大小（你的分配在较小的系统上可能失败）、不同的时钟速度（影响时序）。从比较`uname -a`和`sysctl -a | grep kern.maxphys`开始。
 
-### Where does the /dev node's name actually come from?
+### /dev节点的名称实际上从哪里来？
 
-From `d_name` and `d_unit` in the `struct disk` you pass to `disk_create`. GEOM concatenates them without a separator: `d_name = "myblk"`, `d_unit = 0` produces `/dev/myblk0`. If you want a different convention, set `d_name` accordingly. There is no separator character between the name and the unit.
+来自你传递给`disk_create`的`struct disk`中的`d_name`和`d_unit`。GEOM将它们连接起来不加分隔符：`d_name = "myblk"`、`d_unit = 0`产生`/dev/myblk0`。如果你想要不同的约定，相应地设置`d_name`。名称和单元号之间没有分隔符。
 
-### What is the maximum number of units I can create?
+### 我可以创建的最大单元数是多少？
 
-Limited by `d_unit`, which is `u_int`, so 2^32 - 1 in theory. In practice, per-unit memory consumption and the practical limits of `/dev` name space will stop you long before that.
+受`d_unit`限制，它是`u_int`，理论上为2^32 - 1。在实践中，每单元的内存消耗和`/dev`命名空间的实际限制会在你达到那个数字之前很久就阻止你。
 
-### Can I change d_mediasize after disk_create?
+### 我可以在disk_create之后更改d_mediasize吗？
 
-Yes, but carefully. Filesystems 挂载ed on the disk will not pick up the change automatically; most will require 卸载 and re挂载. `md(4)` supports `MDIOCRESIZE` and there is infrastructure for signalling the change to GEOM, but the pattern is non-trivial.
+可以，但要小心。挂载在磁盘上的文件系统不会自动拾取更改；大多数需要卸载并重新挂载。`md(4)`支持`MDIOCRESIZE`，有向GEOM发出更改信号的基础设施，但这个模式不简单。
 
-### What happens if I forget MODULE_DEPEND?
+### 如果我忘记MODULE_DEPEND会怎样？
 
-The 内核 may fail to load your module if `g_disk` is not already loaded, or may load it successfully if `g_disk` happens to be built into the 内核. Always declare `MODULE_DEPEND` explicitly to avoid surprise.
+如果`g_disk`尚未加载，内核可能无法加载你的模块，或者如果`g_disk`碰巧内建在内核中，可能成功加载。始终显式声明`MODULE_DEPEND`以避免意外。
 
-### Should I use biodone or g_io_deliver in my 驱动程序?
+### 我的驱动程序中应该使用biodone还是g_io_deliver？
 
-Use `biodone`. The `g_disk` wrapper provides a `d_strategy` style 接口 where the correct completion call is `biodone`. If you write your own `g_class`, you will call `g_io_deliver` instead, but that is a different path and a different chapter's worth of complexity.
+使用`biodone`。`g_disk`包装器提供了`d_strategy`风格的接口，其中正确的完成调用是`biodone`。如果你编写自己的`g_class`，你将改为调用`g_io_deliver`，但那是不同的路径和不同章节的复杂度。
 
-### How does BIO_DELETE relate to TRIM and UNMAP?
+### BIO_DELETE与TRIM和UNMAP有什么关系？
 
-`BIO_DELETE` is the in-内核 abstraction. For SATA SSDs it maps to the ATA TRIM command, for SCSI/SAS to UNMAP, and for NVMe to Dataset Management with the deallocate bit. Userland triggers it through `fstrim(8)` or the `-o trim` 挂载 option on UFS. Our 驱动程序 is free to treat it as a hint or to honour it by zeroing memory, since backing is in RAM.
+`BIO_DELETE`是内核内的抽象。对于SATA SSD，它映射到ATA TRIM命令；对于SCSI/SAS，映射到UNMAP；对于NVMe，映射到带释放位的Dataset Management。用户态通过`fstrim(8)`或UFS上的`-o trim`挂载选项触发它。我们的驱动程序可以自由地将其视为提示或通过清零内存来响应它，因为后备存储在RAM中。
 
-### Why does my strategy function sometimes receive a BIO with bio_length of zero?
+### 为什么我的策略函数有时收到bio_length为零的BIO？
 
-In normal operation you should never see this. If it happens, treat it as a defensive case: call `biodone(bp)` with no error and return. A length-zero BIO is not illegal, but it indicates something odd upstream. Filing a PR against the issuing code is reasonable.
+在正常操作中你不应该看到这个。如果发生了，将其视为防御性情况：不带错误调用`biodone(bp)`并返回。长度为零的BIO不是非法的，但表示上游有奇怪的东西。对发出代码提交PR是合理的。
 
-### What is the difference between d_flags and bio_flags?
+### d_flags和bio_flags之间有什么区别？
 
-`d_flags` is static configuration for the whole disk, set once at registration and describing what the 驱动程序 can do (handles DELETE, can FLUSH, accepts unmapped BIOs, and so on). `bio_flags` is dynamic metadata on a single BIO, changing per request (ordered, unmapped, direct completion). Do not confuse them.
+`d_flags`是整个磁盘的静态配置，在注册时设置一次，描述驱动程序能做什么（处理DELETE、可以FLUSH、接受未映射BIO等）。`bio_flags`是单个BIO上的动态元数据，每个请求变化（有序、未映射、直接完成）。不要混淆它们。
 
-### Can my 驱动程序 present itself as removable media?
+### 我的驱动程序可以将自己表现为可移动介质吗？
 
-Yes, set `DISKFLAG_CANDELETE` and consider honouring `disk_gone` to simulate ejection. Tools like `camcontrol` and 文件系统 handlers generally treat any GEOM provider uniformly, so "removable" in the user-visible sense is less distinct than in other operating systems.
+可以，设置`DISKFLAG_CANDELETE`并考虑响应`disk_gone`来模拟弹出。像`camcontrol`和文件系统处理器这样的工具通常统一对待任何GEOM提供者，所以用户可见意义上的"可移动"在其他操作系统中不那么明显。
 
-### What thread actually calls my strategy function?
+### 什么线程实际调用我的策略函数？
 
-It depends. For synchronous submission from the 缓冲区 cache, it is the thread that called `bwrite` or `bread`. For asynchronous completion paths it is often a GEOM worker or the 缓冲区 cache's flusher thread. Your strategy must be written to tolerate any caller. Do not assume a specific thread identity or a specific priority.
+取决于情况。对于来自缓冲区缓存的同步提交，是调用`bwrite`或`bread`的线程。对于异步完成路径，通常是GEOM工作线程或缓冲区缓存的刷新线程。你的策略函数必须编写为容忍任何调用者。不要假设特定的线程标识或特定的优先级。
 
-### How do I know which process caused a given BIO?
+### 我怎么知道哪个进程导致了给定的BIO？
 
-You usually cannot, because BIOs can be reordered, coalesced, merged, and issued from background threads that are not the original requester. `dtrace` with the `io:::start` 探测 plus stack captures can get you close, but it is investigative work, not a routine 驱动程序 responsibility.
+你通常无法知道，因为BIO可以被重新排序、合并、归并，并从不是原始请求者的后台线程发出。带有`io:::start`探测加上栈捕获的`dtrace`可以让你接近，但这是调查工作，不是常规的驱动程序责任。
 
-### Can two different 文件系统 be 挂载ed simultaneously on two unit numbers of my 驱动程序?
+### 我的驱动程序的两个不同单元号上可以同时挂载两个不同的文件系统吗？
 
-Yes, if you implemented multi-unit support. Each unit presents its own GEOM provider. Their backing stores are independent. The only shared state is your module's global variables and the 内核 itself, so the two 挂载s do not interact unless you make them.
+可以，如果你实现了多单元支持。每个单元呈现自己的GEOM提供者。它们的后备存储是独立的。唯一共享的状态是你模块的全局变量和内核本身，所以两个挂载不会交互，除非你让它们交互。
 
-### Should my 驱动程序 handle power management events?
+### 我的驱动程序应该处理电源管理事件吗？
 
-For a pseudo 设备, no. For a real hardware 驱动程序, yes: suspend and resume events flow through New总线 as method calls, and the 驱动程序 must quiesce I/O on suspend and revalidate 设备 state on resume. Storage 驱动程序 on laptops are a common source of suspend-related bugs, so real 驱动程序 take this seriously.
+对于伪设备，不需要。对于真正的硬件驱动程序，需要：挂起和恢复事件通过Newbus作为方法调用传递，驱动程序必须在挂起时停止I/O，在恢复时重新验证设备状态。笔记本电脑上的存储驱动程序是挂起相关bug的常见来源，所以真正的驱动程序对此很认真。
 
-### What is the practical impact of choosing 512 versus 4096 as d_扇区ize?
+### 选择512还是4096作为d_sectorsize有什么实际影响？
 
-On modern 文件系统, very little: UFS, ZFS, and most other FreeBSD 文件系统 work happily with either. On the 驱动程序 side, a larger 扇区 size reduces the number of BIOs for large transfers. On the workload side, applications doing O_DIRECT or aligned I/O may care. When in doubt, pick 4096 for new 驱动程序; it matches modern flash and avoids alignment penalties.
+在现代文件系统上，几乎没有：UFS、ZFS和大多数其他FreeBSD文件系统都能愉快地使用两者。在驱动程序侧，较大的扇区大小减少了大传输的BIO数量。在工作负载侧，做O_DIRECT或对齐I/O的应用程序可能在乎。有疑问时，为新驱动程序选择4096；它匹配现代闪存并避免对齐惩罚。
 
-### If I reload my 驱动程序 many times, does memory leak?
+### 如果我多次重新加载驱动程序，内存会泄漏吗？
 
-Only if you have a bug. In our design, `MOD_UNLOAD` calls `myblk_分离_unit`, which frees the backing store and the softc. The persistence variant deliberately retains the backing store across reloads but uses a single global pointer, so there is no leak; the same memory is reused. If `vmstat -m | grep myblk` climbs across reloads, investigate.
+只有在你有bug时才会。在我们的设计中，`MOD_UNLOAD`调用`myblk_detach_unit`，它释放后备存储和softc。持久性变体故意在重载间保留后备存储，但使用单一全局指针，所以没有泄漏；相同的内存被重用。如果`vmstat -m | grep myblk`在重载间攀升，请调查。
 
-### Why does `挂载` sometimes succeed on my raw 设备 but `newfs_ufs` fail?
+### 为什么`mount`有时在我的原始设备上成功但`newfs_ufs`失败？
 
-`newfs_ufs` writes structured metadata (super块, cylinder groups, inode tables) and then reads some of it back to verify. If the 设备 is too small, corrupts writes silently, or returns errors only under certain conditions, `newfs_ufs` catches it first. `挂载` is much less strict at the write path; it can read in a broken super块 and produce odd errors later. A successful `newfs` is a stronger correctness signal than a successful `挂载`.
+`newfs_ufs`写入结构化元数据（超级块、柱面组、inode表）然后回读其中一些来验证。如果设备太小、静默损坏写入或仅在特定条件下返回错误，`newfs_ufs`会首先捕获它。`mount`在写入路径上不那么严格；它可以读入损坏的超级块并在之后产生奇怪的错误。成功的`newfs`是比成功的`mount`更强的正确性信号。
 
-### How do I verify that my BIO_FLUSH implementation actually makes data durable?
+### 我怎么验证我的BIO_FLUSH实现确实使数据持久？
 
-For our in-memory 驱动程序, durability is bounded by the host's power: flushing does nothing useful because a power cut takes everything with it. For a real 驱动程序 backed by persistent storage, issuing a flush command to the underlying media and confirming completion before calling `biodone` is the contract. Testing requires a power-cycle harness or a simulator; there is no shortcut.
+对于我们的内存驱动程序，持久性受主机电源约束：刷新没有实际用途，因为断电会带走一切。对于由持久存储支持的真正驱动程序，向底层介质发出刷新命令并在调用`biodone`之前确认完成就是契约。测试需要断电循环工具或模拟器；没有捷径。
 
-### What are the correct locking rules inside d_strategy?
+### d_strategy内部正确的锁定规则是什么？
 
-Hold the 驱动程序's lock long enough to protect the backing store against concurrent access, and release it before calling `biodone`. Never hold a lock across a call into another subsystem. Never call `malloc(M_WAITOK)` with a lock held. Never sleep. If you need to sleep, schedule the work on a taskqueue and call `biodone` from the worker.
+持有驱动程序的锁足够长时间来保护后备存储免受并发访问，并在调用`biodone`之前释放它。永远不要在调用另一个子系统时持有锁。永远不要在持有锁时调用`malloc(M_WAITOK)`。永远不要睡眠。如果你需要睡眠，在工作线程上调度工作并从工作线程调用`biodone`。
 
-### Why is BIO_FLUSH not a percent-of-capacity barrier like write barriers on Linux?
+### 为什么BIO_FLUSH不像Linux上的写屏障那样是百分比容量的屏障？
 
-FreeBSD's BIO_FLUSH is a point-in-time barrier: when it completes, all previously issued writes are durable. It is not associated with a particular range or percentage of the 设备. Drivers can implement it as a strict barrier or as an opportunistic flush, but the minimum contract is the point-in-time guarantee.
+FreeBSD的BIO_FLUSH是时间点屏障：当它完成时，所有先前发出的写入都是持久的。它不与特定范围或设备的百分比关联。驱动程序可以将它实现为严格屏障或机会性刷新，但最低契约是时间点保证。
 
-### Are there any tools that generate BIO traffic to help me test?
+### 有生成BIO流量帮助我测试的工具吗？
 
-Yes. `dd(1)` with various `bs=` values, `fio(1)` from ports, `ioping(8)` from ports, plus the usual suspects: `newfs`, `tar`, `rsync`, `cp`. `diskinfo -t` runs a suite of benchmark reads and is useful for rough throughput numbers. The test harnesses under `/usr/src/tools/regression/` can also be adapted.
+有。带有各种`bs=`值的`dd(1)`、来自ports的`fio(1)`、来自ports的`ioping(8)`，加上通常的嫌疑人：`newfs`、`tar`、`rsync`、`cp`。`diskinfo -t`运行一套基准读取，对粗略的吞吐量数字有用。`/usr/src/tools/regression/`下的测试工具也可以被适配。
 
-## What This Chapter Did Not Cover
+## 本章未涵盖的内容
 
-This chapter is long, but there are several related topics we deliberately left for later. Naming them here helps you plan future study and prevents the false impression that 存储驱动程序 end at the BIO handler.
+本章很长，但有几个相关主题我们有意留待以后。在这里命名它们有助于你规划未来的学习，并防止产生存储驱动程序止步于BIO处理器的错误印象。
 
-**Real hardware 存储驱动程序** such as those for SATA, SAS, and NVMe controllers live under CAM and require significant additional machinery: command-块 allocation, tagged queueing, 热插拔 event handling, firmware upload, SMART data, and error-recovery protocols. We introduced the CAM world briefly through the `ada_da.c` excerpt but did not explore it in depth. Chapters 33 through 36 will tackle these 接口, and the md(4) 驱动程序 you read in this chapter is a deliberately small staircase by comparison.
+**真正的硬件存储驱动程序**，如SATA、SAS和NVMe控制器的驱动程序，位于CAM之下，需要大量额外的机制：命令块分配、标记队列、热插拔事件处理、固件上传、SMART数据和错误恢复协议。我们通过`ada_da.c`摘录简要介绍了CAM世界，但没有深入探讨。第33到36章将讨论这些接口，你在本章阅读的`md(4)`驱动程序相比之下是一个刻意设置的小台阶。
 
-**ZFS integration** is its own world. ZFS consumes GEOM providers through its vdev layer but adds copy-on-write semantics, end-to-end checksums, pooled storage, and snapshots that no simple 块 驱动程序 would ever need to know about. If your 驱动程序 works under UFS it almost certainly works under ZFS, but the reverse is not guaranteed: ZFS exercises BIO paths, especially flushing and write ordering, that less demanding 文件系统 skip.
+**ZFS集成**是一个独立的世界。ZFS通过其vdev层消费GEOM提供者，但添加了写时复制语义、端到端校验和、池化存储和快照，这些是简单块驱动程序永远不需要知道的。如果你的驱动程序在UFS下工作，它几乎肯定在ZFS下也工作，但反过来不一定：ZFS对BIO路径的要求，特别是刷新和写入顺序，是不那么苛刻的文件系统跳过的。
 
-**GEOM class authoring** is a larger topic than `g_disk` wrapping. A full class implements taste, start, access, 附加, 分离, dumpconf, destroy_geom, and orphan methods. It can also create and destroy consumers, build multi-level topologies, and respond to configuration via `gctl`. The mirror, stripe, and crypt classes are good starting points once you decide to dig in.
+**GEOM类编写**是比`g_disk`包装更大的主题。完整的类实现taste、start、access、attach、detach、dumpconf、destroy_geom和orphan方法。它还可以创建和销毁消费者、构建多层拓扑、通过`gctl`响应配置。一旦你决定深入研究，mirror、stripe和crypt类是好的起点。
 
-**Quotas, ACLs, and extended attributes** are 文件系统 features that live above the GEOM layer entirely. They matter for userland but do not touch the 存储驱动程序. This is a useful piece of clarity: the 驱动程序's job ends at the BIO boundary.
+**配额、ACL和扩展属性**是完全位于GEOM层之上的文件系统功能。它们对用户空间很重要但不涉及存储驱动程序。这是一个有用的澄清：驱动程序的工作止于BIO边界。
 
-**Tracing and debugging 内核 crashes** deserves its own chapter. Kernel core dumps land on a dump 设备 configured via `dumpon(8)`, analysed with `kgdb(1)` or `crashinfo(8)`. If your 驱动程序 panics the system, being able to load the core file and inspect backtraces is a professional-level skill that this chapter only gestured at.
+**跟踪和调试内核崩溃**值得单独一章。内核核心转储通过`dumpon(8)`配置的转储设备落地，用`kgdb(1)`或`crashinfo(8)`分析。如果你的驱动程序导致系统崩溃，能够加载核心文件并检查回溯是一项专业级技能，本章只是提及。
 
-**High-performance storage paths** use features such as unmapped I/O, direct-dispatch completion, CPU pinning, NUMA-aware allocation, and dedicated queues. These optimisations matter for gigabytes-per-second workloads but are irrelevant to a teaching 驱动程序. When you start chasing microseconds, come back to `/usr/src/sys/dev/nvme/` and study how the real professionals do it.
+**高性能存储路径**使用未映射I/O、直接分派完成、CPU固定、NUMA感知分配和专用队列等特性。这些优化对每秒千兆字节的工作负载很重要，但对教学驱动程序无关。当你开始追逐微秒时，回到`/usr/src/sys/dev/nvme/`研究真正的专业人士是怎么做的。
 
-**Filesystem-specific behaviour** varies widely. UFS asks for one set of BIOs; ZFS asks for a different set; msdosfs and ext2fs ask for something different again. A good 存储驱动程序 is 文件系统-agnostic, but observing different 文件系统 on your 驱动程序 is a fantastic way to build intuition. Try `msdosfs`, `ext2fs`, and `tmpfs` for contrast after you are comfortable with UFS.
+**文件系统特定行为**差异很大。UFS请求一组BIO；ZFS请求不同的组；msdosfs和ext2fs又请求不同的东西。一个好的存储驱动程序是文件系统无关的，但在你的驱动程序上观察不同文件系统是建立直觉的绝佳方式。在你对UFS感到舒适后，尝试`msdosfs`、`ext2fs`和`tmpfs`进行对比。
 
-**iSCSI and network 块设备** present themselves as GEOM providers too, but they are created by userland control daemons and talk to the network stack. 第28章 begins the networking work that makes those providers possible.
+**iSCSI和网络块设备**也以GEOM提供者的形式呈现自己，但它们由用户态控制守护程序创建并与网络栈通信。第28章开始使这些提供者成为可能的网络工作。
 
-Our treatment of the storage path was deliberately focused. We wrote a 驱动程序 that 文件系统 accept as real, we understood why and how it is seen that way, and we traced the data path from `write(2)` to RAM. That foundation is enough to make the unexplored topics above readable rather than bewildering.
+我们对存储路径的处理是刻意聚焦的。我们编写了一个文件系统接受为真实的驱动程序，我们理解了为什么以及如何被这样看待，我们跟踪了从`write(2)`到RAM的数据路径。这个基础足以使上述未探索的主题变得可读而非令人困惑。
 
-## Final Reflection
+## 最终反思
 
-Storage 驱动程序 have a reputation as forbidding territory. This chapter should have replaced some of that reputation with familiarity: the BIO is just a structure, the strategy function is just a dispatcher, GEOM is just a graph, and `disk_create` is just a registration call. What elevates storage work from routine is not the underlying APIs, which are compact, but the operational demands that accumulate around them: performance, durability, error recovery, and correctness under contention.
+存储驱动程序有令人生畏的名声。本章应该已经用熟悉感取代了部分这种名声：BIO只是一个结构，策略函数只是一个分派器，GEOM只是一个图，`disk_create`只是一个注册调用。将存储工作从例行公事中提升的不是底层API——它们很紧凑——而是围绕它们积累的运维需求：性能、持久性、错误恢复和竞争下的正确性。
 
-Those demands do not go away when you leave pseudo 设备 for real hardware. They multiply. But you already have the vocabulary to understand them. You know what a BIO is and where it comes from. You know which thread calls your code and what it expects. You know how to 注册 with GEOM, how to un注册 cleanly, and how to recognise an in-flight request from its shadow in `gstat`. When you sit in front of a real SATA controller 驱动程序 and start reading, you will recognise the shape of the code even though the specifics differ.
+当你从伪设备转向真正的硬件时，这些需求不会消失。它们会倍增。但你已经有了理解它们的词汇。你知道BIO是什么，它从哪里来。你知道哪个线程调用你的代码以及它期望什么。你知道如何向GEOM注册、如何干净地注销，以及如何从`gstat`中的影子识别飞行中的请求。当你坐在真正的SATA控制器驱动程序前开始阅读时，你会识别出代码的形状，即使具体细节不同。
 
-The craft of storage-驱动程序 writing is, ultimately, patient. You learn by writing small 驱动程序, reading the source tree, reproducing simple experiments, and building instincts about when something that looks right is actually right. The chapter you just finished is a single long step along that journey. The next chapters will step again, each time in different directions.
+存储驱动程序编写的技艺，归根结底，是耐心的。你通过编写小驱动程序、阅读源码树、重现简单的实验、建立对看起来正确的东西什么时候实际上正确的直觉来学习。你刚完成的章节是这条旅程中的漫长一步。接下来的章节将再次迈步，每次朝着不同的方向。
 
-## Further Reading
+## 延伸阅读
 
-If this chapter has whetted your appetite for storage internals, here are some places to go next.
+如果本章激发了你对存储内部机制的兴趣，以下是一些可以继续深入的地方。
 
-**Manual pages**. `disk(9)`, `g_bio(9)`, `geom(4)`, `devfs(5)`, `ufs(5)`, `newfs(8)`, `mdconfig(8)`, `gstat(8)`, `diskinfo(8)`, `挂载(2)`, `挂载(8)`. Read them in that order.
+**手册页**。`disk(9)`、`g_bio(9)`、`geom(4)`、`devfs(5)`、`ufs(5)`、`newfs(8)`、`mdconfig(8)`、`gstat(8)`、`diskinfo(8)`、`mount(2)`、`mount(8)`。按此顺序阅读。
 
-**The FreeBSD Architecture Handbook**. The storage chapter is a good complement to this one.
+**FreeBSD架构手册**。存储章节是本章的良好补充。
 
-**Kirk McKusick et al., "The Design and Implementation of the FreeBSD Operating System".** The book's chapters on the 文件系统 are especially relevant.
+**Kirk McKusick等人，"The Design and Implementation of the FreeBSD Operating System"。**该书中关于文件系统的章节特别相关。
 
-**DTrace books.** Brendan Gregg's "DTrace Book" is a practical reference; Sun's "Dynamic Tracing Guide" is the original tutorial.
+**DTrace书籍。**Brendan Gregg的"DTrace Book"是实用的参考；Sun的"Dynamic Tracing Guide"是原始教程。
 
-**The FreeBSD source tree.** `/usr/src/sys/geom/`, `/usr/src/sys/dev/md/`, `/usr/src/sys/ufs/`, and `/usr/src/sys/cam/ata/` (where `ata_da.c` implements the `ada` disk 驱动程序). Every pattern discussed in this chapter is grounded in that code.
+**FreeBSD源码树。**`/usr/src/sys/geom/`、`/usr/src/sys/dev/md/`、`/usr/src/sys/ufs/`和`/usr/src/sys/cam/ata/`（`ata_da.c`在其中实现`ada`磁盘驱动程序）。本章讨论的每个模式都根植于该代码。
 
-**The mailing list archives.** `freebsd-geom@` and `freebsd-fs@` are the two most relevant lists. Reading historic threads is one of the best ways to pick up the institutional knowledge that books do not capture.
+**邮件列表档案。**`freebsd-geom@`和`freebsd-fs@`是两个最相关的列表。阅读历史帖子是获取书籍未捕获的制度知识的最佳方式之一。
 
-**Commit history on GitHub mirrors.** The FreeBSD source tree has a long, well-annotated commit history. For any file you open, running `git log --follow` against its mirror will often reveal the rationale behind design choices, the bugs that shaped the current code, and the people who maintain it. Historical context makes the present code much easier to read.
+**GitHub镜像上的提交历史。**FreeBSD源码树有很长、注释良好的提交历史。对于你打开的任何文件，对其镜像运行`git log --follow`通常会揭示设计选择背后的原因、塑造当前代码的bug以及维护它的人。历史背景使现在的代码更容易阅读。
 
-**The Transactions of the FreeBSD Developer Summit.** Several summits have included storage-focused sessions. Recordings and slides, when available, are excellent for picking up the state of the art and the open design debates.
+**FreeBSD开发者峰会论文集。**几次峰会都包含存储相关的会议。录音和幻灯片（如果有）非常适合了解最新技术和公开的设计辩论。
 
-**Reading other operating systems' storage stacks.** Once you know FreeBSD's storage path, Linux's 块 layer, Illumos's SD 框架, and macOS's IOKit storage classes all become comprehensible in a way they probably were not before. The specific APIs differ, but the fundamental shapes, BIOs or their equivalents, 文件系统 above, hardware below, are universal.
+**阅读其他操作系统的存储栈。**一旦你了解了FreeBSD的存储路径，Linux的块层、Illumos的SD框架和macOS的IOKit存储类都变得可以理解了，而以前可能不是这样。具体API不同，但基本的形状——BIO或其等价物、上面是文件系统、下面是硬件——是通用的。
 
-**Testing 框架 for 内核 code.** The `kyua(1)` harness runs regression tests against real 内核s. The `/usr/tests/sys/geom/` tree has examples of what well-written tests for storage code look like; reading them builds both testing instincts and confidence that your code is right.
+**内核代码的测试框架。**`kyua(1)`工具运行针对真实内核的回归测试。`/usr/tests/sys/geom/`树有编写良好的存储代码测试的例子；阅读它们既能建立测试直觉也能增强代码正确的信心。
 
-**FreeBSD Foundation blog posts.** The Foundation funds several storage-related projects and publishes readable summaries that complement the source tree.
+**FreeBSD基金会博客文章。**基金会资助多个存储相关项目，并发布可读的摘要来补充源码树。
 
 ---
 
-End of 第27章. Close your lab logbook, make sure your 驱动程序 is unloaded and your 挂载 points are released, and take a break before 第28章.
+第27章结束。合上你的实验日志，确保你的驱动程序已卸载、挂载点已释放，在第28章之前休息一下。
 
-You have just written a 存储驱动程序, 挂载ed a 文件系统 on it, traced data through the 缓冲区 cache, into GEOM, through your strategy function, and back again. That is a real accomplishment. Rest on it for a moment before you turn the page.
+你刚刚编写了一个存储驱动程序，在其上挂载了文件系统，跟踪了数据穿过缓冲区缓存、进入GEOM、通过你的策略函数然后返回。这是一项真正的成就。在翻页之前好好感受一下。

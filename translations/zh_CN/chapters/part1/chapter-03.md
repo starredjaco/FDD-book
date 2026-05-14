@@ -917,9 +917,9 @@ uid=1001(dev) gid=1001(dev) groups=1001(dev), 0(wheel)
 
 1. 创建一个名为 `proj` 的组：
 
-		```
+   ```
    # pw groupadd proj
-		```
+   ```
 
 2. 将两个用户添加到组：
 

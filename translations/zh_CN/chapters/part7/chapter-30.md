@@ -17,367 +17,367 @@ language: "zh-CN"
 
 ## 引言
 
-You arrive at Chapter 30 with a new habit of mind. Chapter 29 taught you how to shape a driver so that it absorbs variation in hardware, bus, and architecture without collapsing into a maze of conditionals. You have learned to push the parts that change into small, backend-specific files and to let the core remain clean. You have met the idea that a driver is not written for a single machine; it is written for a family of machines that share a programming model. That lesson carries a great deal of weight in this chapter, because the environment around your driver can now change in a way that is more radical than anything Chapter 29 considered. The machine itself may not be real.
+当你来到第30章时，你已经养成了一种新的思维习惯。第29章教会了你如何塑造一个驱动程序，使其能够适应硬件、总线和架构的变化，而不会陷入条件语句的迷宫中。你已经学会了将变化的部分推入小型的、特定于后端的文件中，让核心保持简洁。你已经接触到了这样的理念：驱动程序不是为单台机器编写的，而是为共享编程模型的一族机器编写的。这一教训在本章中具有极大的分量，因为驱动程序周围的环境现在可能以一种比第29章所考虑的任何情况都更激进的方式发生变化。机器本身可能并不是真实的。
 
-This chapter is about what happens when the hardware under your driver is not a physical card plugged into a physical slot, but a software simulation presented to a guest operating system by a hypervisor; or when the driver is asked to attach inside a jail that sees only part of the device tree; or when the network stack it cooperates with is one of several stacks running side by side inside a single kernel. Each of these situations is a departure from the "one kernel, one machine, one device tree" mental model that the earlier chapters built. Each one changes what your driver may assume, what it may do, and what a user of your driver may safely expect from it.
+本章讨论的是当驱动程序下面的硬件不是插在物理插槽中的物理卡，而是由虚拟机监控程序（hypervisor）呈现给客户操作系统的软件模拟时会发生什么；或者当驱动程序被要求附加到一个只能看到设备树一部分的 jail 中时会发生什么；或者当它所配合的网络栈是单个内核中并行运行的多个栈之一时会发生什么。这些情况中的每一种都偏离了前面章节所建立的"一个内核、一台机器、一个设备树"的心智模型。每一种情况都改变了驱动程序可以假设什么、可以做什么，以及驱动程序的用户可以安全地期望什么。
 
-The word "virtualisation" can mean several different things depending on who is speaking. To a system administrator running a cloud fleet, it means virtual machines with full kernels of their own. To a FreeBSD user, it often means `jail(8)` and its descendants, which isolate processes and filesystems without giving each one a kernel. To a driver author, it means both, and more. It means paravirtual devices like VirtIO that are explicitly designed to be easy for a guest to drive. It means emulated devices that a hypervisor presents to a guest as if they were physical hardware. It means passthrough devices where a real piece of hardware is handed to a guest more or less directly, with the hypervisor stepping aside as much as it safely can. It means jails whose view of `devfs` is trimmed by a ruleset so that the containerised processes inside cannot see every device the host can see. It means VNET jails that own an entire network stack of their own, complete with an `ifnet` that was loaned to them by the host.
+"虚拟化"这个词的含义因说话者的不同而异。对于管理云舰队集群的系统管理员来说，它意味着拥有自己完整内核的虚拟机。对于 FreeBSD 用户来说，它通常指的是 `jail(8)` 及其后继者，它们隔离进程和文件系统，而不给每个进程一个独立的内核。对于驱动程序作者来说，它意味着这两者以及更多。它意味着像 VirtIO 这样明确设计为便于客户驱动的半虚拟化设备。它意味着虚拟机监控程序像物理硬件一样呈现给客户的模拟设备。它意味着直通设备，即一块真实的硬件或多或少直接地交给客户，虚拟机监控程序尽可能安全地退居幕后。它意味着其 `devfs` 视图被规则集修剪过的 jail，使得内部的容器化进程无法看到主机能看到的所有设备。它意味着拥有自己完整网络栈的 VNET jail，包括由主机借给它们的 `ifnet`。
 
-If that list already feels like a lot, take a breath. The chapter will introduce each of these pieces one at a time, with enough real FreeBSD grounding that you will be able to close the book and open the source tree and find the relevant files with your own hands. Nothing in this chapter is impossible to learn; it is a set of distinct but related ideas that share a common thread. The thread is this: a driver stops being the single most important piece of software in its particular hardware path. Above it sits a hypervisor, a jail framework, or a container runtime; beside it sit other guests or jails that share the host; below it sits a piece of silicon that the driver no longer owns exclusively. Writing drivers for that world is not harder than writing drivers for bare metal, but it is different in ways that are easy to miss if you have not been shown them.
+如果上面的列表已经让你觉得内容很多，请深呼吸。本章将逐一介绍这些部分，并提供足够的 FreeBSD 实践基础，使你能够合上书本、打开源代码树，亲手找到相关的文件。本章中的任何内容都不是不可能学会的；它是一组独特但相互关联的想法，共享一条共同的线索。这条线索是：驱动程序不再是其特定硬件路径中最重要的软件。在它之上是虚拟机监控程序、jail 框架或容器运行时；在它旁边是共享主机的其他客户或 jail；在它之下是一块驱动程序不再独占的硅片。为那个世界编写驱动程序并不比为裸金属编写驱动程序更难，但如果你没有被指出其中的差异，它们很容易被忽略。
 
-Two distinct directions run through the chapter. The first direction is about **writing guest drivers**: code that runs inside a virtual machine and talks to devices the hypervisor presents. You will spend the bulk of your time in this direction, because it is where most of the novel programming happens. VirtIO is the canonical example, and we will return to it often. The second direction is about **cooperating with FreeBSD's own virtualisation infrastructure** from the host side: understanding how your driver attaches inside a jail, how it behaves when the host moves an interface into a VNET jail, how it handles a user inside a jail trying to call an `ioctl` that only root on the host should be allowed to call, and how to test it all without ruining a running host. This direction is less about exotic new APIs and more about discipline, privilege boundaries, and a careful mental model of what is visible from where.
+本章贯穿两个不同的方向。第一个方向是关于**编写客户驱动程序**：在虚拟机内运行并与虚拟机监控程序呈现的设备进行通信的代码。你将在这个方向上花费大部分时间，因为这是大多数新颖编程发生的地方。VirtIO 是典型的例子，我们会经常回到它。第二个方向是关于从主机侧**配合 FreeBSD 自身的虚拟化基础设施**：理解你的驱动程序如何在 jail 中附加，当主机将接口移入 VNET jail 时它的行为如何，它如何处理 jail 内的用户试图调用只应允许主机上的 root 调用的 `ioctl`，以及如何在不破坏正在运行的主机的情况下测试这一切。这个方向与其说是关于奇特的新 API，不如说是关于纪律、权限边界和关于从哪里可以看到什么的谨慎心智模型。
 
-The chapter does not try to teach you how to write a hypervisor, how to implement a new VirtIO transport, or how to build a container runtime from scratch. Those are large topics with their own books. What it teaches is how a driver author should think about, prepare for, and work with virtualised and containerised environments, so that the drivers you write make sense everywhere they are loaded. By the end of the chapter, you will recognise a VirtIO guest driver when you see one, you will know how to detect whether your driver is running in a virtual machine, you will be able to explain what `devfs_ruleset(8)` does and why it matters for device exposure, you will be able to reason about the differences between VNET jails and ordinary jails for a network driver, and you will have written a tiny VirtIO guest driver of your own against a FreeBSD `bhyve(8)` backend.
+本章不试图教你如何编写虚拟机监控程序、如何实现新的 VirtIO 传输或如何从头构建容器运行时。这些都是有自己的书籍的大型主题。它所教的是驱动程序作者应该如何思考、准备和使用虚拟化和容器化环境，以便你编写的驱动程序在它们被加载的任何地方都是合理的。到本章结束时，你将能够识别 VirtIO 客户驱动程序，你将知道如何检测驱动程序是否在虚拟机中运行，你将能够解释 `devfs_ruleset(8)` 的作用及其对设备暴露的重要性，你将能够推理 VNET jail 和普通 jail 对网络驱动程序的差异，并且你将编写自己的一个针对 FreeBSD `bhyve(8)` 后端的小型 VirtIO 客户驱动程序。
 
-Before we begin, a word about the tone of what follows. Some of the subjects in this chapter, especially hypervisor internals and jail security boundaries, have acquired a reputation for being exotic. A driver author who has never looked under the hood can feel intimidated by their jargon. You should not. The code is FreeBSD code; the APIs are FreeBSD APIs; the mindset is the same mindset you have been building since Chapter 1. We will move slowly, and we will keep coming back to real files you can open. Let us begin.
+在开始之前，关于接下来内容的语气说一句话。本章中的一些主题，特别是虚拟机监控程序内部机制和 jail 安全边界，已经获得了神秘的声誉。从未深入了解过其内部机制的驱动程序作者可能会被它们的术语所吓倒。你不应该这样。代码是 FreeBSD 代码；API 是 FreeBSD API；思维方式是你从第1章以来一直在建立的相同思维方式。我们将慢慢地推进，并不断回到你可以打开的真实文件。让我们开始吧。
 
 ## 读者指南：如何使用本章
 
-This chapter sits in a different place in the learning progression from Chapter 29. Chapter 29 was about how your driver is organised on disk. Chapter 30 is about what the world around your driver looks like at runtime. That difference matters for how you should read and practise. The patterns of Chapter 29 can be absorbed by reading carefully and typing along. The patterns of this chapter land more firmly if you also boot a virtual machine, create a jail, and watch the driver behave inside them. Plan accordingly.
+本章在学习进度中处于与第29章不同的位置。第29章是关于驱动程序在磁盘上如何组织的。第30章是关于驱动程序周围的世界在运行时是什么样子的。这种差异对你应该如何阅读和实践很重要。第29章的模式可以通过仔细阅读和跟着输入来吸收。本章的模式如果你还启动一个虚拟机、创建一个 jail 并观察驱动程序在其中的行为，会更加牢固。请相应地安排计划。
 
-If you choose the **reading-only path**, plan for roughly two to three focused hours. At the end you will understand the conceptual map: what paravirtual, emulated, and passthrough devices are; how VirtIO uses shared rings and feature negotiation; how jails and VNET isolate devices and network stacks; what `rctl(8)` controls from the driver's point of view. You will not yet have the reflexes of a driver author who has debugged a virtqueue mismatch at three in the morning, and that is fine. The reading pass is a legitimate first encounter, and the material has enough depth that a second pass with labs later on will extract much more value from it.
+如果你选择**仅阅读路径**，计划大约两到三个专注的小时。最后你将理解概念图：什么是半虚拟化、模拟和直通设备；VirtIO 如何使用共享环和特性协商；jail 和 VNET 如何隔离设备和网络栈；从驱动程序的角度看 `rctl(8)` 控制什么。你还不会拥有一个在凌晨三点调试过虚拟队列不匹配的驱动程序作者的条件反射，这没关系。阅读遍是合理的第一次接触，材料有足够的深度，稍后带着实验再读一遍会从中获取更多价值。
 
-If you choose the **reading-plus-labs path**, plan for six to ten hours spread across two or three sessions. You will install `bhyve(8)` on your lab machine, boot a FreeBSD 14.3 guest on top of it with VirtIO devices, write a small VirtIO pseudo-device driver called `vtedu`, and observe it attach, service requests from the host-side device, and detach cleanly. You will also create a simple jail, attach the driver to it under different `devfs` rulesets, and watch what happens when the driver exposes a device inside the jail. The labs are structured so that each one stands on its own, leaves you with a working system, and reinforces a specific concept from the main text.
+如果你选择**阅读加实验路径**，计划六到十个小时，分两到三次进行。你将在实验机器上安装 `bhyve(8)`，在它上面启动一个带有 VirtIO 设备的 FreeBSD 14.3 客户机，编写一个名为 `vtedu` 的小型 VirtIO 伪设备驱动程序，并观察它附加、服务来自主机侧设备的请求以及干净地分离。你还将创建一个简单的 jail，在不同的 `devfs` 规则集下将驱动程序附加到它，并观察当驱动程序在 jail 内暴露设备时会发生什么。实验的结构使得每个实验都独立运作，让你拥有一个可工作的系统，并强化正文中的特定概念。
 
-If you choose the **reading-plus-labs-plus-challenges path**, plan for a long weekend or a handful of evenings. The challenges push the baseline labs into more realistic territory: extending `vtedu` to accept multiple virtqueues, writing a small tool that probes the guest's hypervisor through `vm.guest` and adapts behaviour, building a VNET jail and moving a tap interface into it, and writing a short report on how a driver that exports an `ioctl` surface should decide which ioctls should be accessible from inside a jail. Each challenge is invitational rather than mandatory, and each one is sized to be completable without a second weekend.
+如果你选择**阅读加实验加挑战路径**，计划一个长周末或几个晚上。挑战将基线实验推向更现实的领域：扩展 `vtedu` 以接受多个虚拟队列，编写一个小工具通过 `vm.guest` 探测客户的虚拟机监控程序并调整行为，构建一个 VNET jail 并将 tap 接口移入其中，以及写一份关于导出 `ioctl` 接口的驱动程序应如何决定哪些 ioctl 可以从 jail 内部访问的简短报告。每个挑战都是邀请性的而非强制性的，每个挑战的规模都可以在一个周末内完成。
 
-A note on the lab environment. You will continue to use the throwaway FreeBSD 14.3 machine you established in earlier chapters. That machine will act as the **host** in this chapter. On top of it you will run `bhyve(8)` guests, which are smaller FreeBSD installations managed by your host. You will also create a few jails directly on the host. This nesting sounds complicated the first time it is described, but it is genuinely simple in practice: your host runs FreeBSD, inside the host you start a `bhyve` virtual machine that also runs FreeBSD, and inside either the host or the guest you create jails. Each layer is independent, each layer has its own `dmesg`, and each layer is cheap to recreate from scratch if something goes wrong.
+关于实验环境的一点说明。你将继续使用在前几章中建立的一次性 FreeBSD 14.3 机器。该机器将作为本章的**主机**。在它之上你将运行 `bhyve(8)` 客户机，这些是由你的主机管理的较小 FreeBSD 安装。你还将在主机上直接创建一些 jail。这种嵌套在第一次描述时听起来很复杂，但在实践中确实很简单：你的主机运行 FreeBSD，在主机内部你启动一个也运行 FreeBSD 的 `bhyve` 虚拟机，在主机或客户机内部你创建 jail。每一层都是独立的，每一层都有自己的 `dmesg`，如果出了问题，从头重新创建每一层的成本都很低。
 
-Make a snapshot of the host before you start. The chapter will ask you to change `/etc/devfs.rules`, to load and unload kernel modules, and to create small VMs. None of these are risky if handled carefully, but accidents happen, and the snapshot turns any mistake into a two-minute rollback. If your host is itself a VM in VirtualBox or VMware, the platform's own snapshot tool is the fastest way to do this. If your host is bare metal, a ZFS boot environment with `bectl(8)` is a good substitute.
+在开始之前为主机做一个快照。本章会要求你更改 `/etc/devfs.rules`、加载和卸载内核模块以及创建小型虚拟机。这些操作如果小心处理都不危险，但意外总会发生，快照可以将任何错误变成两分钟的回滚。如果你的主机本身是 VirtualBox 或 VMware 中的虚拟机，平台自己的快照工具是最快的方法。如果你的主机是裸金属，使用 `bectl(8)` 的 ZFS 启动环境是一个好的替代方案。
 
-One more note. This chapter's labs need a few packages that you may not already have installed. You will want `bhyve-firmware` for UEFI guest support, `vm-bhyve` for a more convenient front end to `bhyve` and its accessories, and `jq` for parsing JSON output during some of the more elaborate tests. The commands to install them are in the labs; do not install them now, but be aware that they are coming.
+还有一点说明。本章的实验需要一些你可能尚未安装的软件包。你需要 `bhyve-firmware` 用于 UEFI 客户支持，`vm-bhyve` 作为 `bhyve` 及其附件的更便捷前端，以及 `jq` 用于在一些更精细的测试中解析 JSON 输出。安装它们的命令在实验中；现在不要安装它们，但要知道它们即将用到。
 
 ### 先决条件
 
-You should be comfortable with everything from earlier chapters. In particular, this chapter assumes that you already know how to write a loadable kernel module from scratch, how `probe()` and `attach()` fit together in the driver lifecycle, how softc is allocated and used, and how `device_t` relates to `devclass`. It assumes fluency with the `bus_read_*` and `bus_write_*` accessors from Chapter 15, basic familiarity with interrupt handlers from Chapter 18, and the portable-driver habits from Chapter 29. If any of that feels uncertain, a brief revisit to the earlier material will save you time here.
+你应该对前面章节的所有内容感到熟悉。特别是，本章假设你已经知道如何从头编写一个可加载的内核模块，`probe()` 和 `attach()` 在驱动程序生命周期中如何配合，softc 如何分配和使用，以及 `device_t` 与 `devclass` 的关系。它假设你熟练掌握第15章中的 `bus_read_*` 和 `bus_write_*` 访问器，基本熟悉第18章的中断处理程序，以及第29章的可移植驱动程序习惯。如果其中任何内容感觉不确定，简要回顾前面的材料将为你在这里节省时间。
 
-You should also be comfortable with ordinary FreeBSD system administration: reading `dmesg`, editing `/etc/rc.conf`, using `sysctl(8)`, and creating and destroying jails with `jail(8)` or its wrapper `service jail`. You do not need prior bhyve experience; the labs will walk you through it. You do not need prior container experience either, since FreeBSD's container story is ultimately jails dressed in different operational clothing.
+你还应该熟悉普通的 FreeBSD 系统管理：阅读 `dmesg`、编辑 `/etc/rc.conf`、使用 `sysctl(8)`，以及使用 `jail(8)` 或其包装器 `service jail` 创建和销毁 jail。你不需要有 bhyve 经验；实验会引导你完成。你也不需要有容器经验，因为 FreeBSD 的容器方案最终就是以不同运维外衣出现的 jail。
 
 ### 本章不涵盖的内容
 
-A responsible chapter tells you what it leaves out. This chapter does not teach the internals of the `bhyve(8)` hypervisor. It does not teach `libvirt(3)`, `qemu(1)`, or the Linux KVM subsystem. It does not turn you into an OCI container expert. It does not cover the `xen(4)` paravirtualisation code, since Xen has become a narrower niche in the FreeBSD ecosystem and `bhyve` is the FreeBSD-native story worth learning first. It mentions `jail(8)` at exactly the level a driver author needs, not at the depth a jail administrator would want. For the missing topics, the FreeBSD Handbook and the respective manual pages are your friends, and I will point to them when they are relevant.
+一个负责任的章节会告诉你它省略了什么。本章不教你 `bhyve(8)` 虚拟机监控程序的内部机制。不教你 `libvirt(3)`、`qemu(1)` 或 Linux KVM 子系统。不会把你变成 OCI 容器专家。不涵盖 `xen(4)` 半虚拟化代码，因为 Xen 在 FreeBSD 生态系统中已成为一个较窄的细分领域，而 `bhyve` 是值得首先学习的 FreeBSD 原生方案。它以驱动程序作者所需的精确深度提及 `jail(8)`，而不是 jail 管理员想要的深度。对于缺失的主题，FreeBSD 手册和各自的手册页是你最好的参考，我会在相关处指向它们。
 
-Several topics that could plausibly appear in a virtualisation chapter have homes elsewhere in this book. Secure coding against hostile input is Chapter 31's subject, not this chapter's; you will meet privilege boundaries and jail visibility here, but the deeper security discipline (Capsicum, MAC framework, sanitiser-driven fuzzing) waits for the next chapter. Advanced DMA under virtualisation (IOMMU setup, mapping pages with `bus_dmamap`) is touched conceptually here and developed more fully in later chapters. Performance tuning under virtualisation (how to measure paravirtual overhead, how to decide between emulated and passthrough for a given workload) is a theme that returns in Chapter 35. We will mention these where they connect, but we will not go deep.
+有几个本可以合理出现在虚拟化章节中的主题在本书的其他地方有其归属。针对恶意输入的安全编码是第31章的主题，不是本章的；你将在这里遇到权限边界和 jail 可见性，但更深层次的安全规范（Capsicum、MAC 框架、基于 sanitizer 的模糊测试）要等到下一章。虚拟化下的高级 DMA（IOMMU 设置、使用 `bus_dmamap` 映射页面）在这里有概念性的涉及，并在后续章节中更充分地展开。虚拟化下的性能调优（如何测量半虚拟化开销、如何为给定工作负载在模拟和直通之间做选择）是第35章中回归的主题。我们会在相关连接处提及这些，但不会深入讨论。
 
 ### 结构与节奏
 
-Section 1 establishes the mental model: what virtualisation and containerization mean for a driver author, and how they differ from "hardware, but slower." Section 2 explains the three styles of guest device (emulated, paravirtualised, passthrough) and what each one implies for the driver. Section 3 takes a careful, beginner-friendly tour of VirtIO: the shared-ring model, feature negotiation, and the `virtqueue(9)` APIs you will use. Section 4 teaches how a driver detects its runtime environment through `vm_guest` and friends, and when that detection is and is not a good idea. Section 5 turns to the host side and looks at `bhyve(8)`, `vmm(4)`, and PCI passthrough. Section 6 covers jails, `devfs`, and VNET: the FreeBSD containerisation story from the driver's perspective. Section 7 addresses resource limits and privilege boundaries. Section 8 talks about testing and refactoring. Section 9 revisits time, memory, and interrupt handling through the lens of virtualisation, the quieter topics where beginner drivers often fail in subtle ways. Section 10 widens the lens to FreeBSD on arm64 and riscv64, whose virtualisation stories have their own shape. The labs and challenges follow, along with a troubleshooting appendix and a closing bridge into Chapter 31.
+第1节建立心智模型：虚拟化和容器化对驱动程序作者意味着什么，以及它们与"硬件，但更慢"有何不同。第2节解释客户设备的三种风格（模拟、半虚拟化、直通）以及每种风格对驱动程序的意味。第3节仔细而友好地介绍 VirtIO：共享环模型、特性协商以及你将使用的 `virtqueue(9)` API。第4节教驱动程序如何通过 `vm_guest` 及其伙伴检测运行时环境，以及这种检测何时是个好主意、何时不是。第5节转向主机侧，审视 `bhyve(8)`、`vmm(4)` 和 PCI 直通。第6节涵盖 jail、`devfs` 和 VNET：从驱动程序角度看 FreeBSD 的容器化方案。第7节讨论资源限制和权限边界。第8节讨论测试和重构。第9节通过虚拟化的视角重新审视时间、内存和中断处理——这些安静的主题是新手驱动程序经常以微妙方式失败的地方。第10节将视野拓宽到 FreeBSD 在 arm64 和 riscv64 上的情况，它们的虚拟化方案有自己的形态。实验和挑战紧随其后，还有故障排除附录和通向第31章的收尾桥梁。
 
-Read the sections in order. Each one assumes the previous one, and the labs depend on the earlier sections having been read and internalised.
+按顺序阅读各节。每一节都假设你已读过前一节，实验也依赖于更早的节次已被阅读和吸收。
 
 ### 逐节学习
 
-A recurring pattern in this book is that each section does one thing. Do not try to read two sections at a time, and do not skip ahead to a "more interesting" section if something in the current one feels difficult. The interesting parts of this chapter rest on the foundational ones, and a reader who has skipped the foundation will spend more time reverse-engineering the labs than the careful reader spends on the whole chapter.
+本书中一个反复出现的模式是每节只做一件事。不要试图同时阅读两节，如果当前节的某些内容感觉困难，不要跳到"更有趣"的节。本章有趣的部分建立在基础部分之上，跳过基础的读者花在逆向推导实验上的时间会比细心读者花在整个章节上的时间更多。
 
 ### 保持参考驱动程序在手边
 
-Several labs in this chapter build on a small pedagogical driver called `vtedu`. You will find it under `examples/part-07/ch30-virtualisation/`, organised the same way as earlier chapters' examples. Each lab directory contains the state of the driver at that step, along with Makefile, README, and supporting scripts. Clone the directory, type along, and load the module after each change. Refactoring a VirtIO guest driver in your head is harder than refactoring one on disk; the feedback from the build system and from `dmesg` is half the lesson.
+本章的几个实验构建在一个名为 `vtedu` 的小型教学驱动程序之上。你可以在 `examples/part-07/ch30-virtualisation/` 下找到它，组织方式与前面章节的示例相同。每个实验目录包含该步骤驱动程序的状态，以及 Makefile、README 和支持脚本。克隆该目录，跟着输入，每次更改后加载模块。在脑海中重构 VirtIO 客户驱动程序比在磁盘上重构更难；来自构建系统和 `dmesg` 的反馈是课程的一半。
 
 ### 打开 FreeBSD 源代码树
 
-Several sections will point to real FreeBSD files. The ones that repay careful reading in this chapter are `/usr/src/sys/dev/virtio/random/virtio_random.c` (the smallest complete VirtIO driver in the tree), `/usr/src/sys/dev/virtio/virtio.h` and `/usr/src/sys/dev/virtio/virtqueue.h` (the public API surfaces), `/usr/src/sys/dev/virtio/virtqueue.c` (the ring machinery), `/usr/src/sys/dev/virtio/pci/virtio_pci.c` and `/usr/src/sys/dev/virtio/mmio/virtio_mmio.c` (the two transport backends), `/usr/src/sys/sys/systm.h` (for `vm_guest`), `/usr/src/sys/kern/subr_param.c` (for the `vm.guest` sysctl), `/usr/src/sys/net/vnet.h` (for VNET primitives), and `/usr/src/sys/kern/kern_jail.c` (for prison and jail APIs). Open them when the text says to, and read around the exact spot the text points at. The files are not decoration; they are the source of truth.
+本章的几个小节会指向真实的 FreeBSD 文件。值得仔细阅读的文件有 `/usr/src/sys/dev/virtio/random/virtio_random.c`（代码树中最小的完整 VirtIO 驱动程序）、`/usr/src/sys/dev/virtio/virtio.h` 和 `/usr/src/sys/dev/virtio/virtqueue.h`（公共 API 接口）、`/usr/src/sys/dev/virtio/virtqueue.c`（环机制）、`/usr/src/sys/dev/virtio/pci/virtio_pci.c` 和 `/usr/src/sys/dev/virtio/mmio/virtio_mmio.c`（两个传输后端）、`/usr/src/sys/sys/systm.h`（`vm_guest` 相关）、`/usr/src/sys/kern/subr_param.c`（`vm.guest` sysctl 相关）、`/usr/src/sys/net/vnet.h`（VNET 原语相关）以及 `/usr/src/sys/kern/kern_jail.c`（prison 和 jail API 相关）。当文本提示时打开它们，并阅读文本所指的确切位置周围的代码。这些文件不是装饰；它们是真相的来源。
 
 ### 保持实验日志
 
-Continue the lab logbook from earlier chapters. For this chapter, log a short note for each major lab: which commands you ran, which modules loaded, what `dmesg` said, what surprised you. Virtualisation work is easy to forget the details of after a few days, and a paper trail turns every future debugging session into a one-minute lookup rather than a half-hour re-derivation.
+继续使用前面章节的实验日志。对于本章，为每个主要实验记录一个简短的笔记：你运行了哪些命令，加载了哪些模块，`dmesg` 显示了什么，什么让你感到意外。几天后虚拟化工作的细节很容易忘记，一条书面记录将未来的每个调试会话变成一分钟的查找，而不是半小时的重新推导。
 
 ### 调整节奏
 
-Several ideas in this chapter will feel new the first time you meet them: shared-ring memory, feature negotiation, VNET's thread-local current vnet, the devfs ruleset number system. That newness is normal. If you feel your understanding blur during a particular subsection, stop. Re-read the previous paragraph, try a small experiment in the shell, and come back fresh in an hour. Consistent thirty-minute sessions produce better understanding than a single exhausted all-day effort.
+本章中的几个想法在你第一次遇到时会感觉新颖：共享环内存、特性协商、VNET 的线程局部当前 vnet、devfs 规则集编号系统。这种新颖感是正常的。如果你在某个小节中感到理解模糊，停下来。重新阅读前一段，在 shell 中尝试一个小实验，一小时后精神饱满地回来。持续的三十分钟会话比一次精疲力竭的全天努力产生更好的理解。
 
 ## 如何从本章获得最大收益
 
-Chapter 30 rewards curiosity, patience, and a willingness to experiment. The specific patterns it introduces, the ring structures, the feature bits, the prison and vnet scopes, are not abstract. Each one corresponds to code you can read, state you can observe with `sysctl` or `vmstat`, and behaviour you can trigger with short commands. The most valuable habit you can build while reading the chapter is to move freely between the text, the source tree, and the running system.
+第30章回报好奇心、耐心和实验意愿。它引入的特定模式——环结构、特性位、prison 和 vnet 作用域——都不是抽象的。每一个都对应你可以阅读的代码、你可以用 `sysctl` 或 `vmstat` 观察的状态，以及你可以用短命令触发的行为。你在阅读本章时能建立的的最有价值的习惯是在文本、源代码树和运行中的系统之间自由切换。
 
 ### 阅读时打开源代码树
 
-Do not read the VirtIO section without `virtio.h`, `virtqueue.h`, and `virtio_random.c` open in another window. When the text says that a driver calls `virtqueue_enqueue` to hand a buffer to the host, scroll to that function and see it in context. When the text mentions the `VIRTIO_DRIVER_MODULE` macro, open `virtio.h` and see the two `DRIVER_MODULE` lines it expands into. The FreeBSD kernel is far more approachable than its reputation suggests, and the only way to confirm that is to keep opening it.
+不要在没有 `virtio.h`、`virtqueue.h` 和 `virtio_random.c` 在另一个窗口中打开的情况下阅读 VirtIO 节。当文本说驱动程序调用 `virtqueue_enqueue` 将缓冲区交给主机时，滚动到该函数并在上下文中查看它。当文本提到 `VIRTIO_DRIVER_MODULE` 宏时，打开 `virtio.h` 看它展开成的两行 `DRIVER_MODULE`。FreeBSD 内核比它的名声所暗示的要容易接近得多，确认这一点的唯一方法就是不断打开它。
 
 ### 输入实验代码
 
-Every line of code in the labs is there to teach something. Typing it yourself slows you down enough to notice the structure. Copy-pasting the code often feels productive and usually is not; the finger-memory of typing kernel code is part of how you learn it. If you must copy, copy one function at a time, and read each line as you paste it.
+实验中的每一行代码都在教你一些东西。自己输入会让你慢到足以注意到结构。复制粘贴代码通常感觉高效但实际上并非如此；输入内核代码的手指记忆是你学习它的方式。如果你必须复制，一次复制一个函数，在粘贴时阅读每一行。
 
 ### 运行你阅读的内容
 
-When the text introduces a command, run it. When the text introduces a `sysctl` name, query it. When the text introduces a kernel module, load it. The running system will surprise you sometimes (the `vm.guest` value may not be what you expect if your lab itself is a VM), and every surprise is an opportunity to learn something the text did not need to explain explicitly. A running FreeBSD system is a patient tutor.
+当文本介绍一个命令时，运行它。当文本介绍一个 `sysctl` 名称时，查询它。当文本介绍一个内核模块时，加载它。运行中的系统有时会让你感到惊讶（如果你的实验环境本身就是一个 VM，`vm.guest` 的值可能不是你期望的），每一次惊讶都是学习文本不需要明确解释的某件事的机会。一个运行中的 FreeBSD 系统是一位耐心的导师。
 
 ### 将 dmesg 视为文稿的一部分
 
-A significant fraction of what this chapter teaches is visible only in the kernel's log output. A VirtIO device's negotiated feature set, the attach sequence of a guest driver, the interaction between a module and a jail, all of these surface in `dmesg`. Read it often. Tail it during the labs. Copy relevant lines into your logbook when they teach something non-obvious. Do not treat `dmesg` as noise; treat it as the ground truth of what the kernel actually did.
+本章所教内容的很大一部分只在内核的日志输出中可见。VirtIO 设备的已协商特性集、客户驱动程序的附加序列、模块与 jail 之间的交互——所有这些都浮现在 `dmesg` 中。经常阅读它。在实验期间跟踪它。当相关行教会你一些非显而易见的东西时，将它们复制到你的日志中。不要把 `dmesg` 当作噪声；把它当作内核实际做了什么的真实依据。
 
 ### 故意破坏事物
 
-At three points in the chapter I will suggest deliberately breaking something to see what happens. These are the most educational moments you can give yourself. Unload a required module before a driver that depends on it and see the dependency graph complain. Remove a devfs rule and see the device vanish from inside the jail. Boot a guest with one CPU and then with four and compare the virtqueue setup. Deliberate failures teach in a way that success cannot.
+在章中的三个地方，我会建议你故意破坏某些东西来观察会发生什么。这些是你能给自己最有教育意义的时刻。在一个依赖它的驱动程序之前卸载一个所需的模块，看看依赖图如何抱怨。移除一个 devfs 规则，看看设备如何从 jail 内部消失。用一个 CPU 启动客户机，然后用四个 CPU 启动并比较 virtqueue 的设置。故意的失败以一种成功无法做到的方式教你东西。
 
 ### 尽可能结对学习
 
-If you have a study partner, this is a great chapter to pair on. One of you can run the host and watch `dmesg`, while the other runs the guest and drives the driver. The two perspectives teach different things, and each of you will notice what the other missed. If you are working alone, use two terminal tabs and alternate attention between them.
+如果你有学习伙伴，这是一个非常适合结对学习的章节。你们中一个可以运行主机并观察 `dmesg`，另一个运行客户机并操作驱动程序。两个视角教会不同的东西，你们各自会注意到对方遗漏的。如果你独自工作，使用两个终端标签并在它们之间交替关注。
 
-### 信任迭代, Not the Memorisation
+### 信任迭代，而非记忆
 
-You will not remember every flag, every enum, every macro in this chapter on the first read. That is fine. What matters is that you remember where to look, what the overall shape of the subject is, and how to tell when your driver is doing the right thing. The specific identifiers will become second nature after you have written and debugged two or three virtualisation-aware drivers of your own; they are not a memorisation exercise.
+你不会在第一次阅读时记住本章中的每个标志、每个枚举、每个宏。这没关系。重要的是你记住去哪里查找、主题的整体形状是什么，以及如何判断你的驱动程序是否在正确地做事。在你编写和调试了两三个自己的虚拟化感知驱动程序之后，特定的标识符会变成第二天性；它们不是一项记忆练习。
 
 ### 休息
 
-Virtualisation-aware debugging has a particular cognitive cost. You are tracking state on several sides at once: the host, the guest, the driver, the device model, the jail. Your mind gets fatigued faster than when you are working on a single-threaded bare-metal driver. Two hours of focused work followed by a real break is almost always more productive than four hours of grinding.
+虚拟化感知的调试有特殊的认知成本。你同时跟踪多个方面的状态：主机、客户机、驱动程序、设备模型、jail。你的大脑比处理单线程裸金属驱动程序时更容易疲劳。两小时的专注工作加上一次真正的休息几乎总是比四小时的苦干更有成效。
 
-With those habits in place, let us begin.
+有了这些习惯，让我们开始吧。
 
 ## 第1节：虚拟化与容器化对驱动程序作者意味着什么
-Before we touch any code, we need to agree on what we are talking about. The words "virtualisation" and "containerization" have been worn smooth by marketing language, and they carry different meanings depending on where you encounter them. A vendor's white paper uses "virtualisation" as a synonym for running multiple operating systems on the same hardware; a cloud provider's documentation uses it as shorthand for any managed workload; a FreeBSD administrator uses it for anything from `bhyve(8)` to `jail(8)`. For a driver author, those meanings are not interchangeable. The shape of the problem you are solving changes depending on which kind of virtualisation your driver meets. This section anchors the vocabulary for the rest of the chapter.
+在我们接触任何代码之前，我们需要就我们讨论的内容达成一致。"虚拟化"和"容器化"这两个词已被营销语言磨得光滑，根据你遇到它们的地方带有不同的含义。供应商的白皮书将"虚拟化"用作在同一硬件上运行多个操作系统的同义词；云服务提供商的文档将其作为任何托管工作负载的简写；FreeBSD 管理员将其用于从 `bhyve(8)` 到 `jail(8)` 的任何东西。对于驱动程序作者来说，这些含义是不可互换的。你正在解决的问题的形状会根据你的驱动程序遇到的虚拟化类型而改变。本节为本章的其余部分奠定词汇基础。
 
-### Two Families, Not One
+### 两个家族，不是一个
 
-The first distinction to draw is between **virtual machines** and **containers**. They solve different problems and produce different constraints for driver authors. Conflating them is the single most common confusion in this territory.
+首先要区分的是**虚拟机**和**容器**。它们解决不同的问题，对驱动程序作者产生不同的约束。将它们混为一谈是这个领域中最常见的混淆。
 
-A **virtual machine** is a software-emulated computer. A hypervisor, which itself runs on real hardware, creates an execution environment that looks like a complete machine to the software inside it. The machine has a BIOS or UEFI, memory, CPUs, disks, and network cards. The operating system inside the VM boots from scratch just as it would on real hardware, loads a kernel, and attaches drivers. The observation that matters is that the **guest kernel is a full kernel**, independent of the host kernel. A FreeBSD guest running under a FreeBSD host is not sharing kernel code with the host; the two kernels are peers, separated by the hypervisor and by the barrier between guest memory and host memory.
+**虚拟机**是一个软件模拟的计算机。虚拟机监控程序（hypervisor）本身运行在真实硬件上，创建一个对内部软件看起来像完整机器的执行环境。该机器有 BIOS 或 UEFI、内存、CPU、磁盘和网卡。VM 内部的操作系统像在真实硬件上一样从头启动、加载内核并附加驱动程序。重要的观察是**客户内核是一个完整的内核**，独立于主机内核。在 FreeBSD 主机下运行的 FreeBSD 客户机并不与主机共享内核代码；两个内核是对等的，被虚拟机监控程序以及客户内存与主机内存之间的屏障隔开。
 
-A **container**, on the FreeBSD sense of the word, is a different animal. A container is a namespaced partition of a single kernel. The host kernel is the only kernel in the picture; the containers are separate process groups, separate filesystem views, and often separate network stacks, but all of them run on the same kernel with the same drivers. On FreeBSD, the classical container is a `jail(8)`. Modern container runtimes like `ocijail` and `pot` add scripting and orchestration around that same jail primitive. The observation here is that **there is only one kernel**. A driver in the host is visible to every jail, subject to the rules the host imposes; a jail cannot load a driver of its own, and it does not have a kernel into which to load one.
+**容器**，在 FreeBSD 的意义上，是另一种不同的东西。容器是单个内核的命名空间分区。主机内核是唯一的内核；容器是独立的进程组、独立的文件系统视图，通常也是独立的网络栈，但它们都运行在具有相同驱动程序的同一个内核上。在 FreeBSD 上，经典的容器是一个 `jail(8)`。像 `ocijail` 和 `pot` 这样的现代容器运行时在同一 jail 原语之上添加脚本编排。这里的观察是**只有一个内核**。主机中的驱动程序对所有 jail 可见，受主机施加的规则约束；jail 不能加载自己的驱动程序，它也没有一个可以加载驱动的内核。
 
-These two families overlap only in superficial ways. A VM and a jail both look like "another system" from the outside. A VM and a jail both have their own `/`, their own network, and their own users. But the kernel boundary is nowhere near the same, and that matters enormously to drivers.
+这两个家族只在表面上重叠。从外部看，VM 和 jail 都像是"另一个系统"。VM 和 jail 都有自己的 `/`、自己的网络和自己的用户。但内核边界完全不同，这对驱动程序来说关系重大。
 
-A VM runs a full guest kernel; the kernel sees virtualised (or passthrough) hardware; the driver you write for that hardware is a **guest driver** that attaches inside the guest. A jail shares the host's kernel; no guest driver is being written, because there is no guest kernel to load it into; instead, the question is how a **host driver** exposes its services to processes running inside the jail. The techniques you use in each case are different.
+VM 运行完整的客户内核；内核看到虚拟化（或直通）的硬件；你为该硬件编写的驱动程序是一个在客户机内部附加的**客户驱动程序**。jail 共享主机的内核；不需要编写客户驱动程序，因为没有客户内核可以加载它；相反，问题是**主机驱动程序**如何向 jail 内运行的进程暴露其服务。你在每种情况下使用的技术是不同的。
 
-For the rest of this chapter, when the text says "virtualisation," it usually means the VM case unless the context makes clear that jails are being discussed. When the text says "containerization," it usually means the jail case. Read those words with the families in mind, and you will avoid most of the confusion that newcomers have.
+在本章的其余部分，当文本说"虚拟化"时，通常指 VM 的情况，除非上下文明确表示正在讨论 jail。当文本说"容器化"时，通常指 jail 的情况。带着这两个家族来读这些词，你将避免大多数新手的困惑。
 
-### Virtual Machines as an Environment for Drivers
+### 虚拟机作为驱动程序的环境
 
-A VM presents hardware to the guest. Exactly what that hardware looks like depends on the hypervisor's configuration. There are three broad styles of device that a guest may meet, each of which changes the driver problem.
+VM 向客户机呈现硬件。该硬件具体长什么样取决于虚拟机监控程序的配置。客户机可能遇到三种广泛的设备风格，每种都改变了驱动程序的问题。
 
-**Emulated devices** are the oldest approach. The hypervisor presents to the guest a device that imitates a real, usually well-known, physical device: a `ne2000` Ethernet card, for example, or a PIIX IDE controller, or a serial port compatible with the venerable 16550 UART. The hypervisor's device model implements the same register interface the real hardware would expose. The guest loads the driver it would have loaded on real hardware, and the driver runs unchanged. The price is performance: every register access in the guest traps into the hypervisor, which emulates the behaviour in software, which is much slower than real hardware. Emulated devices are perfect for compatibility and for booting unmodified guest kernels; they are poor for serious workloads.
+**模拟设备**是最古老的方法。虚拟机监控程序向客户机呈现一个模仿真实的、通常是知名的物理设备的设备：例如 `ne2000` 以太网卡、PIIX IDE 控制器或与古老的 16550 UART 兼容的串口。虚拟机监控程序的设备模型实现了与真实硬件会暴露的相同寄存器接口。客户机加载它在真实硬件上会加载的驱动程序，驱动程序无需更改即可运行。代价是性能：客户机中的每次寄存器访问都会陷入虚拟机监控程序，后者在软件中模拟该行为，这比真实硬件慢得多。模拟设备非常适合兼容性和启动未经修改的客户机内核；对于严肃的工作负载则表现不佳。
 
-**Paravirtual devices** solve the performance problem by replacing the compatibility interface with one designed to be cheap for both sides. Instead of imitating physical hardware, the device defines a new interface that is efficient when implemented in software. VirtIO is the canonical example and the one this chapter will spend most of its time on. A VirtIO device does not look like any real hardware; it looks like a VirtIO device, which is a standardised interface that exposes shared memory rings and a few control registers and very little else. The guest must have a driver for VirtIO specifically; that driver is smaller and faster than the equivalent emulated-device driver, because the interface was designed for software on both sides.
+**半虚拟化设备**通过用一种为双方都设计得廉价高效的接口来替换兼容性接口来解决性能问题。该设备不模仿物理硬件，而是定义一个在软件中实现时高效的新接口。VirtIO 是典型的例子，也是本章将花最多时间的例子。VirtIO 设备看起来不像任何真实硬件；它看起来像一个 VirtIO 设备，这是一个标准化接口，暴露共享内存环和少量控制寄存器，几乎没有其他东西。客户机必须有专门为 VirtIO 编写的驱动程序；该驱动程序比等效的模拟设备驱动程序更小更快，因为接口是为双方都是软件而设计的。
 
-**Passthrough devices** go in the other direction. The hypervisor steps aside and hands the guest a real piece of hardware: a physical NIC, a physical GPU, a physical NVMe SSD. The guest's driver talks to that hardware more or less directly. The hypervisor still mediates (through an IOMMU, for example, to constrain which memory the device can reach) but it no longer emulates or paravirtualises. Passthrough is fast but brittle: the device is no longer shared with other guests, and moving the VM to a different host is no longer trivial.
+**直通设备**走另一个方向。虚拟机监控程序退到一边，将真实硬件直接交给客户机：一块物理网卡、一块物理 GPU、一块物理 NVMe SSD。客户机的驱动程序或多或少直接与该硬件通信。虚拟机监控程序仍然进行中介（例如通过 IOMMU 来约束设备可以访问的内存），但它不再模拟或半虚拟化。直通速度快但脆弱：设备不再与其他客户机共享，将 VM 迁移到不同主机也不再简单。
 
-Each style of device imposes a different design on your driver. An emulated-device driver is typically an old, well-tested driver for the emulated hardware, which just happens to be running on a virtualised version of the same hardware. A paravirtual driver is usually a driver written specifically for the paravirtual interface, with no expectation that the "hardware" exists in real silicon. A passthrough driver is the same driver that would have run on bare metal, with one subtlety: the guest's memory is not the same memory the device DMAs into, and the IOMMU mapping must be correct for the device to work.
+每种设备风格对你的驱动程序施加不同的设计。模拟设备驱动程序通常是模拟硬件的旧的、经过良好测试的驱动程序，恰好运行在相同硬件的虚拟化版本上。半虚拟化驱动程序通常是为半虚拟化接口专门编写的驱动程序，不期望"硬件"存在于真实硅片中。直通驱动程序与在裸金属上运行的驱动程序相同，只有一个微妙之处：客户机的内存不是设备 DMA 进入的内存，IOMMU 映射必须正确才能使设备工作。
 
-The rest of this chapter leans strongly into the second style, because paravirtualisation is where most of the novel driver work in virtualised environments happens, and because it illustrates a programming model (shared rings, feature bits, descriptor-based transactions) that generalises to other parts of FreeBSD.
+本章的其余部分强烈倾向于第二种风格，因为半虚拟化是虚拟化环境中大多数新颖驱动程序工作发生的地方，并且它说明了一种编程模型（共享环、特性位、基于描述符的事务），该模型可以推广到 FreeBSD 的其他部分。
 
-### Containers as an Environment for Drivers
+### 容器作为驱动程序的环境
 
-A jail is a different kind of environment, and it asks a different question of a driver. The driver is not running inside the jail; it is running in the single shared kernel. What the jail does is change what the processes in the jail see.
+jail 是一种不同的环境，它向驱动程序提出不同的问题。驱动程序不是在 jail 内部运行；它运行在单个共享内核中。jail 所做的是改变 jail 中进程能看到什么。
 
-From the host's kernel, nothing changes when a jail is created. The host kernel still has all the drivers it had before; the drivers still attach to the same devices; the same `/dev/` entries still exist in the devfs mounted at the host's root. From inside the jail, a devfs mount is also performed, but that devfs is configured with a ruleset that hides some devices and exposes others. A `/dev/mem` is not normally visible inside a jail, because a process inside a jail should not be able to peek at kernel memory; a `/dev/kvm` equivalent (if FreeBSD had one) would be similarly hidden. A `/dev/null` and `/dev/zero` are visible, because there is no reason to hide them.
+从主机的内核来看，创建 jail 时没有任何变化。主机内核仍然拥有之前的所有驱动程序；驱动程序仍然附加到相同的设备；主机根目录挂载的 devfs 中仍然存在相同的 `/dev/` 条目。从 jail 内部来看，也会执行一次 devfs 挂载，但该 devfs 配置了隐藏某些设备并暴露其他设备的规则集。`/dev/mem` 通常在 jail 内部不可见，因为 jail 内的进程不应该能够窥视内核内存；`/dev/kvm` 的等效项（如果 FreeBSD 有的话）也会被类似地隐藏。`/dev/null` 和 `/dev/zero` 是可见的，因为没有理由隐藏它们。
 
-So what is a "driver problem" in a container? Two things, mostly. First, when your driver creates device nodes, you must decide whether those nodes should be visible to jailed processes, and if so, under what conditions. If your driver exposes an `ioctl` that allows a process to change the routing table, that ioctl should not be accessible to a process inside a jail that does not have the privilege to reconfigure the host's network. Second, when your driver cooperates with VNET (the FreeBSD virtual network stack framework), you must be careful about which global state is per-vnet and which is shared. An `ifnet` moved into a VNET jail should behave correctly inside that jail, which means your driver must have declared the right VNET-scoped variables and must not have cached any cross-vnet state.
+那么在容器中什么是"驱动程序问题"？主要是两件事。首先，当你的驱动程序创建设备节点时，你必须决定这些节点是否应该对 jail 内的进程可见，如果可见，在什么条件下可见。如果你的驱动程序暴露一个允许进程更改路由表的 `ioctl`，该 ioctl 不应被没有重新配置主机网络权限的 jail 内进程访问。其次，当你的驱动程序与 VNET（FreeBSD 虚拟网络栈框架）配合时，你必须注意哪些全局状态是 per-vnet 的，哪些是共享的。移入 VNET jail 的 `ifnet` 应该在该 jail 内正确运行，这意味着你的驱动程序必须声明正确的 VNET 作用域变量，并且不能缓存任何跨 vnet 的状态。
 
-These are different concerns from those of VM drivers, and they deserve their own sections. Sections 6 and 7 of this chapter work through them in detail.
+这些是与 VM 驱动程序不同的关注点，它们值得有自己的节。本章的第6节和第7节详细讨论了它们。
 
-### Why This Matters for Driver Authors
+### 为什么这对驱动程序作者很重要
 
-It is fair to ask: why should a driver author care about any of this? Until recently, most drivers were written for physical hardware on bare metal, and the "virtualisation story" was something that happened upstream. Today, and for the foreseeable future, the majority of FreeBSD installations are virtual machines. A driver that works only on bare metal is a driver that works in a minority of deployments. A driver that works only on the host, and not inside a jail, is a driver that cannot be used in any modern containerised FreeBSD environment. Virtualisation-aware driver design is not optional anymore; it is part of writing drivers at all.
+可以公平地问：为什么驱动程序作者应该关心这些？直到最近，大多数驱动程序是为裸金属上的物理硬件编写的，"虚拟化方案"是上游发生的事情。今天，以及在可预见的未来，大多数 FreeBSD 安装是虚拟机。一个只在裸金属上工作的驱动程序是一个只在少数部署中工作的驱动程序。一个只在主机上工作而在 jail 内不工作的驱动程序是一个无法在任何现代容器化 FreeBSD 环境中使用的驱动程序。虚拟化感知的驱动程序设计不再是可选的；它是编写驱动程序的一部分。
 
-There are three concrete reasons the topic matters.
+有三个具体的原因说明这个主题很重要。
 
-First, **most of your users are inside a guest**. The FreeBSD VMs running in public clouds, in private clouds, and in local `bhyve` labs outnumber the FreeBSD installations on real hardware, perhaps by a wide margin. A driver whose design fails in a virtual environment will fail for most of its users.
+首先，**你的大多数用户在客户机内部**。在公有云、私有云和本地 `bhyve` 实验室中运行的 FreeBSD VM 可能远超 FreeBSD 在真实硬件上的安装数量。一个在虚拟环境中设计失败的驱动程序将对其大多数用户失败。
 
-Second, **host-side drivers expose services to jails**. Even if your driver is about a physical device that lives in the host, the moment a jail wants to use its services, the driver faces the jail question. It may need to expose a device node through the jail's devfs, or decide that certain ioctls are jailed-off.
+其次，**主机侧驱动程序向 jail 暴露服务**。即使你的驱动程序是关于主机中物理设备的，一旦 jail 想使用其服务，驱动程序就面临 jail 问题。它可能需要通过 jail 的 devfs 暴露设备节点，或者决定某些 ioctl 对 jail 是被禁止的。
 
-Third, **performance at scale matters more than ever**. In a virtualised environment, the difference between an emulated driver and a paravirtual one is often a factor of ten or more in throughput. Knowing how to write and recognise paravirtual patterns is worth real engineering time. A few extra paragraphs of understanding about `virtqueue(9)` can save you a day of debugging later.
+第三，**规模化的性能比以往任何时候都更重要**。在虚拟化环境中，模拟驱动程序和半虚拟化驱动程序之间的差异在吞吐量上通常是十倍或更多。知道如何编写和识别半虚拟化模式值得真正的工程时间。对 `virtqueue(9)` 多几段的理解可以在以后省去你一天的调试。
 
-### Virtualisation Is Not Just Hardware But Slower
+### 虚拟化不只是更慢的硬件
 
-A common misconception is that virtualisation simply makes hardware slower. That view misses the mechanism entirely. In a well-designed virtualised environment, the guest driver does not see "slower hardware"; it sees different hardware with different access patterns. A VirtIO driver does not make one slow register read per descriptor and then complain about the overhead; it batches a dozen descriptors into a shared ring, notifies the host once, and waits for a single completion. The difference between a naive port of a physical-hardware driver to VirtIO and an idiomatic VirtIO driver is not a matter of tuning; it is a matter of architectural intent.
+一个常见的误解是虚拟化只是使硬件变慢。这种观点完全错过了机制。在一个设计良好的虚拟化环境中，客户驱动程序看到的不是"更慢的硬件"；它看到的是具有不同访问模式的不同硬件。VirtIO 驱动程序不会对每个描述符进行一次慢速寄存器读取然后抱怨开销；它将一打描述符批量放入共享环，通知主机一次，然后等待单个完成。一个物理硬件驱动程序到 VirtIO 的朴素移植和一个惯用的 VirtIO 驱动程序之间的区别不在于调优；而在于架构意图。
 
-Similarly, containerization is not "processes, but confined." It is a reorganisation of visibility, privilege, and global state. A driver that exports a sysctl tree has to decide whether that tree should be visible inside a jail, and whether writes from inside the jail should affect only the jail's view or the host's. These are not just configuration questions; they are design questions that shape the code.
+类似地，容器化不是"进程，但受限"。它是可见性、权限和全局状态的重组。一个导出 sysctl 树的驱动程序必须决定该树是否应该在 jail 内可见，以及 jail 内的写入是只影响 jail 的视图还是影响主机的。这些不仅仅是配置问题；它们是塑造代码的设计问题。
 
-If you take one thing from this section, let it be this: **the environment your driver runs in is not a transparent wrapper around a machine**. It imposes its own concerns, offers its own APIs, and rewards or punishes driver designs that respect or ignore them.
+如果你从本节只带走一件事，那就是：**你的驱动程序运行的环境不是围绕一台机器的透明包装器**。它强加了自身的关注点，提供了自身的 API，并奖励或惩罚尊重或忽视它们的驱动程序设计。
 
-### A Quick Taxonomy
+### 快速分类
 
-To fix the vocabulary in your mind, here is a compact taxonomy of the environments we will discuss in this chapter. Treat it as a map you can return to when a later section mentions a term.
+为了在你脑海中固定词汇，这里有一个我们将本章讨论的环境的紧凑分类。把它当作你可以在后面节次提到术语时返回的地图。
 
-| Environment | Kernel Boundary | What the Driver Sees | Typical FreeBSD Example |
+| 环境 | 内核边界 | 驱动程序看到的 | 典型 FreeBSD 示例 |
 |------------|-----------------|----------------------|-------------------------|
-| Bare metal | Full | Real hardware | Any driver |
-| Emulated VM device | Full, at guest kernel | Imitation of real hardware | `xn`, `em` emulated by QEMU |
-| Paravirtual VM device | Full, at guest kernel | Shared-ring interface | `virtio_blk`, `if_vtnet` |
-| Passthrough VM device | Full, at guest kernel | Real hardware with IOMMU constraints | `em` on a passthrough NIC |
-| Jail (no VNET) | Shared with host | Host-side driver; jail sees host's devfs filtered by ruleset | `devfs` visibility for `/dev/null` |
-| VNET jail | Shared with host | Host-side driver; jail owns its network stack; interfaces moved via `if_vmove()` | `vnet.jail=1` in `jail.conf` |
+| 裸金属 | 完整 | 真实硬件 | 任何驱动程序 |
+| 模拟 VM 设备 | 完整，在客户内核处 | 真实硬件的模仿 | `xn`、被 QEMU 模拟的 `em` |
+| 半虚拟化 VM 设备 | 完整，在客户内核处 | 共享环接口 | `virtio_blk`、`if_vtnet` |
+| 直通 VM 设备 | 完整，在客户内核处 | 带 IOMMU 约束的真实硬件 | 直通 NIC 上的 `em` |
+| Jail（无 VNET） | 与主机共享 | 主机侧驱动程序；jail 看到被规则集过滤的主机 devfs | `/dev/null` 的 `devfs` 可见性 |
+| VNET jail | 与主机共享 | 主机侧驱动程序；jail 拥有自己的网络栈；接口通过 `if_vmove()` 移入 | `jail.conf` 中的 `vnet.jail=1` |
 
-Notice the kernel-boundary column. The boundary is the single most important feature of each row. VMs have a boundary; jails do not. Everything else follows from that.
+注意内核边界列。边界是每行最重要的特征。VM 有边界；jail 没有。其他一切都由此而来。
 
 ### 总结
 
-We have drawn the first map of the chapter. Virtual machines and containers are two different families. VMs present hardware (emulated, paravirtual, or passthrough) to a full guest kernel. Containers partition a single host kernel into isolated process environments, changing what they see and what they may do, but not introducing a second kernel. A driver author deals with each family differently: writing guest drivers for VMs, adapting host drivers for jails. The next section takes the first of those two worlds and looks at the three device styles a guest may meet, in enough detail to build intuition before we touch VirtIO specifically.
+我们已经画出了本章的第一张地图。虚拟机和容器是两个不同的家族。VM 向完整的客户内核呈现硬件（模拟的、半虚拟化的或直通的）。容器将单个主机内核划分为隔离的进程环境，改变它们能看到什么和能做什么，但不引入第二个内核。驱动程序作者以不同方式处理每个家族：为 VM 编写客户驱动程序，为 jail 调整主机驱动程序。下一节将这两个世界中的第一个，审视客户可能遇到的三种设备风格，详细到足以在我们专门接触 VirtIO 之前建立直觉。
 
 ## 第2节：客户驱动程序、模拟设备与半虚拟化设备
-A guest kernel running inside a VM must attach drivers to the devices its hypervisor has given it. Those devices fall into the three styles introduced in Section 1: emulated, paravirtual, and passthrough. Each style produces a different kind of driver, a different kind of bug, and a different kind of optimisation opportunity. This section examines them in the order you are most likely to encounter them, and begins to build the vocabulary we will need in Section 3 for VirtIO specifically.
+在 VM 内运行的客户内核必须将驱动程序附加到其虚拟机监控程序给它的设备上。这些设备分为第1节中介绍的三种风格：模拟、半虚拟化和直通。每种风格产生不同类型的驱动程序、不同类型的错误和不同类型的优化机会。本节按照你最可能遇到它们的顺序进行考察，并开始构建我们在第3节专门讨论 VirtIO 时所需的词汇。
 
-### Emulated Devices in Detail
+### 模拟设备详解
 
-An emulated device is the simplest story to tell. The hypervisor implements, in software, a faithful imitation of a known physical device. The classical FreeBSD examples include the emulated `em(4)` Ethernet NIC (the Intel 8254x family), the emulated `ahci(4)` SATA controller, the emulated 16550-compatible serial port, and the emulated VGA video adapter.
+模拟设备是最简单的故事。虚拟机监控程序在软件中实现了对一个已知物理设备的忠实模仿。经典的 FreeBSD 示例包括模拟的 `em(4)` 以太网 NIC（Intel 8254x 系列）、模拟的 `ahci(4)` SATA 控制器、模拟的 16550 兼容串口和模拟的 VGA 视频适配器。
 
-From the guest's point of view, nothing unusual is happening. The PCI device enumerator finds an Intel card; the `em(4)` driver probes it and attaches; the driver issues its usual register writes; packets eventually appear on the wire. Under the hood, each of those register writes is a trap into the hypervisor, which consults its model of the Intel chip, applies the state change, and possibly generates a virtual interrupt back into the guest.
+从客户机的角度来看，没有发生任何不寻常的事情。PCI 设备枚举器发现一张 Intel 卡；`em(4)` 驱动程序探测它并附加；驱动程序发出其常规的寄存器写入；数据包最终出现在线路上。在底层，每次寄存器写入都是一次陷入虚拟机监控程序的操作，虚拟机监控程序查询其 Intel 芯片模型，应用状态变更，并可能生成一个虚拟中断回到客户机。
 
-This approach has one huge virtue and one large vice. The virtue is compatibility: the guest kernel needs no special driver at all. A stock FreeBSD install image boots on an emulated `em(4)` card as easily as it boots on a real one. The vice is cost. Every trap into the hypervisor, every software emulation of a register behaviour, every synthesised interrupt, costs CPU cycles. For a busy workload with millions of register accesses per second, emulated devices are measurably slow.
+这种方法有一个巨大的优点和一个大的缺点。优点是兼容性：客户内核根本不需要特殊驱动程序。一个标准的 FreeBSD 安装镜像在模拟的 `em(4)` 卡上启动就像在真实卡上一样容易。缺点是成本。每次陷入虚拟机监控程序、每次寄存器行为的软件模拟、每次合成的中断，都消耗 CPU 周期。对于每秒数百万次寄存器访问的繁忙工作负载，模拟设备明显很慢。
 
-### What Emulated Devices Imply for Driver Code
+### 模拟设备对驱动程序代码的意味
 
-From the driver author's perspective, an emulated device looks like real hardware. The implication is that you do not normally write a "special" driver for emulated hardware; you write one driver that works on the real silicon and lean on emulation for the compatibility case. Most of the emulated-device drivers in `/usr/src/sys/dev/` are therefore the same files that drive the real cards.
+从驱动程序作者的角度来看，模拟设备看起来像真实硬件。这意味着你通常不需要为模拟硬件编写"特殊"的驱动程序；你编写一个在真实硅片上工作的驱动程序，并依赖模拟来实现兼容性。`/usr/src/sys/dev/` 中的大多数模拟设备驱动程序因此是驱动真实卡的相同文件。
 
-There are two small exceptions that matter for our purposes. First, some drivers include a short early-boot probe that distinguishes "this is a real card" from "this is a hypervisor imitating a card." The `em(4)` driver, for example, logs a slightly different message when it detects that the environment is virtualised, because some diagnostic counters are meaningful only on real silicon. Second, a few drivers bypass hardware-specific optimisations in virtualised environments because those optimisations would be counterproductive: prefetching blocks that the hypervisor's emulation already has in RAM is wasteful, for instance. These are rare and usually framed as conditional performance tweaks rather than architectural changes.
+有两个小的例外对我们的目的很重要。首先，一些驱动程序包含一个简短的早期启动探测，用于区分"这是一张真实的卡"和"这是虚拟机监控程序在模仿一张卡"。例如，`em(4)` 驱动程序在检测到环境已虚拟化时会记录略有不同的消息，因为一些诊断计数器只在真实硅片上有意义。其次，一些驱动程序在虚拟化环境中绕过硬件特定的优化，因为这些优化会适得其反：预取虚拟机监控程序模拟已经放在 RAM 中的块是浪费的。这些很少见，通常被构架为条件性的性能调整而非架构更改。
 
-In practice, the first time you care about emulated-versus-real is when you are looking at a trace or a sysctl and wondering why a counter is zero. It is almost never a correctness problem.
+在实践中，你第一次关心模拟与真实的区别是当你查看跟踪或 sysctl 并想知道为什么某个计数器为零时。这几乎从来不是正确性问题。
 
-### Why Emulation Exists at All
+### 为什么模拟设备存在
 
-It is worth pausing to ask why emulated devices exist, given that they are slower than alternatives. The answer is threefold.
+值得停下来问为什么模拟设备存在，考虑到它们比替代方案更慢。答案有三方面。
 
-First, emulation provides compatibility with existing guest kernels. A hypervisor that offered only paravirtual devices would need to persuade every guest operating system to install paravirtual drivers. That is a solved problem today, but in the early 2000s (when modern hypervisors were being designed) it was a significant barrier. Emulated devices let guests run unmodified; they gained a performance path (paravirtual) later.
+首先，模拟提供了与现有客户内核的兼容性。一个只提供半虚拟化设备的虚拟机监控程序需要说服每个客户操作系统安装半虚拟化驱动程序。今天这是一个已解决的问题，但在2000年代初（现代虚拟机监控程序设计时），这是一个重大的障碍。模拟设备让客户机未经修改即可运行；它们后来才获得了性能路径（半虚拟化）。
 
-Second, emulation is often good enough for low-frequency workloads. A guest that makes one disk I/O per second does not suffer measurably from emulation. A guest that makes a hundred thousand disk I/Os per second suffers badly. The majority of workloads are closer to the first than the second, and for them, emulation is a fine choice.
+其次，模拟对于低频工作负载通常已经足够好。一个每秒进行一次磁盘 I/O 的客户机不会因模拟而受到可衡量的影响。一个每秒进行十万次磁盘 I/O 的客户机则会受到严重影响。大多数工作负载更接近前者而非后者，对它们来说模拟是一个不错的选择。
 
-Third, emulation is easier to implement correctly than paravirtualisation when the guest side is an existing driver. A hypervisor author who wants to support, say, VMware-format disk images does not have to write a paravirtual disk driver for every guest OS; they write a VMware-compatible emulated disk controller, and the existing VMware guest drivers work.
+第三，当客户侧是现有驱动程序时，模拟比半虚拟化更容易正确实现。一个想要支持 VMware 格式磁盘镜像的虚拟机监控程序作者不需要为每个客户操作系统编写半虚拟化磁盘驱动程序；他们编写一个兼容 VMware 的模拟磁盘控制器，现有的 VMware 客户驱动程序就能工作。
 
-In FreeBSD's `bhyve(8)`, emulated devices include the LPC bridge (for serial ports and the RTC), PCI-IDE and AHCI controllers (for some storage cases), and the E1000 NIC (through the `e1000` backend). These are used for installers and for compatibility with older guests. For performance-oriented work, VirtIO devices are the common choice.
+在 FreeBSD 的 `bhyve(8)` 中，模拟设备包括 LPC 桥（用于串口和 RTC）、PCI-IDE 和 AHCI 控制器（用于某些存储场景）以及 E1000 NIC（通过 `e1000` 后端）。这些用于安装程序和与较旧客户机的兼容性。对于面向性能的工作，VirtIO 设备是常见的选择。
 
-### Passthrough as Seen by the Guest
+### 从客户机角度看直通
 
-Passthrough deserves a deeper look from the guest's perspective, because it is the most "hardware-like" of the three styles and introduces subtleties that a novice driver author might not expect.
+直通值得从客户机的角度更深入地审视，因为它是三种风格中最"硬件化"的，并且引入了新手驱动程序作者可能不会预料到的微妙之处。
 
-When a PCI device is passed through, the guest sees an exact copy of the device's PCI configuration: vendor ID, device ID, subsystem IDs, BARs, capabilities, MSI-X table. The guest's PCI enumerator claims the device with the same driver it would have used on bare metal. The driver programs the device through register accesses; those accesses are, for the most part, direct (not trapped and emulated), because the hardware virtualisation extensions (Intel VT-x, AMD-V) support mapping a device's MMIO into a guest's address space.
+当 PCI 设备被直通时，客户机看到设备 PCI 配置的精确副本：厂商 ID、设备 ID、子系统 ID、BAR、能力、MSI-X 表。客户机的 PCI 枚举器使用与裸金属上相同的驱动程序来声明该设备。驱动程序通过寄存器访问编程设备；这些访问在很大程度上是直接的（不陷入和模拟的），因为硬件虚拟化扩展（Intel VT-x、AMD-V）支持将设备的 MMIO 映射到客户机的地址空间。
 
-DMA is where subtlety enters. The guest programs physical addresses into the device's DMA registers, but those addresses are guest-physical, not host-physical. Without help, the device would DMA to host-physical addresses that do not correspond to guest memory at all, which would be a security disaster. The help comes from the IOMMU: Intel VT-d or AMD-Vi sits between the device and the host memory bus, and it remaps device-issued addresses to the correct host memory.
+DMA 是微妙之处所在。客户机将物理地址编程到设备的 DMA 寄存器中，但这些地址是客户机物理地址，不是主机物理地址。没有帮助的话，设备会 DMA 到与客户机内存完全不对应的主机物理地址，这将是安全灾难。帮助来自 IOMMU：Intel VT-d 或 AMD-Vi 位于设备和主机内存总线之间，它将设备发出的地址重新映射到正确的主机内存。
 
-From the guest driver's perspective, all of this is invisible, as long as the driver uses `bus_dma(9)` correctly. The `bus_dma(9)` framework records which physical addresses are valid for a given DMA handle, and the kernel sets up the IOMMU mappings to match. A driver that bypasses `bus_dma(9)` and programs physical addresses directly (perhaps by calling `vtophys` on a kernel pointer) is a driver that will work on bare metal but break under passthrough.
+从客户驱动程序的角度来看，只要驱动程序正确使用 `bus_dma(9)`，所有这些都是不可见的。`bus_dma(9)` 框架记录哪些物理地址对给定的 DMA 句柄有效，内核设置匹配的 IOMMU 映射。一个绕过 `bus_dma(9)` 并直接编程物理地址的驱动程序（也许通过对内核指针调用 `vtophys`）将在裸金属上工作但在直通下崩溃。
 
-Interrupts under passthrough are handled by MSI or MSI-X exclusively; legacy pin-based interrupts cannot be passed through usefully. The guest driver configures MSI/MSI-X in the usual way, and the hypervisor sets up interrupt remapping so that the device's interrupts are delivered to the guest's virtual interrupt controller rather than to the host's.
+直通下的中断专门由 MSI 或 MSI-X 处理；传统的基于引脚的中断无法被有效地直通。客户驱动程序以通常的方式配置 MSI/MSI-X，虚拟机监控程序设置中断重映射，使设备的中断被投递到客户机的虚拟中断控制器而不是主机的。
 
-### Firmware and Platform Dependencies Under Passthrough
+### 直通下的固件和平台依赖
 
-One area where passthrough can surprise driver authors is firmware. Many modern devices expect their firmware to be loaded by the host, not by the device itself. A device whose driver assumes firmware has already been loaded (perhaps by a boot-time BIOS routine on the host) may fail to initialise inside a guest, because the guest's BIOS has not done the firmware-loading work.
+直通可能让驱动程序作者感到意外的一个领域是固件。许多现代设备期望其固件由主机加载，而不是由设备自身加载。一个假设固件已经加载的设备驱动程序（也许是由主机上的启动时 BIOS 例程加载的）可能在客户机内初始化失败，因为客户机的 BIOS 没有做固件加载工作。
 
-The solution is usually for the driver to carry firmware and load it explicitly. FreeBSD's `firmware(9)` framework makes this straightforward: the driver registers the firmware image (typically a blob compiled into a loadable module), and at attach time it calls `firmware_get` and uploads the blob to the device. A driver that works on both bare metal and passthrough is a driver that does the firmware load itself, rather than relying on platform code.
+解决方案通常是让驱动程序自带固件并显式加载。FreeBSD 的 `firmware(9)` 框架使这变得简单：驱动程序注册固件镜像（通常是编译到可加载模块中的 blob），在附加时调用 `firmware_get` 并将 blob 上传到设备。一个在裸金属和直通下都能工作的驱动程序是一个自己加载固件的驱动程序，而不是依赖平台代码的驱动程序。
 
-Similarly, ACPI tables and other platform tables may be different between the host and a guest. A driver that reads an ACPI table to determine board-specific routing (for example, to identify which GPIO controls a power rail) will find a different table in a guest, because the guest's virtual BIOS generates its own. The driver must either provide defaults for cases where the table is missing or treat the missing table as an unsupported platform.
+类似地，ACPI 表和其他平台表在主机和客户机之间可能不同。一个读取 ACPI 表来确定板卡特定路由的驱动程序（例如，识别哪个 GPIO 控制电源轨）在客户机中会找到不同的表，因为客户机的虚拟 BIOS 生成自己的表。驱动程序必须为缺少表的情况提供默认值，或将缺少的表视为不支持的平台。
 
-### When to Prefer Which Device Style
+### 何时选择哪种设备风格
 
-The three device styles are not mutually exclusive on a single VM. A `bhyve(8)` guest can have an emulated LPC bridge, a VirtIO block device, a passthrough NIC, and a VirtIO console, all at the same time. The administrator chooses which style to use for each role based on the trade-offs.
+三种设备风格在单个 VM 上不是互斥的。一个 `bhyve(8)` 客户机可以同时拥有模拟的 LPC 桥、VirtIO 块设备、直通 NIC 和 VirtIO 控制台。管理员根据权衡为每个角色选择使用哪种风格。
 
-For installation and legacy guests, emulated devices are right. They require nothing from the guest and they work out of the box.
+对于安装和遗留客户机，模拟设备是正确的选择。它们不需要客户机做任何事情，开箱即用。
 
-For typical FreeBSD guests doing ordinary work, VirtIO devices are right. They are fast, standardised, and well supported in FreeBSD's tree. Most production `bhyve(8)` deployments use VirtIO for disk, network, and console.
+对于做普通工作的典型 FreeBSD 客户机，VirtIO 设备是正确的选择。它们快速、标准化，在 FreeBSD 的源代码树中得到良好支持。大多数生产环境的 `bhyve(8)` 部署使用 VirtIO 处理磁盘、网络和控制台。
 
-For performance-critical or hardware-specific workloads, passthrough is right. A guest that runs a GPU-accelerated workload needs a passthrough GPU; a guest that needs real network-card offload features needs a passthrough NIC.
+对于性能关键或硬件特定的工作负载，直通是正确的选择。运行 GPU 加速工作负载的客户机需要直通 GPU；需要真实网卡卸载功能的客户机需要直通 NIC。
 
-As a driver author, the most likely device style you will write for is VirtIO, because that is where the new driver work is. Emulated and passthrough drivers are usually existing drivers; VirtIO drivers are designed from scratch for the paravirtual interface.
+作为驱动程序作者，你最可能编写的设备风格是 VirtIO，因为那是新驱动程序工作所在。模拟和直通驱动程序通常是现有的驱动程序；VirtIO 驱动程序是为半虚拟化接口从头设计的。
 
-### Paravirtual Devices in Detail
+### 半虚拟化设备详解
 
-Paravirtual devices are a deeper change. The hypervisor declines to imitate any physical device and instead defines an interface optimised for software on both sides. The guest must have a driver written for that interface; a stock legacy driver will not work. The benefit is performance: a paravirtual interface can batch, amortise, and simplify the host-guest interaction in ways that a realistic hardware model cannot.
+半虚拟化设备是更深层的变化。虚拟机监控程序拒绝模仿任何物理设备，而是定义一个为双方软件优化过的接口。客户机必须有为该接口编写的驱动程序；标准的遗留驱动程序将不起作用。好处是性能：半虚拟化接口可以批量、摊销和简化主机-客户机交互，这是现实的硬件模型无法做到的。
 
-The dominant paravirtual family on FreeBSD is VirtIO. VirtIO is not a FreeBSD invention; it is a cross-platform standard designed for use across Linux, FreeBSD, and other guest operating systems. FreeBSD's VirtIO implementation lives under `/usr/src/sys/dev/virtio/`, with individual drivers for block devices (`virtio_blk`), network devices (`if_vtnet`), serial consoles (`virtio_console`), SCSI (`virtio_scsi`), entropy (`virtio_random`), and memory ballooning (`virtio_balloon`). Other VirtIO device types exist (9p filesystems, input devices, sockets), and they too have FreeBSD drivers in varying states of maturity.
+FreeBSD 上占主导地位的半虚拟化家族是 VirtIO。VirtIO 不是 FreeBSD 的发明；它是一个跨平台标准，设计用于 Linux、FreeBSD 和其他客户操作系统。FreeBSD 的 VirtIO 实现位于 `/usr/src/sys/dev/virtio/` 下，包含用于块设备（`virtio_blk`）、网络设备（`if_vtnet`）、串行控制台（`virtio_console`）、SCSI（`virtio_scsi`）、熵（`virtio_random`）和内存 ballooning（`virtio_balloon`）的各个驱动程序。还存在其他 VirtIO 设备类型（9p 文件系统、输入设备、套接字），它们也有处于不同成熟状态的 FreeBSD 驱动程序。
 
-From the outside, a VirtIO device looks like a PCI device (when attached via PCI) or a memory-mapped device (when attached via MMIO, which is common on embedded and ARM systems). The guest kernel enumerates it the same way it would any other device: a PCI bus scan finds a device with vendor ID 0x1af4 and a device ID indicating the type, or the guest's device tree advertises a VirtIO MMIO transport with a known compatible string.
+从外部看，VirtIO 设备看起来像一个 PCI 设备（通过 PCI 附加时）或一个内存映射设备（通过 MMIO 附加时，这在嵌入式和 ARM 系统上很常见）。客户机内核以枚举任何其他设备相同的方式枚举它：PCI 总线扫描找到一个厂商 ID 为 0x1af4 且设备 ID 指示类型的设备，或者客户机的设备树通告一个具有已知兼容字符串的 VirtIO MMIO 传输。
 
-Once probed and attached, the driver talks to the device through a small set of primitives: device feature bits, device status, device configuration space, and a set of **virtqueues**. The virtqueues are the heart of the VirtIO model. Each one is a ring of descriptors in shared memory, writable by the guest and readable by the host; the host has a parallel ring of used descriptors that the guest reads to discover completions. All the actual I/O happens through the rings; the registers the driver touches are almost exclusively used for setup, notification, and feature negotiation.
+一旦探测并附加，驱动程序通过一小组原语与设备通信：设备特性位、设备状态、设备配置空间和一组**虚拟队列（virtqueue）**。虚拟队列是 VirtIO 模型的核心。每个虚拟队列都是共享内存中的描述符环，可由客户机写入并由主机读取；主机有一个平行的已使用描述符环，客户机从中读取以发现完成。所有实际的 I/O 都通过环进行；驱动程序接触的寄存器几乎专门用于设置、通知和特性协商。
 
-This design is radically different from an emulated-device driver. A VirtIO driver almost never issues a register write during normal operation. It posts buffers into rings, notifies the host that new work is available, and reads completions from the ring when they arrive. The per-request overhead is a handful of memory accesses, not a register trap. When the system is busy, the driver can post many requests and notify once; the host can batch many completions and signal once. The result is an order-of-magnitude performance improvement over an equivalent emulated driver.
+这种设计与模拟设备驱动程序根本不同。VirtIO 驱动程序在正常操作期间几乎从不发出寄存器写入。它将缓冲区发布到环中，通知主机有新工作可用，并在完成到达时从环中读取。每次请求的开销是少量内存访问，而不是寄存器陷入。当系统繁忙时，驱动程序可以发布多个请求并通知一次；主机可以批量处理多个完成并信号一次。结果是与等效模拟驱动程序相比一个数量级的性能提升。
 
-### Paravirtual Devices and the Driver Author
+### 半虚拟化设备与驱动程序作者
 
-For a driver author, paravirtual devices are where a lot of new work happens in FreeBSD's driver ecosystem. VirtIO is well-defined and stable, and writing a new VirtIO-backed device type is a reasonable weekend project once you have read the foundational drivers. More importantly, the patterns of VirtIO (shared rings, feature negotiation, descriptor-based transactions) echo through other FreeBSD subsystems (notably `if_netmap` and portions of the network stack), so time invested in understanding them pays dividends.
+对于驱动程序作者来说，半虚拟化设备是 FreeBSD 驱动程序生态系统中大量新工作发生的地方。VirtIO 定义良好且稳定，一旦你阅读了基础驱动程序，编写一个新的基于 VirtIO 的设备类型是一个合理的周末项目。更重要的是，VirtIO 的模式（共享环、特性协商、基于描述符的事务）在其他 FreeBSD 子系统中也有体现（特别是 `if_netmap` 和网络栈的部分），因此投入理解它们的时间会产生回报。
 
-This chapter will spend all of Section 3 on VirtIO fundamentals. For now, what matters is the framing: a paravirtual driver is a first-class guest driver that was designed to live inside a VM, with the performance characteristics that design affords.
+本章将在整个第3节中讲解 VirtIO 基础知识。现在重要的是框架：半虚拟化驱动程序是一流的客户驱动程序，被设计为在 VM 内运行，具有该设计所赋予的性能特征。
 
-### Passthrough Devices in Detail
+### 直通设备详解
 
-Passthrough is the third style, and in some ways the most interesting because it collapses the virtualisation question back into the bare-metal question, with a twist.
+直通是第三种风格，在某些方面最有趣，因为它将虚拟化问题折叠回裸金属问题，但有一个转折。
 
-In passthrough, the hypervisor declines to abstract the device at all. It hands the guest a real PCI or PCIe device: for example, a specific physical NIC in one of the host's slots, or a specific NVMe SSD, or a specific GPU. The guest's driver talks to that real hardware as if it were the host. The guest even receives the device's interrupts, through a mechanism the hypervisor provides.
+在直通中，虚拟机监控程序完全拒绝抽象设备。它将一个真实的 PCI 或 PCIe 设备交给客户机：例如，主机某个插槽中的特定物理 NIC，或特定的 NVMe SSD，或特定的 GPU。客户机的驱动程序像它是主机一样与真实硬件通信。客户机甚至通过虚拟机监控程序提供的机制接收设备的中断。
 
-There are three reasons passthrough exists. First, performance: a passthrough NIC delivers line-rate traffic to the guest with no software overhead per packet. Second, access to hardware features the hypervisor does not emulate: GPU acceleration, NVMe-specific queuing, hardware crypto engines. Third, licensing or certification: some proprietary drivers only work with real hardware and cannot be used through any emulation layer.
+直通存在三个原因。首先是性能：直通 NIC 以线路速率向客户机传递流量，每个数据包没有软件开销。其次是访问虚拟机监控程序不模拟的硬件特性：GPU 加速、NVMe 特定队列、硬件加密引擎。第三是许可或认证：一些专有驱动程序只在真实硬件上工作，不能通过任何模拟层使用。
 
-The cost of passthrough is isolation. Once a device is passed through to a guest, the host no longer owns it in any useful sense; it cannot use the NIC itself, and other guests cannot share it. Live migration becomes difficult or impossible, because the target host may not have the same physical device in the same slot. The guest owns the hardware until the guest stops running.
+直通的代价是隔离性。一旦设备被直通给客户机，主机就不再以任何有意义的方式拥有它；它不能自己使用 NIC，其他客户机也不能共享它。实时迁移变得困难或不可能，因为目标主机可能没有在相同插槽中的相同物理设备。客户机拥有该硬件直到客户机停止运行。
 
-### Passthrough and the IOMMU
+### 直通与 IOMMU
 
-Passthrough sounds simple in principle, but it requires one major piece of hardware support: an IOMMU. An IOMMU is to DMA what an MMU is to CPU memory access: a hardware-enforced translation table between the view of memory a device has (its "DMA address") and real physical memory. Without an IOMMU, a passthrough device could DMA into any physical memory on the host, including the host's kernel data, with obvious and terrifying consequences. With an IOMMU, the hypervisor can constrain the device to DMA only into the memory regions assigned to the guest, preserving the security boundary.
+直通在原则上听起来简单，但它需要一个主要的硬件支持：IOMMU。IOMMU 对 DMA 的作用就像 MMU 对 CPU 内存访问的作用：一个硬件强制的转换表，在设备看到的内存视图（其"DMA 地址"）和真实物理内存之间进行转换。没有 IOMMU，直通设备可以 DMA 到主机上的任何物理内存，包括主机的内核数据，后果是显而易见且可怕的。有了 IOMMU，虚拟机监控程序可以约束设备只 DMA 到分配给客户机的内存区域，从而保持安全边界。
 
-On amd64 systems, the IOMMU is Intel VT-d (on Intel CPUs) or AMD-Vi (on AMD CPUs). It is usually enabled through a kernel configuration option and some BIOS settings. FreeBSD's `bhyve(8)` uses the IOMMU through the `pci_passthru(4)` mechanism, which we will meet in Section 5.
+在 amd64 系统上，IOMMU 是 Intel VT-d（在 Intel CPU 上）或 AMD-Vi（在 AMD CPU 上）。它通常通过内核配置选项和一些 BIOS 设置启用。FreeBSD 的 `bhyve(8)` 通过 `pci_passthru(4)` 机制使用 IOMMU，我们将在第5节中遇到它。
 
-For the driver author, the IOMMU is invisible most of the time. The `bus_dma(9)` API in the guest behaves the same way it does on bare metal; the guest driver's `bus_dmamem_alloc()` and `bus_dmamap_load()` calls produce DMA addresses that, from the guest's point of view, look the same as they would on bare metal. The IOMMU translation happens one layer below, between the device and the real memory, and the guest driver does not participate in it.
+对于驱动程序作者来说，IOMMU 在大多数时候是不可见的。客户机中的 `bus_dma(9)` API 行为与裸金属上相同；客户驱动程序的 `bus_dmamem_alloc()` 和 `bus_dmamap_load()` 调用产生的 DMA 地址，从客户机的角度看，与裸金属上看起来相同。IOMMU 转换发生在下面一层，在设备和真实内存之间，客户驱动程序不参与其中。
 
-The one place where the IOMMU matters for the driver author is when the IOMMU is misconfigured or missing, and DMA starts to fail in mysterious ways. If you ever see "DMA timeout" messages from a passthrough driver, the IOMMU is often the first suspect. Chapter 32 will go deeper into this.
+IOMMU 对驱动程序作者唯一重要的地方是当 IOMMU 配置错误或缺失时，DMA 开始以神秘的方式失败。如果你在直通驱动程序中看到"DMA timeout"消息，IOMMU 通常是第一个嫌疑对象。第32章将更深入地讨论这个问题。
 
-### The Driver Author's Mental Model
+### 驱动程序作者的心智模型
 
-If you step back from these three styles, a clear pattern emerges. The guest kernel always loads a driver; the driver always sees a device; the device's behaviour is always defined by some interface. What changes between the styles is which interface and who implements it.
+如果你从这三种风格中退后一步，一个清晰的模式出现了。客户内核总是加载驱动程序；驱动程序总是看到设备；设备的行为总是由某个接口定义的。风格之间变化的是哪个接口以及谁实现了它。
 
-In emulated devices, the interface is the real hardware's register model, and the hypervisor implements it in software. The driver is the real-hardware driver.
+在模拟设备中，接口是真实硬件的寄存器模型，虚拟机监控程序在软件中实现它。驱动程序就是真实硬件的驱动程序。
 
-In paravirtual devices, the interface is a bespoke software-optimised model, and the hypervisor implements it natively. The driver is paravirtual-specific.
+在半虚拟化设备中，接口是一个定制的软件优化模型，虚拟机监控程序原生实现它。驱动程序是半虚拟化专用的。
 
-In passthrough devices, the interface is the real hardware's register model, and the hardware itself implements it, with the IOMMU as a gatekeeper. The driver is the real-hardware driver, running in the guest, with DMA addresses translated transparently.
+在直通设备中，接口是真实硬件的寄存器模型，硬件本身实现它，IOMMU 作为守门人。驱动程序是真实硬件的驱动程序，运行在客户机中，DMA 地址被透明地转换。
 
-The driver author is therefore working with the same skills in all three cases. The shape of the work differs only in which interface is in play. Once you understand that, the rest of this chapter becomes a study of specific interfaces, specific FreeBSD APIs, and specific deployment contexts.
+因此驱动程序作者在所有三种情况下使用相同的技能。工作的形状只在于使用哪个接口有所不同。一旦你理解了这一点，本章的其余部分就变成了对特定接口、特定 FreeBSD API 和特定部署上下文的研究。
 
-### A Note on Hybrid Models
+### 关于混合模型的说明
 
-Real systems often mix these styles. A single guest may have an emulated serial port for early boot logging, a paravirtual NIC for main network traffic, a paravirtual block device for the root filesystem, and a passthrough GPU for acceleration. Each of those devices is governed by its own driver, and the guest's driver toolkit needs to know the patterns for all three. This is not unusual; it is the common case for any non-trivial VM.
+真实系统经常混合这些风格。单个客户机可能有一个用于早期启动日志的模拟串口、一个用于主要网络流量的半虚拟化 NIC、一个用于根文件系统的半虚拟化块设备和一个用于加速的直通 GPU。这些设备中的每一个都由自己的驱动程序管理，客户机的驱动程序工具包需要了解所有三种的模式。这不是异常情况；这是任何非平凡 VM 的常见情况。
 
-As a driver author, the implication is that you usually do not need to build a universal driver for all three styles. You build the driver for the style your device uses, and you coexist with drivers for the other styles. The per-device decisions about which style to use are made by the hypervisor administrator, not by the driver.
+作为驱动程序作者，其含义是你通常不需要为所有三种风格构建通用驱动程序。你为你的设备使用的风格构建驱动程序，并与其他风格的驱动程序共存。关于使用哪种风格的逐设备决定由虚拟机监控程序管理员做出，而不是由驱动程序做出。
 
 ### 总结
 
-Three styles of guest device, three kinds of driver work, one underlying mental model: a driver talks to an interface, and the interface is implemented by whichever layer the hypervisor chooses. Emulated is easy but slow; paravirtual is fast and requires custom drivers; passthrough is near-native and requires an IOMMU. The rest of this chapter concentrates on the paravirtual style, with VirtIO as the example, because that is where most of the interesting new driver work in FreeBSD happens. In Section 3 we open the VirtIO toolkit and start examining its parts.
+三种客户设备风格、三种驱动程序工作、一个底层心智模型：驱动程序与接口对话，接口由虚拟机监控程序选择的任何层实现。模拟简单但慢；半虚拟化快速但需要定制驱动程序；直通接近原生但需要 IOMMU。本章的其余部分集中于半虚拟化风格，以 VirtIO 为例，因为那是 FreeBSD 中大多数有趣的新驱动程序工作发生的地方。在第3节中我们将打开 VirtIO 工具箱并开始检查它的各个部分。
 
 ## 第3节：VirtIO 基础与 virtqueue(9)
-VirtIO is a standard. It defines a way for a guest to talk to a device that exists only in software, without reference to any physical hardware. The standard is maintained by the OASIS VirtIO Technical Committee and is implemented by a number of hypervisors, including `bhyve(8)`, QEMU, and the Linux KVM family. Because the standard is shared, a VirtIO guest driver written for a FreeBSD guest will talk to a VirtIO device presented by any conforming hypervisor.
+VirtIO 是一个标准。它定义了一种方式，让客户机能够与只存在于软件中的设备通信，而不涉及任何物理硬件。该标准由 OASIS VirtIO 技术委员会维护，并由多个虚拟机监控程序实现，包括 `bhyve(8)`、QEMU 和 Linux KVM 家族。因为标准是共享的，为 FreeBSD 客户机编写的 VirtIO 客户驱动程序可以与任何符合标准的虚拟机监控程序呈现的 VirtIO 设备通信。
 
-This section introduces the VirtIO model at the level of detail a driver author needs. It is long, because VirtIO has enough moving parts to justify the space, and short compared to the VirtIO specification itself, which spans hundreds of pages. We will focus on the parts you need to write a FreeBSD guest driver.
+本节以驱动程序作者所需的详细程度介绍 VirtIO 模型。它很长，因为 VirtIO 有足够多的组成部分值得占据这些篇幅；但与跨越数百页的 VirtIO 规范本身相比，它又很短。我们将专注于你编写 FreeBSD 客户驱动程序所需的部分。
 
-### The Ingredients of a VirtIO Device
+### VirtIO 设备的组成部分
 
-A VirtIO device exposes a small number of elements to its guest driver. Understanding each one is the foundation for everything that follows.
+VirtIO 设备向其客户驱动程序暴露少量元素。理解每一个元素是后续所有内容的基础。
 
-The first element is the **transport**. VirtIO devices can appear over several transports: VirtIO over PCI (the usual case on amd64 desktops, servers, and cloud), VirtIO over MMIO (the usual case on ARM and embedded systems), and VirtIO over channel I/O (used on IBM mainframes). From the guest's view, the transport dictates how the device is enumerated and how registers are read, but once the driver has hold of a `device_t`, the transport recedes into the background. FreeBSD's VirtIO framework provides a transport-agnostic API.
+第一个元素是**传输层（transport）**。VirtIO 设备可以通过多种传输层出现：基于 PCI 的 VirtIO（amd64 桌面、服务器和云上的常见情况）、基于 MMIO 的 VirtIO（ARM 和嵌入式系统上的常见情况）和基于通道 I/O 的 VirtIO（用于 IBM 大型机）。从客户机的角度看，传输层决定了设备如何被枚举以及寄存器如何被读取，但一旦驱动程序获得了 `device_t`，传输层就退到幕后。FreeBSD 的 VirtIO 框架提供了与传输层无关的 API。
 
-The second element is the **device type**. Every VirtIO device has a single-byte type identifier (`VIRTIO_ID_NETWORK` is 1, `VIRTIO_ID_BLOCK` is 2, `VIRTIO_ID_CONSOLE` is 3, `VIRTIO_ID_ENTROPY` is 4, `VIRTIO_ID_BALLOON` is 5, `VIRTIO_ID_SCSI` is 8, and so on, as listed in `/usr/src/sys/dev/virtio/virtio_ids.h`). The type tells the guest what the device does; the guest dispatches to the right driver based on the type.
+第二个元素是**设备类型**。每个 VirtIO 设备都有一个单字节的类型标识符（`VIRTIO_ID_NETWORK` 为 1，`VIRTIO_ID_BLOCK` 为 2，`VIRTIO_ID_CONSOLE` 为 3，`VIRTIO_ID_ENTROPY` 为 4，`VIRTIO_ID_BALLOON` 为 5，`VIRTIO_ID_SCSI` 为 8，等等，列在 `/usr/src/sys/dev/virtio/virtio_ids.h` 中）。类型告诉客户机设备做什么；客户机根据类型分派到正确的驱动程序。
 
-The third element is the **device feature bits**. Each device type defines a set of optional features, each represented by a bit in a 64-bit mask. Some features are universal (the ability to use indirect descriptors, for example), and some are device-specific (VirtIO block devices may advertise write-caching, discard support, geometry information, and more). The guest driver reads the device's advertised features, selects which of them the driver knows how to use, and writes back a negotiated feature mask. The device then agrees to the negotiated set and rejects any attempt to use a feature outside it. This negotiation is the mechanism by which VirtIO devices and drivers evolve without breaking each other.
+第三个元素是**设备特性位**。每种设备类型定义一组可选特性，每个特性由 64 位掩码中的一个位表示。一些特性是通用的（例如使用间接描述符的能力），一些是设备特定的（VirtIO 块设备可以通告写缓存、discard 支持、几何信息等）。客户驱动程序读取设备通告的特性，选择驱动程序知道如何使用的特性，然后写回一个协商后的特性掩码。设备随后同意协商后的集合，并拒绝使用集合之外特性的任何尝试。这种协商是 VirtIO 设备和驱动程序在不破坏彼此的情况下演进的机制。
 
-The fourth element is the **device status**. A small byte-level register reports where in the lifecycle the device sits: acknowledged by the driver, driver found for this device type, features negotiated, device set up and ready, and so on. Writing to the status register drives the device through its lifecycle; reading it tells the driver where it is.
+第四个元素是**设备状态**。一个小的字节级寄存器报告设备处于生命周期中的哪个阶段：已被驱动程序确认、已找到此设备类型的驱动程序、特性已协商、设备已设置就绪等等。写入状态寄存器驱动设备通过其生命周期；读取它告诉驱动程序当前处于哪里。
 
-The fifth element is the **device configuration space**. Each device type has its own small layout of bytes that carry device-specific configuration: a block device's capacity, a network device's MAC address, a console device's port count. The guest reads the configuration space to learn device-specific details and occasionally writes to it to request a configuration change.
+第五个元素是**设备配置空间**。每种设备类型都有自己的小字节布局，承载设备特定的配置：块设备的容量、网络设备的 MAC 地址、控制台设备的端口数。客户机读取配置空间以了解设备特定的细节，偶尔也会写入以请求配置更改。
 
-The sixth element, and the most important for this chapter, is the **set of virtqueues**. Each VirtIO device has one or more virtqueues, and the virtqueues are where almost all the actual work happens. Think of each virtqueue as a bounded-size bidirectional conveyor belt between the guest and the host. The guest places requests on the belt; the host consumes them, acts on them, and places completions on a parallel return belt; the guest reads the completions to learn what happened. The conveyor belt is implemented as a ring of descriptors in shared memory.
+第六个元素，也是本章最重要的，是**虚拟队列集合**。每个 VirtIO 设备有一个或多个虚拟队列，虚拟队列是几乎所有实际工作发生的地方。把每个虚拟队列想象成客户机和主机之间一个有界大小的双向传送带。客户机将请求放在传送带上；主机消费它们、执行操作，并将完成放在平行的回传传送带上；客户机读取完成以了解发生了什么。传送带实现为共享内存中的描述符环。
 
-### Virtqueues and the Shared-Ring Model
+### 虚拟队列与共享环模型
 
-At the heart of VirtIO is the virtqueue, the single most important abstraction in the whole protocol. A virtqueue is a ring of descriptors, held in memory that both the guest and the host can read and write. Its size is a power of two, chosen at device initialisation; typical values are 128 or 256 entries, though larger values are permitted.
+VirtIO 的核心是虚拟队列，这是整个协议中最重要的抽象。虚拟队列是一个描述符环，保存在客户机和主机都可以读写的内存中。其大小是 2 的幂，在设备初始化时选择；典型值为 128 或 256 个条目，但也允许更大的值。
 
-Each descriptor in the ring describes a single scatter-gather buffer in guest memory: its guest physical address, its length, and a couple of flags (is this buffer readable or writable from the device's point of view, does this descriptor chain to a next descriptor, does it point to an indirect descriptor table). The driver fills descriptors, chains them as needed to represent multi-buffer transactions, and writes to a small index to announce that new descriptors are available. The host's device implementation walks the descriptors, performs the work they describe, and writes to its own index to announce that the work is done.
+环中的每个描述符描述客户机内存中的一个分散-聚集缓冲区：其客户机物理地址、长度和几个标志（从设备的角度看此缓冲区是可读还是可写的、此描述符是否链接到下一个描述符、是否指向间接描述符表）。驱动程序填充描述符，根据需要链接它们以表示多缓冲区事务，并写入一个小索引来通告有新的描述符可用。主机的设备实现遍历描述符，执行它们描述的工作，并写入自己的索引来通告工作已完成。
 
-There are three rings inside a virtqueue, not one. The **descriptor table** holds the actual descriptors. The **available ring** (driven by the guest) lists the indices of descriptor chains the driver has made available. The **used ring** (driven by the host) lists the indices of descriptor chains the device has consumed and whose results are ready. The split is subtle but important: the driver writes to the available ring and reads from the used ring, while the host does the opposite. Each side reads what the other side wrote, without locks, through careful use of memory barriers and atomic index updates.
+虚拟队列内部有三个环，不是一个。**描述符表**保存实际的描述符。**可用环**（由客户机驱动）列出驱动程序已提供的描述符链的索引。**已用环**（由主机驱动）列出设备已消费且结果已就绪的描述符链的索引。这种分割微妙但重要：驱动程序写入可用环并从已用环读取，而主机则相反。每一方读取另一方写入的内容，不使用锁，通过谨慎使用内存屏障和原子索引更新来实现。
 
-From the driver author's point of view, you almost never manipulate the rings by hand. FreeBSD's `virtqueue(9)` API abstracts them behind a handful of functions. You call `virtqueue_enqueue()` to push a scatter-gather list onto the available ring. You call `virtqueue_notify()` to let the host know new work is available. You call `virtqueue_dequeue()` to pull the next completion off the used ring. If you are polling rather than taking interrupts, you call `virtqueue_poll()` to wait for the next completion. The API hides the index arithmetic, the memory barriers, and the flag juggling; your code deals with scatter-gather lists and cookies.
+从驱动程序作者的角度来看，你几乎从不手动操作环。FreeBSD 的 `virtqueue(9)` API 将它们抽象在少量函数之后。你调用 `virtqueue_enqueue()` 将分散-聚集列表推到可用环上。你调用 `virtqueue_notify()` 让主机知道有新工作可用。你调用 `virtqueue_dequeue()` 从已用环拉取下一个完成。如果你在轮询而不是接收中断，你调用 `virtqueue_poll()` 等待下一个完成。API 隐藏了索引算术、内存屏障和标志操作；你的代码只处理分散-聚集列表和 cookie。
 
-The cookie mechanism deserves a line. When you enqueue a scatter-gather list, you supply an opaque pointer, the cookie, which the API remembers. When you dequeue a completion, you receive that cookie back. This lets the driver associate each completion with the request that produced it, without the ring having to carry any driver-specific context. A driver typically passes the pointer to a softc-level request structure as the cookie; dequeue gives back the same pointer, and the driver resumes processing.
+cookie 机制值得一提。当你入队一个分散-聚集列表时，你提供一个不透明指针（cookie），API 会记住它。当你出队一个完成时，你会收到那个 cookie 返回。这让驱动程序能将每个完成与产生它的请求关联起来，而不需要环携带任何驱动程序特定的上下文。驱动程序通常传递指向 softc 级别请求结构的指针作为 cookie；出队时返回相同的指针，驱动程序继续处理。
 
-### Feature Negotiation in Practice
+### 特性协商的实践
 
-Before the driver uses any of these mechanisms, it must negotiate features. The sequence is simple and looks the same in every VirtIO driver.
+在驱动程序使用这些机制之前，它必须协商特性。这个序列很简单，在每个 VirtIO 驱动程序中看起来都一样。
 
-First, the driver reads the device's advertised feature bits with `virtio_negotiate_features()`. The argument is a mask of features the driver is prepared to use; the return value is the intersection of the driver's mask and the device's advertised bits. The device has now committed to supporting only that subset, and the driver knows exactly which features are in play.
+首先，驱动程序通过 `virtio_negotiate_features()` 读取设备播发的特性位。参数是驱动程序准备使用的特性掩码；返回值是驱动程序掩码与设备播发位的交集。此时设备已承诺仅支持该子集，驱动程序也确切知道哪些特性生效。
 
-Second, the driver calls `virtio_finalize_features()` to seal the negotiation. After this call, the device will reject any attempt to enable features outside the negotiated set. The driver's subsequent setup code can inspect the negotiated mask through `virtio_with_feature()`, which returns true if a given feature bit is present.
+其次，驱动程序调用 `virtio_finalize_features()` 来锁定协商结果。此调用之后，设备将拒绝任何尝试启用协商集合之外特性的操作。驱动程序的后续设置代码可以通过 `virtio_with_feature()` 检查协商后的掩码，如果给定的特性位存在则返回 true。
 
-Third, the driver allocates virtqueues. The exact number and per-queue parameters depend on the device type. A `virtio_random` device allocates one virtqueue; a `virtio_net` device allocates at least two (one for receive, one for transmit), more if multiple queues are negotiated. Allocation uses `virtio_alloc_virtqueues()`, passing an array of `struct vq_alloc_info`, each entry describing one queue's name, callback, and maximum indirect-descriptor size.
+第三，驱动程序分配虚拟队列。确切的队列数量和每队列参数取决于设备类型。`virtio_random` 设备分配一个虚拟队列；`virtio_net` 设备至少分配两个（一个用于接收，一个用于发送），如果协商了多队列则会更多。分配使用 `virtio_alloc_virtqueues()`，传入一个 `struct vq_alloc_info` 数组，每个条目描述一个队列的名称、回调和最大间接描述符大小。
 
-Fourth, the driver sets up interrupts with `virtio_setup_intr()`. The interrupt handlers are the callbacks from step three. When the host has posted a completion to a queue, the guest receives a virtual interrupt, the handler runs, and it processes the completions by calling `virtqueue_dequeue()` in a loop.
+第四，驱动程序通过 `virtio_setup_intr()` 设置中断。中断处理程序就是第三步中的回调函数。当主机向队列提交完成时，客户机收到一个虚拟中断，处理程序运行，通过循环调用 `virtqueue_dequeue()` 来处理完成项。
 
-This four-step sequence is the backbone of every VirtIO driver in `/usr/src/sys/dev/virtio/`. Read `vtrnd_attach()` in `/usr/src/sys/dev/virtio/random/virtio_random.c` and you will see it clearly: feature negotiation, queue allocation, and interrupt setup, in exactly that order. Read `vtblk_attach()` in `/usr/src/sys/dev/virtio/block/virtio_blk.c` and you will see the same sequence, with more moving parts because the device is more complex, but the same skeleton.
+这四个步骤的序列是 `/usr/src/sys/dev/virtio/` 中每个 VirtIO 驱动程序的骨架。阅读 `/usr/src/sys/dev/virtio/random/virtio_random.c` 中的 `vtrnd_attach()`，你会清楚地看到：特性协商、队列分配和中断设置，严格按照这个顺序。阅读 `/usr/src/sys/dev/virtio/block/virtio_blk.c` 中的 `vtblk_attach()`，你会看到相同的序列，只是因为设备更复杂所以有更多的活动部件，但骨架是一样的。
 
-### A Walkthrough of `virtio_random`
+### `virtio_random` 详解
 
-Because `virtio_random` is the smallest complete VirtIO driver in the FreeBSD tree, it is the best one to read first. The whole file is under four hundred lines, and every line is there for a reason. Let us trace through the important parts.
+因为 `virtio_random` 是 FreeBSD 代码树中最小的完整 VirtIO 驱动程序，所以它是最好的入门读物。整个文件不到四百行，每一行都有其存在的理由。让我们追踪其中的重要部分。
 
-The softc is small:
+softc 很小：
 
 ```c
 struct vtrnd_softc {
@@ -391,9 +391,9 @@ struct vtrnd_softc {
 };
 ```
 
-The fields are the device handle, the negotiated feature mask (the device has no feature bits so this will always be zero), a pointer to the single virtqueue, an event handler tag for shutdown hooks, a flag that is set to true during teardown, a scatter-gather list used for every enqueue, and a buffer in which the device will store each batch of entropy.
+字段包括设备句柄、协商的特性掩码（设备没有特性位所以这总是零）、指向单一虚拟队列的指针、用于关机钩子的事件处理程序标签、在拆卸期间设置为 true 的标志、用于每次入队的分散-聚集列表，以及设备将在其中存储每批熵的缓冲区。
 
-The device methods table is the standard newbus skeleton:
+设备方法表是标准的 newbus 骨架：
 
 ```c
 static device_method_t vtrnd_methods[] = {
@@ -416,9 +416,9 @@ MODULE_DEPEND(virtio_random, virtio, 1, 1, 1);
 MODULE_DEPEND(virtio_random, random_device, 1, 1, 1);
 ```
 
-`VIRTIO_DRIVER_MODULE` is a short macro that expands to two `DRIVER_MODULE` declarations, one for `virtio_pci` and one for `virtio_mmio`. This is how the same driver attaches on both transports without any transport-specific code of its own; the framework routes it to whichever transport finds a matching device.
+`VIRTIO_DRIVER_MODULE` 是一个简短的宏，展开为两个 `DRIVER_MODULE` 声明，一个用于 `virtio_pci`，一个用于 `virtio_mmio`。这就是同一个驱动程序在两种传输上附加而不需要任何自己的传输特定代码的方式；框架将它路由到找到匹配设备的任何传输。
 
-The `probe` function is one line:
+`probe` 函数只有一行：
 
 ```c
 static int
@@ -428,9 +428,9 @@ vtrnd_probe(device_t dev)
 }
 ```
 
-`VIRTIO_SIMPLE_PROBE` consults the PNP match table that was declared above through `VIRTIO_SIMPLE_PNPINFO`. The match table tells the kernel that this driver wants devices whose VirtIO type is `VIRTIO_ID_ENTROPY`.
+`VIRTIO_SIMPLE_PROBE` 查询上面通过 `VIRTIO_SIMPLE_PNPINFO` 声明的 PNP 匹配表。匹配表告诉内核该驱动程序想要 VirtIO 类型为 `VIRTIO_ID_ENTROPY` 的设备。
 
-The `attach` function is more substantial. It allocates the entropy buffer and the scatter-gather list, sets up features, allocates a single virtqueue, installs a shutdown event handler, registers itself with the FreeBSD `random(4)` framework, and posts its first buffer into the virtqueue:
+`attach` 函数更为重要。它分配熵缓冲区和分散-聚集列表、设置特性、分配一个单一虚拟队列、安装关机事件处理程序、向 FreeBSD `random(4)` 框架注册自己，并将第一个缓冲区发布到虚拟队列中：
 
 ```c
 sc = device_get_softc(dev);
@@ -455,7 +455,7 @@ random_source_register(&random_vtrnd);
 vtrnd_enqueue(sc);
 ```
 
-Feature negotiation is trivial because the driver advertises `VTRND_FEATURES = 0`:
+特性协商是简单的，因为驱动程序通告 `VTRND_FEATURES = 0`：
 
 ```c
 static int
@@ -469,9 +469,9 @@ vtrnd_negotiate_features(struct vtrnd_softc *sc)
 }
 ```
 
-The feature mask of the device is irrelevant; the driver wants no features and gets no features, and the finalisation succeeds trivially. A more complex driver would build a non-zero mask and check it afterwards.
+设备的特性掩码无关紧要；驱动程序不需要特性也不获得特性，终结化简单地成功。更复杂的驱动程序会构建非零掩码并在之后检查它。
 
-The virtqueue allocation asks for a single queue:
+虚拟队列分配请求一个单一队列：
 
 ```c
 static int
@@ -487,9 +487,9 @@ vtrnd_alloc_virtqueue(struct vtrnd_softc *sc)
 }
 ```
 
-The first argument to `VQ_ALLOC_INFO_INIT` is the maximum indirect-descriptor-table size, which is zero for this driver because it does not use indirect descriptors. The second argument is the interrupt handler callback, which is `NULL` because this driver uses polling rather than interrupt-driven completion. The third is the argument to that handler. The fourth is the output pointer for the virtqueue handle. The fifth is a format string that produces the queue's name.
+`VQ_ALLOC_INFO_INIT` 的第一个参数是最大间接描述符表大小，此驱动程序为零，因为它不使用间接描述符。第二个参数是中断处理回调，为 `NULL`，因为此驱动程序使用轮询而非中断驱动的完成。第三个是该处理程序的参数。第四个是虚拟队列句柄的输出指针。第五个是生成队列名称的格式字符串。
 
-The enqueue function is short:
+入队函数很短：
 
 ```c
 static void
@@ -507,9 +507,9 @@ vtrnd_enqueue(struct vtrnd_softc *sc)
 }
 ```
 
-This pushes a scatter-gather list describing the entropy buffer onto the ring. The cookie is `sc` itself. The next two arguments are "readable segments" (none, the device writes the buffer) and "writable segments" (one, the entropy buffer). `virtqueue_notify()` kicks the host so it starts filling the buffer.
+这会将描述熵缓冲区的分散-聚集列表推到环上。cookie 是 `sc` 本身。接下来两个参数是"可读段"（无，设备写入缓冲区）和"可写段"（一个，熵缓冲区）。`virtqueue_notify()` 踢一下主机，让它开始填充缓冲区。
 
-Because there are no interrupts, the driver uses polling to retrieve completions:
+因为没有中断，驱动程序使用轮询来检索完成：
 
 ```c
 static int
@@ -534,29 +534,29 @@ vtrnd_harvest(struct vtrnd_softc *sc, void *buf, size_t *sz)
 }
 ```
 
-The lifecycle here is the full VirtIO cycle. Enqueue posts a buffer; the host fills it with entropy and marks the descriptor "used"; the driver dequeues the used descriptor, extracts the cookie and the length, copies the result out to its caller, and re-posts the buffer for the next round. If the queue is empty (no completion yet), `virtqueue_dequeue()` returns `NULL` and the driver returns `EAGAIN`.
+这里的生命周期是完整的 VirtIO 循环。入队发布一个缓冲区；主机用熵填充它并将描述符标记为"已用"；驱动程序出队已用的描述符，提取 cookie 和长度，将结果复制给调用者，并为下一轮重新发布缓冲区。如果队列为空（尚无完成），`virtqueue_dequeue()` 返回 `NULL`，驱动程序返回 `EAGAIN`。
 
-This is the full shape of a VirtIO driver. Everything else, from `virtio_blk` to `if_vtnet`, is elaboration on this base: more queues, more features, more work per completion, more bookkeeping per request. The skeleton is the same.
+这是 VirtIO 驱动程序的完整形态。其他一切，从 `virtio_blk` 到 `if_vtnet`，都是在这个基础上的扩展：更多队列、更多特性、每次完成更多工作、每个请求更多簿记。骨架是相同的。
 
-### What the `virtqueue(9)` API Buys You
+### `virtqueue(9)` API 给你带来了什么
 
-Step back for a moment and consider how much complexity the API abstracts away. The ring arithmetic, with its wraparound and its careful handling of available versus used indices, is entirely hidden. The memory barriers that keep the guest and the host in sync, which are subtle enough to be a common source of bugs in handwritten ring code, are placed by the API. The optional features (indirect descriptors, event indexes) are turned on and off based on negotiation without the driver having to know how they work.
+退后一步，想想 API 抽象掉了多少复杂性。带有环绕和仔细的可用与已用索引处理的环算术完全被隐藏了。保持客户机和主机同步的内存屏障——在手写环代码中足够微妙以致成为常见 bug 来源——由 API 放置。可选特性（间接描述符、事件索引）基于协商打开和关闭，驱动程序不需要知道它们如何工作。
 
-The cost of that abstraction is that a driver author who only ever uses the API will not understand the rings themselves in depth. That is usually fine, but on the rare occasion when you debug a ring-layer mismatch (because you posted a descriptor with the wrong writable count, say, and the host is rejecting it) you will want to know what is going on. The VirtIO specification is the reference for the underlying ring layout, and `/usr/src/sys/dev/virtio/virtio_ring.h` is the FreeBSD side of the same layout. They repay reading at least once.
+这种抽象的代价是只使用 API 的驱动程序作者不会深入理解环本身。这通常没问题，但在罕见的情况下，当你调试环层不匹配时（因为你发布了错误可写计数的描述符，主机正在拒绝它），你会想知道发生了什么。VirtIO 规范是底层环布局的参考，`/usr/src/sys/dev/virtio/virtio_ring.h` 是相同布局的 FreeBSD 侧。它们值得至少阅读一次。
 
-### Indirect Descriptors
+### 间接描述符
 
-A small optimisation worth knowing about is the indirect-descriptor feature (`VIRTIO_RING_F_INDIRECT_DESC`). When negotiated, it allows a driver to describe a multi-buffer transaction in an indirect descriptor table rather than a chain of descriptors on the main ring. The ring entry becomes a single descriptor that points to a block of descriptors, so a large scatter-gather list consumes only one slot on the ring rather than many.
+一个值得了解的小优化是间接描述符特性（`VIRTIO_RING_F_INDIRECT_DESC`）。协商后，它允许驱动程序在间接描述符表中而非主环上的描述符链中描述多缓冲区事务。环条目变成一个指向描述符块的单个描述符，因此大的分散-聚集列表只消耗环上的一个槽而不是多个。
 
-Indirect descriptors matter in workloads that do large, scatter-gather-heavy transactions, such as network drivers sending packets with many fragments. For small drivers, they are an optional flourish. The `virtqueue(9)` API handles the mechanism transparently: if you pass a non-zero `vqai_maxindirsz` during queue allocation, the kernel can use indirects; if you pass zero, it cannot.
+间接描述符在执行大型、分散-聚集密集型事务的工作负载中很重要，例如发送具有许多片段的数据包的网络驱动程序。对于小型驱动程序，它们是可选的修饰。`virtqueue(9)` API 透明地处理该机制：如果在队列分配期间传递非零的 `vqai_maxindirsz`，内核可以使用间接描述符；如果传递零，则不能。
 
-### A Deeper Look at the Ring Layout
+### 深入了解环布局
 
-For a reader who wants to know what `virtqueue(9)` is hiding, here is a brief tour of the underlying layout. The details matter only when you are debugging a ring-layer issue; you can skip this subsection on first reading.
+对于想知道 `virtqueue(9)` 隐藏了什么的读者，这里是底层布局的简要介绍。细节只在调试环层问题时重要；你可以在首次阅读时跳过此小节。
 
-Each virtqueue has three main structures in memory, allocated contiguously (with alignment requirements that differ slightly between legacy and modern VirtIO).
+每个虚拟队列在内存中有三个主要结构，连续分配（对齐要求在传统和现代 VirtIO 之间略有不同）。
 
-The **descriptor table** is an array of `struct vring_desc`, one entry per descriptor slot:
+**描述符表** 是一个 `struct vring_desc` 数组，每个描述符槽位对应一个条目：
 
 ```c
 struct vring_desc {
@@ -567,9 +567,9 @@ struct vring_desc {
 };
 ```
 
-The descriptor table has as many entries as the queue size (typically 128 or 256). Unused descriptors are linked into a free list maintained by the driver; used descriptors form chains that describe single transactions.
+描述符表有与队列大小相同数量的条目（通常为 128 或 256）。未使用的描述符被链接到由驱动程序维护的空闲列表中；已使用的描述符形成描述单个事务的链。
 
-The **available ring** is what the driver writes and the device reads:
+**可用环**是驱动程序写入、设备读取的部分：
 
 ```c
 struct vring_avail {
@@ -580,9 +580,9 @@ struct vring_avail {
 };
 ```
 
-When the driver enqueues a new transaction, it picks a chain of descriptors from the free list, fills them in, places the head descriptor's index into `ring[idx % QUEUE_SIZE]`, and then increments `idx`. The increment uses a release-style memory barrier so that the device sees the new `ring` entry before it sees the new `idx`.
+当驱动程序入队一个新事务时，它从空闲列表中选取一个描述符链，填充它们，将头描述符的索引放入 `ring[idx % QUEUE_SIZE]`，然后递增 `idx`。递增使用释放式内存屏障，使设备在看到新的 `idx` 之前先看到新的 `ring` 条目。
 
-The **used ring** is what the device writes and the driver reads:
+**已用环**是设备写入、驱动程序读取的部分：
 
 ```c
 struct vring_used_elem {
@@ -598,95 +598,95 @@ struct vring_used {
 };
 ```
 
-When the device finishes a transaction, it writes an entry to `ring[idx % QUEUE_SIZE]` with the head index and the byte count, then increments `idx`. The driver observes the increment and dequeues accordingly.
+当设备完成一个事务时，它向 `ring[idx % QUEUE_SIZE]` 写入一个条目，包含头索引和字节计数，然后递增 `idx`。驱动程序观察到递增并相应地出队。
 
-The subtlety of the format is the synchronisation. Guest and host are not synchronising through locks (they do not share locks); they are synchronising through ordered writes and atomic index updates. The spec is careful to specify the memory barriers on each side, and the `virtqueue(9)` implementation places them correctly. Getting the barriers wrong is a common bug in hand-rolled ring implementations; that is one reason to use the framework.
+格式的微妙之处在于同步。客户机和主机不是通过锁来同步的（它们不共享锁）；它们通过有序写入和原子索引更新来同步。规范仔细地指定了每一侧的内存屏障，`virtqueue(9)` 实现正确地放置了它们。在手写环实现中弄错屏障是一个常见的 bug；这就是使用框架的原因之一。
 
-### Event Indexes: A Performance Detail
+### 事件索引：一个性能细节
 
-The `VIRTIO_F_RING_EVENT_IDX` feature allows both sides to suppress notifications when they are not needed. The mechanism is two extra fields, `used_event` in the available ring and `avail_event` in the used ring. Each side writes a value saying "interrupt me only when the other side's producer index passes this value".
+`VIRTIO_F_RING_EVENT_IDX` 特性允许双方在不需要时抑制通知。该机制是两个额外字段：可用环中的 `used_event` 和已用环中的 `avail_event`。每一方写入一个值，表示"仅当对方的生产者索引超过此值时才中断我"。
 
-The practical effect is that a driver producing requests at a high rate does not cause the host to be interrupted on every enqueue; instead, the host reads the current `used_event` and only delivers a notification when the producer index catches up. Similarly, a device completing transactions at a high rate does not cause the guest to be interrupted on every dequeue; the guest sets `avail_event` to suppress notifications it does not need.
+实际效果是，以高速率产生请求的驱动程序不会导致主机在每次入队时都被中断；相反，主机读取当前的 `used_event`，只在水者索引追上时才投递通知。类似地，以高速率完成事务的设备不会导致客户机在每次出队时都被中断；客户机设置 `avail_event` 来抑制它不需要的通知。
 
-This optimisation halves the notification overhead in worst-case workloads. It is a feature that most modern VirtIO drivers negotiate, and the `virtqueue(9)` API handles it transparently. As a driver author, you simply negotiate the feature and do not have to think about the details.
+这种优化在最坏情况工作负载中将通知开销减半。这是大多数现代 VirtIO 驱动程序协商的特性，`virtqueue(9)` API 透明地处理它。作为驱动程序作者，你只需协商该特性，不必考虑细节。
 
-### Legacy Versus Modern VirtIO
+### 传统与现代 VirtIO
 
-VirtIO has two major versions. Legacy (sometimes called "virtio 0.9") was the original specification; modern ("virtio 1.0" and up) came later with a cleaner design. FreeBSD supports both.
+VirtIO 有两个主要版本。传统版本（有时称为"virtio 0.9"）是原始规范；现代版本（"virtio 1.0"及以上）后来带着更简洁的设计出现。FreeBSD 两者都支持。
 
-The practical differences are in configuration-space layout, byte order, and a few feature-bit semantics. Legacy VirtIO puts configuration in native byte order; modern VirtIO is always little-endian. Legacy mandates some fields in a specific position; modern uses capability structures to describe the layout flexibly. Legacy defines a specific set of feature bits below bit 32; modern extends them above bit 32.
+实际差异在于配置空间布局、字节序和一些特性位语义。传统 VirtIO 以本机字节序放置配置；现代 VirtIO 始终为小端序。传统模式要求某些字段在特定位置；现代模式使用能力结构来灵活描述布局。传统模式在第32位以下定义特定的特性位集；现代模式将它们扩展到第32位以上。
 
-For driver authors, the framework hides most of these differences. Negotiating `VIRTIO_F_VERSION_1` puts the driver in modern mode; not negotiating it puts the driver in legacy mode. The `virtio_with_feature` helper checks the negotiated state. As long as your driver follows the `virtqueue(9)` API and uses `virtio_read_device_config` rather than direct configuration-space access, you can ignore the legacy/modern distinction almost entirely.
+对于驱动程序作者来说，框架隐藏了大部分这些差异。协商 `VIRTIO_F_VERSION_1` 将驱动程序置于现代模式；不协商它将驱动程序置于传统模式。`virtio_with_feature` 辅助函数检查协商状态。只要你的驱动程序遵循 `virtqueue(9)` API 并使用 `virtio_read_device_config` 而非直接配置空间访问，你几乎可以完全忽略传统/现代的区别。
 
-The one place where the distinction leaks is in how configuration-space fields are accessed. Legacy VirtIO uses `virtio_read_device_config` with a size argument and assumes native byte order; modern VirtIO assumes little-endian and uses helpers that byte-swap if the host is big-endian. The framework handles this, but a driver that does configuration-space access by hand (rather than through the framework) would have to be aware.
+区别泄漏的唯一地方是配置空间字段的访问方式。传统 VirtIO 使用带大小参数的 `virtio_read_device_config` 并假设本机字节序；现代 VirtIO 假设小端序，并在主机为大端序时使用字节交换辅助函数。框架处理了这一点，但手动进行配置空间访问（而非通过框架）的驱动程序需要意识到这一点。
 
-### Feature Bits Worth Knowing
+### 值得了解的特性位
 
-Each VirtIO device type has its own set of feature bits. A few are worth knowing in the abstract, because they show up in many drivers.
+每种 VirtIO 设备类型都有自己的特性位集。有几个在抽象层面值得了解，因为它们出现在许多驱动程序中。
 
-- `VIRTIO_F_VERSION_1` indicates that the device supports the modern, version 1 of the VirtIO specification. Almost all modern drivers negotiate this bit.
-- `VIRTIO_F_RING_EVENT_IDX` enables a more efficient form of interrupt suppression. When both sides support it, notifications and interrupts are only sent when they are actually useful, reducing overhead under load.
-- `VIRTIO_F_RING_INDIRECT_DESC`, already mentioned, allows indirect descriptors.
-- `VIRTIO_F_ANY_LAYOUT` relaxes the rules about how descriptors are ordered in a chain.
+- `VIRTIO_F_VERSION_1` 表示设备支持现代的 VirtIO 规范版本 1。几乎所有现代驱动程序都协商此位。
+- `VIRTIO_F_RING_EVENT_IDX` 启用更高效的中断抑制形式。当双方都支持时，通知和中断只在实际有用时才发送，减少了负载下的开销。
+- `VIRTIO_F_RING_INDIRECT_DESC`，前面已提到，允许间接描述符。
+- `VIRTIO_F_ANY_LAYOUT` 放宽了描述符在链中如何排序的规则。
 
-Each device type has its own set on top of these. For a block device, `VIRTIO_BLK_F_WCE` indicates that the device has a write cache; `VIRTIO_BLK_F_FLUSH` provides a flush command. For a network device, `VIRTIO_NET_F_CSUM` advertises offloaded checksum calculation. For entropy, there are no device-specific feature bits.
+每种设备类型在这些之上有自己的集合。对于块设备，`VIRTIO_BLK_F_WCE` 表示设备有写缓存；`VIRTIO_BLK_F_FLUSH` 提供刷新命令。对于网络设备，`VIRTIO_NET_F_CSUM` 通告卸载的校验和计算。对于熵设备，没有设备特定的特性位。
 
-The general rule is: read the feature bits the device advertises, decide which the driver can use, ignore the others. Negotiation is not about "demanding" features; it is about agreeing on an intersection.
+通用规则是：读取设备通告的特性位，决定驱动程序可以使用哪些，忽略其他的。协商不是"要求"特性；而是就交集达成一致。
 
-### A Second Example: Structure of virtio_net
+### 第二个示例：virtio_net 的结构
 
-It is worth a brief look at a larger VirtIO driver to see how the skeleton scales. The network driver `if_vtnet` lives in `/usr/src/sys/dev/virtio/network/if_vtnet.c`. It is roughly ten times the length of `virtio_random`, but the extra size comes from features and completeness, not from complexity in the core VirtIO interaction. Knowing how the scale-up works makes future reading more productive.
+值得简要查看一个更大的 VirtIO 驱动程序，以了解骨架如何扩展。网络驱动程序 `if_vtnet` 位于 `/usr/src/sys/dev/virtio/network/if_vtnet.c`。 它大约是 `virtio_random` 的十倍長度，但额外的篇幅来自特性和完整性，而不是核心 VirtIO 交互中的复杂性。了解这种扩展方式使未来的阅读更加有效率。
 
-`if_vtnet` begins, like every VirtIO driver, with a module registration and a `device_method_t` table. The methods table is longer because `if_vtnet` hooks into the `ifnet(9)` framework; you will see `DEVMETHOD` entries for `device_probe`, `device_attach`, `device_detach`, `device_suspend`, `device_resume`, and `device_shutdown`, each implemented by the driver. The `VIRTIO_DRIVER_MODULE` macro at the bottom of the file registers the driver for both PCI and MMIO transports, exactly as `virtio_random` does.
+`if_vtnet` 和每个 VirtIO 驱动程序一样，以模块注册和 `device_method_t` 表开始。方法表更长，因为 `if_vtnet` 挂钩到 `ifnet(9)` 框架；你会看到 `device_probe`、`device_attach`、`device_detach`、`device_suspend`、`device_resume` 和 `device_shutdown` 的 `DEVMETHOD` 条目，每个都由驱动程序实现。文件底部的 `VIRTIO_DRIVER_MODULE` 宏为 PCI 和 MMIO 传输注册驱动程序，与 `virtio_random` 完全一样。
 
-The softc, `struct vtnet_softc`, is much larger than `vtrnd_softc`, but its role is the same: hold the state that the driver needs to serve the device. Notable additions include a pointer to the kernel's `ifnet` structure (`vtnet_ifp`), an array of receive queues (`vtnet_rxqs`), an array of transmit queues (`vtnet_txqs`), a feature mask, a cached MAC address, and statistics counters. Each queue structure contains its own virtqueue pointer, softc back-reference, taskqueue context, and a number of bookkeeping fields. A single multi-queue virtio-net device can have tens of virtqueues; each receive/transmit pair represents one queue pair that can run in parallel with the others.
+softc，即 `struct vtnet_softc`，比 `vtrnd_softc` 大得多，但它的作用相同：保存驱动程序为设备服务所需的状态。值得注意的添加包括指向内核 `ifnet` 结构的指针（`vtnet_ifp`）、接收队列数组（`vtnet_rxqs`）、发送队列数组（`vtnet_txqs`）、特性掩码、缓存的 MAC 地址和统计计数器。每个队列结构包含自己的虚拟队列指针、softc 反向引用、任务队列上下文和许多簿记字段。单个多队列 virtio-net 设备可以有数十个虚拟队列；每个接收/发送对代表一个可以与其他对并行运行的队列对。
 
-The probe function uses the same `VIRTIO_SIMPLE_PROBE` pattern as `virtio_random`, but matching on `VIRTIO_ID_NETWORK` (which is 1). The attach function is substantial: it reads feature bits, negotiates them, allocates the queues, reads the device's MAC address from configuration space (`virtio_read_device_config`), initialises the `ifnet`, registers with the network stack, and sets up callouts for link-status polling. Each of these steps is a small function of its own, and the flow follows the same "negotiate, allocate, register, start" rhythm that `virtio_random` illustrates.
+探测函数使用与 `virtio_random` 相同的 `VIRTIO_SIMPLE_PROBE` 模式，但匹配的是 `VIRTIO_ID_NETWORK`（值为 1）。附加函数内容丰富：它读取特性位，进行协商，分配队列，从配置空间读取设备的 MAC 地址（`virtio_read_device_config`），初始化 `ifnet`，向网络协议栈注册，并设置用于链路状态轮询的 callout。这些步骤各自是一个小函数，流程遵循与 `virtio_random` 所示相同的“协商、分配、注册、启动”节奏。
 
-The receive path uses `virtqueue_dequeue` in a loop to drain completed packets. For each completed descriptor, the driver reads the packet header (`virtio_net_hdr`) that the device wrote to the first few bytes of the buffer, extracts metadata such as checksum-status flags and GSO segment sizes, and passes the packet up to `if_input`. If the packet is the last one in a batch, the driver re-posts fresh receive buffers to keep the queue primed for the next round.
+接收路径在循环中使用 `virtqueue_dequeue` 排空已完成的包。对于每个完成的描述符，驱动程序读取设备写入缓冲区前几字节的包头（`virtio_net_hdr`），提取校验和状态标志和 GSO 段大小等元数据，然后将包向上传递给 `if_input`。如果该包是一批中的最后一个，驱动程序重新投递新的接收缓冲区，使队列保持就绪状态以迎接下一轮。
 
-The transmit path uses `virtqueue_enqueue` with a scatter-gather list covering both the packet header and the packet body. The cookie is the `mbuf(9)` pointer, so the transmit completion callback can free the mbuf when the device is done with it. If the queue becomes full, the driver stops accepting outbound packets until some space frees up, which is standard `ifnet` driver discipline.
+发送路径使用 `virtqueue_enqueue` 配合覆盖包头和包体的分散-聚集列表。cookie 是 `mbuf(9)` 指针，这样发送完成回调可以在设备处理完毕后释放 mbuf。如果队列变满，驱动程序停止接受出站包直到有空间释放，这是标准的 `ifnet` 驱动程序规范。
 
-Feature negotiation in `if_vtnet` is interesting because the feature set is large. Features like `VIRTIO_NET_F_CSUM` (transmit checksum offload), `VIRTIO_NET_F_GUEST_CSUM` (receive checksum offload), `VIRTIO_NET_F_GSO` (generic segmentation offload), and `VIRTIO_NET_F_MRG_RXBUF` (merged receive buffers) each change how the driver programs the virtqueues and how it interprets incoming data. The driver's feature-negotiation function picks a set that the driver implements, offers it for negotiation, and then queries the negotiated mask to decide which code paths to enable.
+`if_vtnet` 中的特性协商很有趣，因为特性集很大。像 `VIRTIO_NET_F_CSUM`（发送校验和卸载）、`VIRTIO_NET_F_GUEST_CSUM`（接收校验和卸载）、`VIRTIO_NET_F_GSO`（通用分段卸载）和 `VIRTIO_NET_F_MRG_RXBUF`（合并接收缓冲区）这样的特性各自改变了驱动程序编程虚拟队列的方式和解释传入数据的方式。驱动程序的特性协商函数选择一个驱动程序实现的集合，提供它进行协商，然后查询协商后的掩码来决定启用哪些代码路径。
 
-The lesson from `if_vtnet` is that a VirtIO driver scales through feature diversity and queue multiplicity, not through a fundamentally different architecture. If you understand `virtio_random`'s lifecycle, you understand `if_vtnet`'s lifecycle; the extra code is in feature-specific sub-paths and in `ifnet`-specific hooking. When the time comes to read `if_vtnet.c`, focus on `vtnet_attach` first, then walk the feature-negotiation function, then look at `vtnet_rxq_eof` (receive) and `vtnet_txq_encap` (transmit). Those four functions explain 80% of the driver.
+从 `if_vtnet` 得到的教训是，VirtIO 驱动程序通过特性多样性和队列多重性来扩展，而不是通过根本不同的架构。如果你理解 `virtio_random` 的生命周期，你就理解 `if_vtnet` 的生命周期；额外的代码在于特性特定的子路径和 `ifnet` 特定的挂钩。当需要阅读 `if_vtnet.c` 时，首先关注 `vtnet_attach`，然后遍历特性协商函数，再看 `vtnet_rxq_eof`（接收）和 `vtnet_txq_encap`（发送）。这四个函数解释了驱动程序 80% 的内容。
 
-### A Third Example for Intuition: virtio_blk
+### 第三个示例：直观理解 virtio_blk
 
-`virtio_blk`, in `/usr/src/sys/dev/virtio/block/virtio_blk.c`, is shorter than `if_vtnet` but longer than `virtio_random`. It illustrates a third common pattern: a driver that exposes a block-oriented device rather than a stream-oriented one.
+`virtio_blk`，位于 `/usr/src/sys/dev/virtio/block/virtio_blk.c`，比 `if_vtnet` 短但比 `virtio_random` 长。它演示了第三种常见模式：一个暴露面向块设备而非面向流设备的驱动程序。
 
-The softc of `vtblk` contains a virtqueue, a pool of request structures, statistics, and the geometry information read from the device's configuration space. The probe and attach follow the familiar pattern. The interesting part is how requests are structured.
+`vtblk` 的 softc 包含一个虚拟队列、一组请求结构池、统计信息以及从设备配置空间读取的几何信息。探测和附加遵循熟悉的模式。有趣的部分是请求的结构方式。
 
-For every block I/O operation, the driver builds a three-segment descriptor chain: a header descriptor (containing the operation type and sector number), zero or more data descriptors (the actual payload, which is writable from the device's perspective for reads and readable from the device for writes), and a status descriptor (where the device writes a single-byte status code). The header and status are small structures; the data segments are whatever the `bio(9)` request brought in.
+对于每个块 I/O 操作，驱动程序构建一个三段描述符链：一个头部描述符（包含操作类型和扇区号）、零个或多个数据描述符（实际载荷，从设备角度看读取时可写、写入时可读），以及一个状态描述符（设备在其中写入一个单字节状态码）。头部和状态是小型结构；数据段则是 `bio(9)` 请求带来的内容。
 
-This three-segment layout is a common VirtIO idiom. If you see a driver building a chain that starts with a header and ends with a status, you are looking at a request-response device. `virtio_scsi` uses the same layout, as does `virtio_console` (for control messages). Recognising the pattern speeds up reading.
+这种三段布局是常见的 VirtIO 惯用法。如果你看到一个驱动程序构建一个以头部开始、以状态结束的链，你看到的就是一个请求-响应设备。`virtio_scsi` 使用相同的布局，`virtio_console`（用于控制消息）也是如此。识别这种模式可以加速阅读。
 
-### Common Mistakes When Reading VirtIO Code
+### 阅读 VirtIO 代码时的常见错误
 
-When reading any VirtIO driver for the first time, a few patterns can confuse a reader who is not expecting them.
+首次阅读任何 VirtIO 驱动程序时，一些模式可能会让没有心理准备的读者感到困惑。
 
-The first is the mix of probe patterns. Some drivers use `VIRTIO_SIMPLE_PROBE`; others use their own probe functions that do more complex feature checks. Both are legitimate, and the former is a shorthand for a common case.
+第一个是探测模式的混合。一些驱动程序使用 `VIRTIO_SIMPLE_PROBE`；其他的使用自己的探测函数做更复杂的特性检查。两者都是合理的，前者是常见情况的简写。
 
-The second is the module registration style. `VIRTIO_DRIVER_MODULE` is a macro that expands to two `DRIVER_MODULE` calls, and reading the macro definition (in `/usr/src/sys/dev/virtio/virtio.h`) makes it clear. Without the macro, you might wonder why the driver is not calling `DRIVER_MODULE` explicitly; with it, you see that it is, once per transport.
+第二个是模块注册风格。`VIRTIO_DRIVER_MODULE` 是一个宏，它展开为两个 `DRIVER_MODULE` 调用，阅读宏定义（在 `/usr/src/sys/dev/virtio/virtio.h` 中）就能看清。没有这个宏，你可能会想为什么驱动程序没有显式调用 `DRIVER_MODULE`；有了它，你会看到它确实调用了，每种传输一次。
 
-The third is the distinction between the VirtIO core functions (`virtio_*`) and the virtqueue functions (`virtqueue_*`). The core functions operate on the whole device; the virtqueue functions operate on a single queue. A driver usually uses both, and the namespace prefix is the hint.
+第三个是 VirtIO 核心函数（`virtio_*`）和虚拟队列函数（`virtqueue_*`）之间的区别。核心函数操作整个设备；虚拟队列函数操作单个队列。驱动程序通常同时使用两者，命名空间前缀就是提示。
 
-The fourth is the polling-versus-interrupt distinction. A driver that polls (like `virtio_random`) passes `NULL` as the callback in `VQ_ALLOC_INFO_INIT` and calls `virtqueue_poll` to wait for completions. A driver that uses interrupts (like `if_vtnet`) passes a callback and lets the kernel's interrupt infrastructure schedule it. Both are legitimate; the choice depends on the workload's latency sensitivity and on whether the driver can afford to block.
+第四个是轮询与中断的区别。轮询的驱动程序（如 `virtio_random`）在 `VQ_ALLOC_INFO_INIT` 中将 `NULL` 作为回调传递，并调用 `virtqueue_poll` 等待完成。使用中断的驱动程序（如 `if_vtnet`）传递一个回调，让内核的中断基础设施来调度它。两者都是合理的；选择取决于工作负载的延迟敏感性和驱动程序是否可以承受阻塞。
 
 ### 总结
 
-This has been a long section, and deliberately so. VirtIO is dense, and its vocabulary is the foundation for most of the interesting work a modern guest-driver author does. You now know that a VirtIO device has a transport, a type, a feature mask, a status, a configuration space, and a set of virtqueues; that the virtqueues are shared rings with separate descriptor, available, and used components; that `virtqueue(9)` abstracts the ring mechanics behind a small API of enqueue, dequeue, notify, and poll; that feature negotiation is the mechanism for forward and backward compatibility; and that the smallest FreeBSD VirtIO driver is `virtio_random`, under four hundred lines of code that illustrate the whole skeleton. You have also seen how larger VirtIO drivers like `if_vtnet` and `virtio_blk` are structured around the same skeleton, scaled up with feature-specific code.
+这是一个很长的节，而且是故意的。VirtIO 内容密集，其词汇是现代客户驱动程序作者所做大多数有趣工作的基础。你现在知道 VirtIO 设备有传输层、类型、特性掩码、状态、配置空间和一组虚拟队列；虚拟队列是共享环，有独立的描述符、可用和已用组件；`virtqueue(9)` 将环机制抽象在入队、出队、通知和轮询的小型 API 之后；特性协商是向前和向后兼容的机制；最小的 FreeBSD VirtIO 驱动程序是 `virtio_random`，不到四百行代码展示了完整的骨架。你也看到了更大的 VirtIO 驱动程序如 `if_vtnet` 和 `virtio_blk` 如何围绕相同的骨架构建，通过特性特定的代码进行扩展。
 
-Section 4 takes a different turn. Now that you know what a guest driver is, we consider the question: how does the driver know it is in a guest in the first place?
+第4节转向不同的方向。现在你知道了什么是客户驱动程序，我们来考虑这个问题：驱动程序如何首先知道它在一个客户机中？
 
 ## 第4节：虚拟机监控程序检测与环境感知的驱动程序行为
-There are legitimate reasons for a driver to know whether it is running inside a virtual machine. A driver that is inclined to use an expensive hardware counter may skip it on a hypervisor where the counter is known to be unreliable. A driver that polls a hardware register in a tight loop may tune its polling interval differently under virtualisation, because each poll becomes a hypervisor exit. A driver that emits a warning about a suspicious interrupt rate may suppress the warning when running in a cloud where background noise is normal. A few FreeBSD drivers in the tree use this kind of adaptation.
+驱动程序知道它是否在虚拟机内运行是有正当理由的。一个倾向于使用昂贵硬件计数器的驱动程序可以在已知计数器不可靠的虚拟机监控程序上跳过它。一个在紧密循环中轮询硬件寄存器的驱动程序可以在虚拟化下以不同方式调整其轮询间隔，因为每次轮询都变成一次虚拟机监控程序退出。一个发出可疑中断速率警告的驱动程序可以在云环境中运行时抑制该警告，因为云环境中的背景噪声是正常的。FreeBSD 源代码树中有一些驱动程序使用这种适应性。
 
-There are also illegitimate reasons. A driver that tries to behave differently to "hide" something from a hypervisor is building anti-debugging logic, which has its place in anti-tamper software but has none in a general-purpose driver. A driver that branches on the exact hypervisor brand to gain performance is building fragile code whose behaviour will drift as hypervisors evolve. We will focus on the legitimate uses.
+也有不正当的理由。一个试图以不同方式行为来向虚拟机监控程序"隐藏"某些东西的驱动程序是在构建反调试逻辑，这在反篡改软件中有其位置，但在通用驱动程序中没有。一个基于确切虚拟机监控程序品牌分支以获得性能的驱动程序是在构建脆弱的代码，其行为会随着虚拟机监控程序的演进而偏移。我们将专注于正当的用途。
 
-### The `vm_guest` Global
+### `vm_guest` 全局变量
 
-The FreeBSD kernel exposes a single global variable, `vm_guest`, which records the hypervisor it detected at boot. The variable is declared in `/usr/src/sys/sys/systm.h`:
+FreeBSD 内核暴露一个单一的全局变量 `vm_guest`，它记录启动时检测到的虚拟机监控程序。该变量在 `/usr/src/sys/sys/systm.h` 中声明：
 
 ```c
 extern int vm_guest;
@@ -706,35 +706,35 @@ enum VM_GUEST {
 };
 ```
 
-The values are self-explanatory. `VM_GUEST_NO` means the kernel is running on bare metal; the other values identify specific hypervisors. `VM_GUEST_VM` is a fallback for "a virtual machine of unknown type," when the kernel could tell it was virtualised but could not pin down which hypervisor.
+这些值是不言自明的。`VM_GUEST_NO` 表示内核运行在裸金属上；其他值标识特定的虚拟机监控程序。`VM_GUEST_VM` 是"未知类型的虚拟机"的回退值，当内核能检测到虚拟化但无法确定是哪个虚拟机监控程序时使用。
 
-The corresponding sysctl is `kern.vm_guest`, which yields the human-readable form of the same information. The string values mirror the enum: "none", "generic", "xen", "hv", "vmware", "kvm", "bhyve", "vbox", "parallels", "nvmm". You can query it from the shell:
+相应的 sysctl 是 `kern.vm_guest`，它产生相同信息的可读形式。字符串值与枚举对应："none"、"generic"、"xen"、"hv"、"vmware"、"kvm"、"bhyve"、"vbox"、"parallels"、"nvmm"。你可以从 shell 查询它：
 
 ```sh
 sysctl kern.vm_guest
 ```
 
-On a bare-metal FreeBSD machine you will see `none`. On a `bhyve(8)` guest, you will see `bhyve`. On a VirtualBox guest, `vbox`. And so on.
+在裸金属 FreeBSD 机器上你会看到 `none`。在 `bhyve(8)` 客户机上你会看到 `bhyve`。在 VirtualBox 客户机上看到 `vbox`。以此类推。
 
-### How the Detection Works
+### 检测如何工作
 
-The detection happens early in boot, on architectures where hypervisor presence is detectable. On amd64, the kernel examines the CPUID leaf for a hypervisor present bit and then probes specific leaves associated with each hypervisor brand. The code lives in `/usr/src/sys/x86/x86/identcpu.c`, in functions named `identify_hypervisor()` and `identify_hypervisor_cpuid_base()`. On arm64, a similar mechanism exists through firmware interfaces.
+检测在启动早期进行，在可以检测虚拟机监控程序存在的架构上。在 amd64 上，内核检查 CPUID 叶的虚拟机监控程序存在位，然后探测与每个虚拟机监控程序品牌关联的特定叶。代码位于 `/usr/src/sys/x86/x86/identcpu.c`，在名为 `identify_hypervisor()` 和 `identify_hypervisor_cpuid_base()` 的函数中。在 arm64 上，通过固件接口存在类似的机制。
 
-The driver author does not need to care about the detection code. What matters is that by the time your driver's `attach()` runs, `vm_guest` has been set to its final value.
+驱动程序作者不需要关心检测代码。重要的是，当你的驱动程序的 `attach()` 运行时，`vm_guest` 已经被设置为其最终值。
 
-### When to Consult `vm_guest`
+### 何时查询 `vm_guest`
 
-Consulting `vm_guest` is appropriate in a driver when the driver's correctness or performance depends on knowing the runtime environment. A few real examples from the tree illustrate the range:
+当驱动程序的正确性或性能取决于了解运行时环境时，在驱动程序中查询 `vm_guest` 是合适的。源代码树中的一些实际例子说明了范围：
 
-- Some performance counters in `/usr/src/sys/kern/kern_resource.c` adjust their behaviour when `vm_guest == VM_GUEST_NO`, because the kernel assumes a bare-metal cost model is accurate there.
-- Some time-related code in the amd64 tree may not use certain timing primitives under specific hypervisors where those primitives are known to be unreliable.
-- Some informational messages in driver probe paths are suppressed under virtualisation to avoid confusing users who expect the driver to behave "differently" in a VM.
+- `/usr/src/sys/kern/kern_resource.c` 中的一些性能计数器在 `vm_guest == VM_GUEST_NO` 时调整其行为，因为内核假设裸金属成本模型在那里是准确的。
+- amd64 源代码树中的一些时间相关代码可能在已知某些计时原语不可靠的特定虚拟机监控程序下不使用这些原语。
+- 驱动程序探测路径中的一些信息性消息在虚拟化下被抑制，以避免让期望驱动程序在 VM 中"表现不同"的用户感到困惑。
 
-A driver you write should use `vm_guest` sparingly. A common anti-pattern is to test for `VM_GUEST_VM` as a blanket switch ("if virtualised, do X"), which is usually a sign that the driver has a bug on real hardware that it is papering over. Prefer to handle the underlying cause directly, and use `vm_guest` only when the dependency is genuinely on the environment rather than on a specific hardware quirk.
+你编写的驱动程序应谨慎使用 `vm_guest`。一个常见的反模式是将 `VM_GUEST_VM` 作为通用开关测试（"如果虚拟化了，就做 X"），这通常表明驱动程序在真实硬件上有一个它正在掩盖的 bug。更倾向于直接处理根本原因，只在依赖确实在于环境而非特定硬件怪癖时使用 `vm_guest`。
 
-### A Usage Example
+### 使用示例
 
-Suppose your driver has a sysctl that controls how aggressively it polls a hardware register. The tight loop is fine on bare metal, where each poll is cheap, but under virtualisation each poll costs a hypervisor exit, which is expensive. You might want the default polling interval to be larger under virtualisation:
+假设你的驱动程序有一个 sysctl 控制它轮询硬件寄存器的激进程度。紧密循环在裸金属上没问题，每次轮询很廉价，但在虚拟化下每次轮询都要付出虚拟机监控程序退出的代价，这很昂贵。你可能希望虚拟化下的默认轮询间隔更大：
 
 ```c
 #include <sys/systm.h>
@@ -749,9 +749,9 @@ my_poll_default(void)
 }
 ```
 
-This is a legitimate use of `vm_guest`: the driver is choosing a sensible default based on a property of the environment that genuinely affects its performance characteristics. The value remains overridable by a sysctl for users who know better than the default.
+这是 `vm_guest` 的正当使用：驱动程序基于真正影响其性能特征的环境属性选择合理的默认值。该值仍然可以被 sysctl 覆盖，供比默认值更了解情况的用户使用。
 
-Contrast that with an illegitimate use:
+与不正当使用对比：
 
 ```c
 /* DO NOT DO THIS */
@@ -761,11 +761,11 @@ if (vm_guest == VM_GUEST_VMWARE) {
 }
 ```
 
-Here the driver is branching on a specific hypervisor brand to work around a perceived bug. This is fragile for three reasons. The specific behaviour of VMware may change in a later release; the same issue may apply to KVM or Parallels without the code noticing; and the driver now has a maintenance burden tied to a third-party product. A better approach is to address the root cause (the coalescing code is fragile, so either fix it or expose a sysctl), not the symptom (VMware happens to trigger it).
+这里驱动程序基于特定虚拟机监控程序品牌分支以解决一个感知到的 bug。这很脆弱，原因有三。VMware 的特定行为可能在后续版本中改变；相同的问题可能也适用于 KVM 或 Parallels 而代码没有注意到；驱动程序现在承担了与第三方产品绑定的维护负担。更好的方法是解决根本原因（合并代码很脆弱，所以要么修复它要么暴露一个 sysctl），而不是解决症状（VMware 恰好触发了它）。
 
-### The Sysctl Path
+### Sysctl 路径
 
-For user-space tools and scripts, the `kern.vm_guest` sysctl is a better interface than poking at `/dev/mem` or similar. A small shell script can decide whether to run certain tests based on the environment:
+对于用户空间工具和脚本，`kern.vm_guest` sysctl 是比探查 `/dev/mem` 或类似方式更好的接口。一个小型 shell 脚本可以根据环境决定是否运行某些测试：
 
 ```sh
 if [ "$(sysctl -n kern.vm_guest)" = "none" ]; then
@@ -776,142 +776,142 @@ else
 fi
 ```
 
-This is how the FreeBSD test suite decides which tests to run in which environment. Reusing the same variable from inside a driver keeps the whole system consistent.
+这就是 FreeBSD 测试套件决定在哪个环境中运行哪些测试的方式。从驱动程序内部重用相同的变量保持整个系统的一致性。
 
-### Interaction with Subsystems
+### 与子系统的交互
 
-A few FreeBSD subsystems adapt their behaviour based on `vm_guest` automatically, and a driver author should be aware of the adaptations without having to touch them.
+一些 FreeBSD 子系统基于 `vm_guest` 自动调整其行为，驱动程序作者应该意识到这些调整而不需要触碰它们。
 
-The timecounter selection code in `/usr/src/sys/kern/kern_tc.c` considers `vm_guest` when picking a default timecounter, because some hypervisors' TSC implementations are unreliable across guest migrations. The driver does not need to care; the kernel simply picks a safer timecounter.
+`/usr/src/sys/kern/kern_tc.c` 中的时间计数器选择代码在选择默认时间计数器时考虑 `vm_guest`，因为一些虚拟机监控程序的 TSC 实现在客户机迁移之间不可靠。驱动程序不需要关心；内核只是选择一个更安全的时间计数器。
 
-The VirtIO transport drivers (`virtio_pci.c` and `virtio_mmio.c`) do not branch on `vm_guest` directly, because they are already guests by their own probe path. They trust that if they have a device at all, they are running in an environment that emulates VirtIO.
+VirtIO 传输驱动程序（`virtio_pci.c` 和 `virtio_mmio.c`）不直接基于 `vm_guest` 分支，因为它们通过自己的探测路径已经是客户机了。它们相信如果它们有设备，就是运行在模拟 VirtIO 的环境中。
 
-Some network driver code handles the case where GRO (generic receive offload) is known to interact badly with certain hypervisor configurations. These adaptations are not driver-by-driver decisions; they are made in the network stack based on observed characteristics.
+一些网络驱动程序代码处理 GRO（通用接收卸载）已知与某些虚拟机监控程序配置交互不良的情况。这些适应不是逐驱动程序的决策；它们是基于观察到的特征在网络栈中做出的。
 
-As an author of a single driver, your rule of thumb is: if you feel the urge to branch on `vm_guest`, ask yourself whether the issue belongs to the kernel's environment handling rather than to your driver. Usually it does.
+作为单个驱动程序的作者，你的经验法则是：如果你感到需要基于 `vm_guest` 分支，问问自己这个问题是否属于内核的环境处理而不是你的驱动程序。通常是的。
 
-### Detecting Within a VirtIO Driver
+### 在 VirtIO 驱动程序中检测
 
-A VirtIO driver, by definition, is running inside some kind of environment that speaks VirtIO. The driver does not usually need to know which specific hypervisor is backing the VirtIO device. That is one of VirtIO's virtues: it is environment-agnostic. The same `virtio_net` driver works under `bhyve`, under QEMU/KVM, under Google Cloud's backend, and under AWS Nitro, because all of them implement the same standard.
+VirtIO 驱动程序，根据定义，运行在某种支持 VirtIO 的环境中。驱动程序通常不需要知道是哪个特定虚拟机监控程序在支持 VirtIO 设备。这是 VirtIO 的优点之一：它是环境无关的。相同的 `virtio_net` 驱动程序在 `bhyve`、QEMU/KVM、Google Cloud 的后端和 AWS Nitro 下都能工作，因为它们都实现了相同的标准。
 
-There are two exceptions. One is when the driver hits a performance cliff that is hypervisor-specific, in which case `vm_guest` tells you which workaround to apply. The other is when the driver wants to print a diagnostic message that identifies the hypervisor by name. Both are rare.
+有两个例外。一个是当驱动程序遇到特定于虚拟机监控程序的性能悬崖时，在这种情况下 `vm_guest` 告诉你应用哪种变通方案。另一个是当驱动程序想要打印一条标识虚拟机监控程序名称的诊断消息时。两者都很罕见。
 
-### Detecting From the Host Side
+### 从主机侧检测
 
-A host-side driver (one that runs in the host, not in a guest) usually does not care about `vm_guest` at all, because the host is not virtualised by definition. The sysctl will return `none` on bare metal, and that is the expected case.
+主机侧驱动程序（运行在主机而非客户机中的驱动程序）通常完全不关心 `vm_guest`，因为根据定义主机没有虚拟化。sysctl 在裸金属上将返回 `none`，这是预期的情况。
 
-The one subtlety is when the host is itself a guest, as in nested virtualisation scenarios. A FreeBSD host inside a VMware ESXi VM, for example, will have `vm_guest = VM_GUEST_VMWARE`. A `bhyve(8)` running inside such a host will present guests that also see virtualisation, though they see the `bhyve` presentation rather than the VMware one. The chain of environments can go two or three levels deep in research and test setups. Do not assume a host is bare metal; if your driver has a host-versus-guest split, use the sysctl or the variable to distinguish.
+一个微妙之处是当主机本身是客户机时，比如在嵌套虚拟化场景中。例如，VMware ESXi VM 内的 FreeBSD 主机将具有 `vm_guest = VM_GUEST_VMWARE`。在这样主机内运行的 `bhyve(8)` 将呈现也看到虚拟化的客户机，尽管它们看到的是 `bhyve` 的呈现而非 VMware 的。环境链在研究和测试设置中可以深入两到三层。不要假设主机是裸金属；如果你的驱动程序有主机与客户机的区分，使用 sysctl 或变量来区分。
 
 ### 总结
 
-`vm_guest` is a small, quiet API that tells your driver, and user-space tools, about the environment. It is easy to use and easy to misuse. Use it to adapt sensible defaults, not to work around hypervisor-specific bugs. Use it to inform user-space decisions through the sysctl. Do not make your driver's behaviour depend on the exact hypervisor brand; doing so couples your code to a third-party product's version history, and that is a maintenance tax you do not want to pay.
+`vm_guest` 是一个小型、安静的 API，告诉你的驱动程序和用户空间工具关于环境的信息。它容易使用也容易误用。用它来调整合理的默认值，而不是解决特定虚拟机监控程序的 bug。用它通过 sysctl 来告知用户空间决策。不要让你的驱动程序行为依赖于确切的虚拟机监控程序品牌；这样做会将你的代码与第三方产品的版本历史耦合，那是你不想付出的维护税。
 
-Section 5 looks at the other side of virtualisation for FreeBSD: the host that runs the guests, and the tools and interfaces that a driver author should understand when running or cooperating with `bhyve(8)`.
+第5节审视 FreeBSD 虚拟化的另一面：运行客户机的主机，以及驱动程序作者在运行或配合 `bhyve(8)` 时应该理解的工具和接口。
 
 ## 第5节：bhyve、PCI 直通与主机端考量
-So far we have focused on what happens inside the guest. The guest is where most of the learning happens, because the guest is where most of the driver code lives. But FreeBSD has another role in the virtualisation story: it is also a hypervisor. `bhyve(8)` runs virtual machines, and understanding how `bhyve(8)` presents devices to its guests is useful both when you are the guest author (so you know what the host is doing) and when you are the host author (so you know how to share a real device with a guest).
+到目前为止我们关注的是客户机内部发生的事情。客户机是大部分学习发生的地方，因为客户机是大部分驱动程序代码所在的地方。但 FreeBSD 在虚拟化故事中还有另一个角色：它也是一个虚拟机监控程序。`bhyve(8)` 运行虚拟机，理解 `bhyve(8)` 如何向其客户机呈现设备是有用的，无论你是客户机作者（这样你知道主机在做什么）还是主机作者（这样你知道如何与客户机共享真实设备）。
 
-This section steps onto the host side. We will not go deep enough to write hypervisor code, because that is a topic of its own. We will go deep enough for you to understand what the host is doing, what the host-side knobs are, and what a driver author needs to know when cooperating with `bhyve(8)`.
+本节踏上主机侧。我们不会深入到编写虚拟机监控程序代码的程度，因为那是自己的主题。我们会深入到足以让你理解主机在做什么、主机侧有哪些旋钮，以及驱动程序作者在配合 `bhyve(8)` 时需要知道什么。
 
-### bhyve From the Driver Author's Perspective
+### 从驱动程序作者角度看 bhyve
 
-`bhyve(8)` is a type-2 hypervisor that runs on a FreeBSD host and uses hardware virtualisation extensions (Intel VT-x or AMD-V) to execute guest code directly on the CPU. It is implemented as a user-space program (`/usr/sbin/bhyve`) and a kernel module (`vmm.ko`). The kernel module handles the low-level virtualisation primitives: VM entry and exit, page table management for guest memory, virtual APIC emulation, and a handful of performance-critical device backends. The user-space program handles the rest: command-line parsing, emulated device backends that do not need to live in the kernel, VirtIO backends, and the main VCPU loop.
+`bhyve(8)` 是一个运行在 FreeBSD 主机上的二类虚拟机监控程序，使用硬件虚拟化扩展（Intel VT-x 或 AMD-V）直接在 CPU 上执行客户机代码。它实现为一个用户空间程序（`/usr/sbin/bhyve`）和一个内核模块（`vmm.ko`）。内核模块处理低级虚拟化原语：VM 进入和退出、客户机内存的页表管理、虚拟 APIC 模拟和少量性能关键的设备后端。用户空间程序处理其余部分：命令行解析、不需要驻留在内核中的模拟设备后端、VirtIO 后端和主 VCPU 循环。
 
-From a driver author's perspective, three things matter about `bhyve(8)`.
+从驱动程序作者的角度来看，关于 `bhyve(8)` 有三件事很重要。
 
-First, `bhyve(8)` is a FreeBSD program, so the same kernel that runs your driver might also be running `bhyve(8)` in user space. That means host-side resources (memory, CPU, network interfaces) can be competing with `bhyve(8)` for allocation. If your driver is running on a host that is also a hypervisor, you may want to think about NUMA placement, IRQ affinity, and similar concerns.
+首先，`bhyve(8)` 是一个 FreeBSD 程序，所以运行你的驱动程序的同一内核可能也在用户空间运行 `bhyve(8)`。这意味着主机侧资源（内存、CPU、网络接口）可能与 `bhyve(8)` 竞争分配。如果你的驱动程序运行在同时是虚拟机监控程序的主机上，你可能需要考虑 NUMA 放置、IRQ 亲和性等类似问题。
 
-Second, `bhyve(8)` uses a FreeBSD kernel interface called `vmm(4)` for its low-level needs. This interface is stable but niche; most driver authors never touch it directly. If you are writing a driver that needs to interact with virtual machines (for example, a driver that provides a paravirtual device to `bhyve(8)` guests from the host side), you would use `vmm(4)` or one of the higher-level libraries that wraps it.
+其次，`bhyve(8)` 使用一个名为 `vmm(4)` 的 FreeBSD 内核接口来满足其低级需求。该接口稳定但小众；大多数驱动程序作者从不直接触碰它。如果你正在编写需要与虚拟机交互的驱动程序（例如，从主机侧向 `bhyve(8)` 客户机提供半虚拟化设备的驱动程序），你将使用 `vmm(4)` 或封装它的更高级库之一。
 
-Third, and most importantly for this chapter, `bhyve(8)` can assign a real PCI device directly to a guest. This is called PCI passthrough, and it has important implications for driver authors on both sides of the fence.
+第三，也是本章最重要的，`bhyve(8)` 可以将真实 PCI 设备直接分配给客户机。这称为 PCI 直通，它对两边的驱动程序作者都有重要影响。
 
-### vmm(4): The Kernel Side of bhyve
+### vmm(4)：bhyve 的内核侧
 
-`vmm(4)` is a kernel module that exposes an interface for creating and managing virtual machines. It lives at `/usr/src/sys/amd64/vmm/` and related directories. The module is loaded on demand by `bhyvectl(8)` or `bhyve(8)`, and it exports a character device interface through `/dev/vmm/NAME` where `NAME` is the name of the virtual machine.
+`vmm(4)` 是一个暴露创建和管理虚拟机接口的内核模块。它位于 `/usr/src/sys/amd64/vmm/` 及相关目录。该模块由 `bhyvectl(8)` 或 `bhyve(8)` 按需加载，并通过 `/dev/vmm/NAME` 导出字符设备接口，其中 `NAME` 是虚拟机的名称。
 
-The `vmm(4)` interface is not something a beginner driver author needs to learn in depth. It is complex, specialised, and mostly of interest to people who are extending or modifying the hypervisor itself. For our purposes, it is enough to know the following. `vmm(4)` manages the virtual CPU state, including registers, page tables, and interrupt controllers. It hands off emulation of devices that are not performance-critical to user space, via a ring buffer interface. For devices that are performance-critical, such as the in-kernel virtual APIC or the virtual IOAPIC, it handles emulation in the kernel itself.
+`vmm(4)` 接口不是初学驱动程序作者需要深入学习的。它复杂、专门化，主要对正在扩展或修改虚拟机监控程序本身的人感兴趣。就我们的目的而言，了解以下内容就足够了。`vmm(4)` 管理虚拟 CPU 状态，包括寄存器、页表和中断控制器。它通过环形缓冲区接口将非性能关键设备的模拟交给用户空间。对于性能关键的设备，如内核内的虚拟 APIC 或虚拟 IOAPIC，它在内核本身中处理模拟。
 
-A driver author who is running inside a `bhyve(4)` guest will never interact with `vmm(4)` directly. The guest kernel sees only the virtualised devices; the mechanism by which they are emulated is invisible. The only observable trace is in `sysctl kern.vm_guest`, which will report `bhyve`.
+在 `bhyve(4)` 客户机内运行的驱动程序作者永远不会直接与 `vmm(4)` 交互。客户机内核只看到虚拟化的设备；模拟它们的机制是不可见的。唯一可观察到的痕迹在 `sysctl kern.vm_guest` 中，它将报告 `bhyve`。
 
-A driver author who is writing host-side code for `bhyve(8)` will see `vmm(4)` only through the user-space libraries. Most tasks are handled by `libvmmapi(3)`, which wraps the raw ioctl interface. Direct `vmm(4)` work is rare outside of `bhyve(8)` development itself.
+为 `bhyve(8)` 编写主机侧代码的驱动程序作者只通过用户空间库看到 `vmm(4)`。大多数任务由 `libvmmapi(3)` 处理，它封装了原始 ioctl 接口。直接的 `vmm(4)` 工作在 `bhyve(8)` 开发本身之外很少见。
 
-### PCI Passthrough: Giving a Guest a Real Device
+### PCI 直通：将真实设备交给客户机
 
-The most direct way for a guest to interact with a physical device is for the host to give the guest exclusive access to that device. This is called PCI passthrough, and `bhyve(8)` supports it through the `pci_passthru(4)` facility.
+客户机与物理设备交互最直接的方式是主机将设备的独占访问权交给客户机。这称为 PCI 直通，`bhyve(8)` 通过 `pci_passthru(4)` 设施支持它。
 
-The idea is straightforward, but the mechanics are subtle. A real PCI device is normally claimed by a driver on the host. That driver programs the device, handles its interrupts, and owns its memory-mapped registers. When we do passthrough, we want the guest's driver to do all of that instead. The host must step out of the way, and the hardware must be reconfigured so that the guest's memory addresses map to the device's memory correctly and so that the device's DMA operations go to the guest's memory rather than the host's.
+想法很简单，但机制很微妙。真实 PCI 设备通常由主机上的驱动程序声明。该驱动程序编程设备、处理其中断并拥有其内存映射寄存器。当我们做直通时，我们希望客户机的驱动程序代替它做所有这些。主机必须让路，硬件必须被重新配置，使客户机的内存地址正确映射到设备的内存，使设备的 DMA 操作转到客户机的内存而不是主机的内存。
 
-The host steps out of the way by detaching the driver that was attached to the device and attaching a placeholder driver (`ppt(4)`) instead. `ppt` is a minimal driver whose only purpose is to claim the device so that no one else does. Its probe function matches any PCI device whose address matches a pattern specified by the user in `/boot/loader.conf`, typically using the `pptdevs` tunable. Once the placeholder driver claims the device, `bhyve(8)` can request a passthrough through the `vmm(4)` interface, and the device becomes accessible inside the guest.
+主机让路的方式是分离已附加到设备的驱动程序，改为附加一个占位驱动程序（`ppt(4)`）。`ppt` 是一个最小的驱动程序，其唯一目的是声明设备以免其他人声明。其探测函数匹配任何 PCI 地址与用户在 `/boot/loader.conf` 中指定的模式匹配的设备，通常使用 `pptdevs` 可调参数。一旦占位驱动程序声明了设备，`bhyve(8)` 就可以通过 `vmm(4)` 接口请求直通，设备就可在客户机内部访问。
 
-The hardware reconfiguration is handled by the IOMMU. This is the part that makes passthrough both capable and dangerous. Without an IOMMU, DMA from the device would go to physical addresses on the host's memory bus, and a misbehaving guest could program the device to read or write anywhere in host memory. That is obviously unsafe. An IOMMU (Intel VT-d or AMD-Vi on the platforms FreeBSD supports) sits between the device and the host memory bus, remapping device-issued addresses so that they cannot escape the guest. From the device's perspective, it still does DMA to an address; from the host memory bus's perspective, that address is translated to somewhere inside the guest's memory and nowhere else.
+硬件重新配置由 IOMMU 处理。这是使直通既强大又危险的部分。没有 IOMMU，设备的 DMA 将转到主机内存总线上的物理地址，行为不端的客户机可以编程设备来读取或写入主机内存中的任何位置。这显然是不安全的。IOMMU（FreeBSD 支持的平台上的 Intel VT-d 或 AMD-Vi）位于设备和主机内存总线之间，重新映射设备发出的地址，使它们无法逃离客户机。从设备的角度看，它仍然 DMA 到一个地址；从主机内存总线的角度看，该地址被转换到客户机内存中的某处，而不是其他任何地方。
 
-If your host has no IOMMU, `bhyve(8)` will refuse to set up passthrough. This is an intentional safety check. Enabling passthrough without IOMMU protection would be like handing a stranger a signed blank cheque on the host kernel: one bug in the device firmware or one malicious guest, and the host is compromised.
+如果你的主机没有 IOMMU，`bhyve(8)` 将拒绝设置直通。这是一个有意为之的安全检查。在没有 IOMMU 保护的情况下启用直通就像给陌生人一张签好名的主机内核空白支票：设备固件中的一个 bug 或一个恶意客户机，主机就被入侵了。
 
-### How Passthrough Looks to the Guest Driver
+### 直通在客户驱动程序眼中的样子
 
-From the guest's perspective, a PCI passthrough device looks exactly like the real hardware. The guest's PCI enumeration finds the device, with its real vendor and device IDs, its real capabilities, and its real BARs. The guest's driver attaches just as it would on bare metal. The read and write operations hit the real hardware (with some address translation in between). Interrupts are delivered to the guest through the hypervisor's virtual interrupt controller. DMA works, though the addresses the guest programs into the device are guest-physical addresses, not host-physical addresses, with the IOMMU taking care of the translation.
+从客户机的角度看，PCI 直通设备看起来与真实硬件完全一样。客户机的 PCI 枚举找到设备，具有真实的厂商和设备 ID、真实的能力和真实的 BAR。客户机的驱动程序像在裸金属上一样附加。读写操作命中真实硬件（中间有一些地址转换）。中断通过虚拟机监控程序的虚拟中断控制器投递到客户机。DMA 正常工作，尽管客户机编程到设备中的地址是客户机物理地址，不是主机物理地址，IOMMU 负责转换。
 
-This has three practical consequences for a driver author.
+这对驱动程序作者有三个实际后果。
 
-First, your driver does not need to know it is running under passthrough. The same driver binary works on bare metal and in a passthrough guest. This is a major design goal of the whole scheme.
+首先，你的驱动程序不需要知道它在直通下运行。相同的驱动程序二进制文件在裸金属和直通客户机中都能工作。这是整个方案的一个主要设计目标。
 
-Second, if your driver uses DMA, make sure you are using `bus_dma(9)` properly. The bus-DMA framework handles the guest-physical versus host-physical translation transparently if you use it correctly. If you are doing clever things with physical addresses directly (which you should not be), passthrough will break those things.
+其次，如果你的驱动程序使用 DMA，确保你正确使用了 `bus_dma(9)`。如果你正确使用，总线 DMA 框架透明地处理客户机物理地址与主机物理地址的转换。如果你直接对物理地址做了巧妙的事情（你不应该这样做），直通将破坏这些事情。
 
-Third, if your driver relies on platform-specific features (for example, special firmware on the PCI device itself, or a particular BIOS table), those features must be present in the guest too. Passthrough gives the guest the device, but it does not give it the firmware or the BIOS tables. Some passthrough setups fail because the driver assumes the presence of an ACPI table that exists on the host but not inside the guest's virtual BIOS.
+第三，如果你的驱动程序依赖于平台特定的特性（例如，PCI 设备本身的特殊固件或特定的 BIOS 表），这些特性在客户机中也必须存在。直通给了客户机设备，但没有给它固件或 BIOS 表。一些直通设置失败是因为驱动程序假设存在一个只在主机上存在而不在客户机虚拟 BIOS 中的 ACPI 表。
 
-The last point matters especially for devices that expect strict ordering or uncached memory access. The bus-DMA and bus-space interfaces, used correctly, handle these cases. Direct pointer manipulation to mapped memory usually does not survive passthrough.
+最后一点对于期望严格排序或非缓存内存访问的设备尤其重要。如果正确使用总线 DMA 和总线空间接口，它们能处理这些情况。直接指针操作映射内存在直通下通常不能存活。
 
-### Host-Side Driver Attach Under bhyve
+### bhyve 下的主机侧驱动程序附加
 
-When `bhyve(8)` is running on a FreeBSD host, two categories of device exist. Some devices are claimed by host drivers and shared with guests through emulation or VirtIO. Others are claimed by `ppt(4)` and passed through entirely.
+当 `bhyve(8)` 在 FreeBSD 主机上运行时，存在两类设备。一些设备由主机驱动程序声明并通过模拟或 VirtIO 与客户机共享。其他设备由 `ppt(4)` 声明并完全直通。
 
-If you are writing a driver for a device that might be used under passthrough, there are a few things to consider.
+如果你正在编写一个可能用于直通的设备驱动程序，有几件事需要考虑。
 
-The first is whether the device should even allow passthrough. Some devices are fundamental to the host's operation (for example, the SATA controller that the host boots from, or the network interface the host is reachable on). These devices should not be marked as candidates for passthrough, because taking them away from the host would break the host. The mechanism for marking candidates is administrative, through `pptdevs` in `loader.conf`, and the host administrator is responsible. There is no per-driver lockout, but a driver author can document clearly whether passthrough is recommended for the device.
+首先是设备是否应该允许直通。一些设备对主机的运行是基础性的（例如，主机启动的 SATA 控制器或主机可达的网络接口）。这些设备不应该被标记为直通候选，因为从主机拿走它们会破坏主机。标记候选的机制是管理性的，通过 `loader.conf` 中的 `pptdevs`，主机管理员负责。没有逐驱动程序的锁定，但驱动程序作者可以清楚地记录是否推荐该设备的直通。
 
-The second is whether the driver releases the device cleanly at detach time. Passthrough requires the original driver to detach, and then `ppt(4)` to attach. If your driver's `DEVICE_DETACH` method is sloppy, passthrough setup will be unstable. The detach code must stop the hardware cleanly, release IRQs, unmap resources, and free any memory that the hardware might touch. Anything that persists after detach is a risk.
+其次是驱动程序在分离时是否干净地释放设备。直通要求原始驱动程序分离，然后 `ppt(4)` 附加。如果你的驱动程序的 `DEVICE_DETACH` 方法草率，直通设置将不稳定。分离代码必须干净地停止硬件、释放 IRQ、取消映射资源并释放硬件可能接触的任何内存。分离后仍然存在的任何东西都是风险。
 
-The third is whether the driver tolerates being re-attached after a passthrough use. When the guest shuts down and releases the device, the host administrator might want to rebind the device to the original driver for use on the host. The driver should be able to attach to a device that was previously owned by `ppt(4)`, even though the device may have been reset and reconfigured by the guest. This means the driver's `DEVICE_ATTACH` method should not assume anything about the device's initial state; it should program the device from scratch, just as it does on first boot.
+第三是驱动程序是否容忍在直通使用后重新附加。当客户机关闭并释放设备时，主机管理员可能希望将设备重新绑定到原始驱动程序以在主机上使用。驱动程序应该能够附加到之前由 `ppt(4)` 拥有的设备，即使设备可能已被客户机重置和重新配置。这意味着驱动程序的 `DEVICE_ATTACH` 方法不应该假设关于设备初始状态的任何事情；它应该从头编程设备，就像首次启动一样。
 
-None of these are new requirements. They are all things a well-written driver does anyway. Passthrough just makes the habits more important, because the cost of getting them wrong shows up immediately.
+这些都不是新的要求。它们都是编写良好的驱动程序本就应该做的事情。直通只是使这些习惯更加重要，因为犯错的成本会立即显现。
 
-### IOMMU Groups and the Reality of Partial Isolation
+### IOMMU 组与部分隔离的现实
 
-A brief word on IOMMU groups, which come up sometimes in passthrough discussions. An IOMMU cannot always isolate a single device from another device on the same PCI bus. When two devices share a bus or a bridge without ACS (Access Control Services), the IOMMU treats them as a single group, because it cannot guarantee that one cannot see the other's DMA. FreeBSD's `dmar(4)` (Intel) and `amdvi(4)` (AMD) drivers handle this grouping internally, but the administrator sometimes has to pass through a whole group rather than a single device.
+简要提及 IOMMU 组，这在直通讨论中有时会出现。IOMMU 不能总是将单个设备与同一 PCI 总线上的另一个设备隔离。当两个设备在没有 ACS（访问控制服务）的总线或桥上共享时，IOMMU 将它们视为单个组，因为它不能保证一个设备看不到另一个设备的 DMA。FreeBSD 的 `dmar(4)`（Intel）和 `amdvi(4)`（AMD）驱动程序在内部处理这种分组，但管理员有时必须直通整个组而不是单个设备。
 
-For a driver author, the practical implication is that passthrough sometimes grabs more than the device you expected. If your device sits behind a bridge shared with another device, turning on passthrough for your device may pull the other one into the guest too. The solution is usually to place devices on separate bridges in the firmware configuration, but that is an administrator concern, not a driver concern. Knowing it exists helps when diagnosing unexpected behaviour.
+对于驱动程序作者来说，实际的影响是直通有时会抓取比你预期更多的设备。如果你的设备位于与另一个设备共享的桥后面，为你的设备启用直通可能会将另一个设备也拉入客户机。解决方案通常是在固件配置中将设备放在单独的桥上，但这是管理员的事，不是驱动程序的事。知道它的存在有助于诊断意外行为。
 
-### Host-Only Considerations: Memory, CPU, and the Hypervisor
+### 仅主机考量：内存、CPU 与虚拟机监控程序
 
-A FreeBSD host that runs `bhyve(8)` guests has a few extra responsibilities beyond the usual. Memory for the guest's RAM is allocated from the host's physical memory, so a host running many guests needs correspondingly more memory. Guest VCPUs are backed by host threads, so a host running many guests needs to provision CPU capacity. And the hypervisor itself uses a small amount of memory and CPU for its bookkeeping.
+运行 `bhyve(8)` 客户机的 FreeBSD 主机除了常规职责外还有一些额外的责任。客户机 RAM 的内存从主机的物理内存分配，因此运行许多客户机的主机需要相应更多的内存。客户机的 VCPU 由主机线程支持，因此运行许多客户机的主机需要配置足够的 CPU 容量。虚拟机监控程序本身也使用少量内存和 CPU 进行簿记。
 
-A driver author on the host side does not need to manage these resources directly. They are managed by `bhyve(8)` and the host administrator. But there are two ways in which a host-side driver can interact with them.
+主机侧的驱动程序作者不需要直接管理这些资源。它们由 `bhyve(8)` 和主机管理员管理。但主机侧驱动程序有两种方式可以与之交互。
 
-The first is when a driver offers a device backend that `bhyve(8)` consumes. An example would be a storage driver that provides the backing store for a guest's virtual disk. If the host-side driver is slow, the guest feels it as slow disk. If the host-side driver consumes too much memory, the host runs out of memory for guests. This is a classic shared-resource problem, and it is usually solved by provisioning rather than by clever code.
+第一种是当驱动程序提供 `bhyve(8)` 消费的设备后端时。例如，一个为客户机虚拟磁盘提供后端存储的存储驱动程序。如果主机侧驱动程序慢，客户机会感觉磁盘慢。如果主机侧驱动程序消耗太多内存，主机会没有足够内存给客户机。这是一个经典的共享资源问题，通常通过合理配置而不是巧妙的代码来解决。
 
-The second is when a driver interacts with the hypervisor through `vmm(4)` or similar. Paravirtual device backends sometimes use kernel-side hooks to deliver notifications to guests more efficiently than going through user space. These are rare and advanced, and outside the scope of this chapter. They are mentioned here so you are not surprised if you see them referenced later.
+第二种是当驱动程序通过 `vmm(4)` 或类似接口与虚拟机监控程序交互时。半虚拟化设备后端有时使用内核侧钩子来比通过用户空间更高效地向客户机传递通知。这些很少见且属于高级主题，超出了本章的范围。这里提及是为了让你在后续看到相关引用时不至于感到意外。
 
-### Cross-Platform Notes: bhyve on arm64
+### 跨平台说明：arm64 上的 bhyve
 
-`bhyve(8)` runs on amd64 and, increasingly, on arm64. The arm64 port uses the ARMv8 virtualisation extensions (EL2) rather than Intel VT-x or AMD-V. The SMMU (System Memory Management Unit) takes the role of the IOMMU. The user-space interface is the same, the guest's VirtIO experience is the same, and from a driver author's perspective, the two architectures are interchangeable. The distinction matters only for the low-level hypervisor code inside `vmm(4)`.
+`bhyve(8)` 在 amd64 上运行，并且越来越多地在 arm64 上运行。arm64 移植使用 ARMv8 虚拟化扩展（EL2）而不是 Intel VT-x 或 AMD-V。SMMU（系统内存管理单元）承担 IOMMU 的角色。用户空间接口相同，客户机的 VirtIO 体验相同，从驱动程序作者的角度看，两个架构是可互换的。区别只对 `vmm(4)` 内部的低级虚拟机监控程序代码有意义。
 
-For a book about driver authorship, the lesson is the one we have already learned in Chapter 29: write clean, bus-dma-using, endian-correct code, and you will not notice which architecture you are running on. The hypervisor story is another good reason to follow those habits.
+对于一本关于驱动程序编写的书来说，教训就是我们在第 29 章已经学到的：编写干净的、使用 bus-dma 的、字节序正确的代码，你就不会注意到自己在哪个架构上运行。虚拟机监控程序的故事是遵循这些习惯的另一个好理由。
 
-### Inspecting bhyve From the Host
+### 从主机侧检查 bhyve
 
-A driver author can inspect `bhyve(8)` state in a few useful ways without getting into `vmm(4)` internals.
+驱动程序作者可以通过几种有用的方式检查 `bhyve(8)` 状态，而不需要进入 `vmm(4)` 内部。
 
-`bhyvectl(8)` is the command-line tool for querying and controlling virtual machines. `bhyvectl --vm=NAME --get-stats` shows counters maintained by `vmm(4)` for a running guest, including VM exit counts, emulation counts, and similar diagnostics. This is useful when you suspect that a guest driver is generating unnecessary VM exits (a common performance pitfall).
+`bhyvectl(8)` 是查询和控制虚拟机的命令行工具。`bhyvectl --vm=NAME --get-stats` 显示 `vmm(4)` 为运行中的客户机维护的计数器，包括 VM 退出计数、模拟计数和类似的诊断信息。当你怀疑客户驱动程序正在产生不必要的 VM 退出（一个常见的性能陷阱）时，这很有用。
 
-`pciconf -lvBb` on the host shows the PCI devices and their current driver bindings. A device bound to `ppt(4)` is visible in passthrough mode; a device bound to its native driver is available to the host. This is a quick way to see what is passed through and what is not.
+主机上的 `pciconf -lvBb` 显示 PCI 设备及其当前驱动程序绑定。绑定到 `ppt(4)` 的设备处于直通模式；绑定到其原生驱动程序的设备可供主机使用。这是快速查看哪些设备已直通、哪些未直通的方法。
 
-`vmstat -i` on the host shows interrupt counts per device. If a device is passed through to a guest, its interrupts are delivered to the guest's virtual interrupt controller, not to the host. On the host side, you will see the hypervisor's posted-interrupt or interrupt-remapping counts increase instead. This is a subtle but useful diagnostic.
+主机上的 `vmstat -i` 显示每个设备的中断计数。如果设备被直通给客户机，其中断会传递给客户机的虚拟中断控制器，而不是主机。在主机侧，你会看到虚拟机监控程序的通知中断或中断重映射计数增加。这是一个微妙但有用的诊断手段。
 
-None of this is required reading for driver authorship. It is mentioned here so that when you encounter `bhyve(8)` on a host while debugging a driver, you know where to look first.
+这些都不是驱动程序编写的必读内容。这里提及是为了当你在主机上调试驱动程序时遇到 `bhyve(8)`，知道首先该去哪里查看。
 
-### A Typical bhyve Command Line
+### 典型的 bhyve 命令行
 
-For readers who want to see what `bhyve(8)` actually looks like when invoked without a wrapper tool, here is a representative command line. It starts a guest named `guest0` with two VCPUs, two gigabytes of memory, a virtio-blk disk backed by a file, and a virtio-net network interface bridged to the host:
+对于想了解 `bhyve(8)` 在不使用封装工具时实际样子的读者，这里有一个代表性的命令行。它启动一个名为 `guest0` 的客户机，配备两个 VCPU、2 GB 内存、一个由文件支持的 virtio-blk 磁盘和一个桥接到主机的 virtio-net 网络接口：
 
 ```sh
 bhyve -c 2 -m 2G \
@@ -923,90 +923,90 @@ bhyve -c 2 -m 2G \
     guest0
 ```
 
-Each `-s` flag defines a PCI slot. Slot zero is the host bridge; slot two is a virtio-blk device backed by a disk image file; slot three is a virtio-net device backed by a `tap(4)` interface the host has configured; slot thirty-one is the LPC bridge used for legacy devices like the serial console. The `-l com1,stdio` redirects the guest's first serial port to the host's standard I/O, which is convenient for console access.
+每个 `-s` 标志定义一个 PCI 插槽。插槽零是主桥；插槽二是由磁盘映像文件支持的 virtio-blk 设备；插槽三是由主机配置的 `tap(4)` 接口支持的 virtio-net 设备；插槽三十一是用于串行控制台等传统设备的 LPC 桥。`-l com1,stdio` 将客户机的第一个串口重定向到主机的标准 I/O，这对于控制台访问很方便。
 
-When this command runs, the host kernel creates a new VM through `vmm(4)`, allocates memory for the guest's RAM, and hands off VCPU execution to the guest's kernel. The virtio-blk backend in `bhyve(8)` (user-space code) services the guest's block requests by reading and writing the disk image file. The virtio-net backend sends and receives packets through the `tap0` interface, which the host's network stack handles as an ordinary interface.
+当此命令运行时，主机内核通过 `vmm(4)` 创建一个新的 VM，为客户机的 RAM 分配内存，并将 VCPU 执行移交给客户机内核。`bhyve(8)` 中的 virtio-blk 后端（用户空间代码）通过读写磁盘映像文件来服务客户机的块请求。virtio-net 后端通过 `tap0` 接口发送和接收数据包，主机的网络协议栈将其作为普通接口处理。
 
-A driver running inside this guest sees a PCI virtio-blk device, a PCI virtio-net device, and the usual assortment of emulated LPC devices. From the driver's perspective, there is no clue that the "hardware" is implemented by a user-space program running a few milliseconds away on the same host. The abstraction is, by design, complete.
+在此客户机内运行的驱动程序看到一个 PCI virtio-blk 设备、一个 PCI virtio-net 设备和通常的一组模拟 LPC 设备。从驱动程序的角度看，没有任何线索表明"硬件"是由运行在同一主机上几毫秒之外的用户空间程序实现的。这种抽象在设计上是完整的。
 
-### Inside the vmm(4) Module
+### vmm(4) 模块内部
 
-`vmm(4)` is the kernel-side infrastructure for `bhyve(8)`. In FreeBSD 14.3, its main source files live in `/usr/src/sys/amd64/vmm/`; an arm64 port is under active development and is expected to ship in a later release, so if you are on FreeBSD 14.3 the amd64 tree is the one to read. The module exports a small control interface through `/dev/vmmctl` and a per-VM interface through `/dev/vmm/NAME`.
+`vmm(4)` 是 `bhyve(8)` 的内核侧基础设施。在 FreeBSD 14.3 中，其主要源文件位于 `/usr/src/sys/amd64/vmm/`；arm64 移植正在积极开发中，预计在后续版本中发布，所以如果你使用 FreeBSD 14.3，amd64 代码树就是你应该阅读的。该模块通过 `/dev/vmmctl` 导出一个小的控制接口，通过 `/dev/vmm/NAME` 导出每个 VM 的接口。
 
-The control interface is used by `bhyvectl(8)` and `bhyve(8)` to create, destroy, and enumerate virtual machines. The per-VM interface is used to read and write VCPU state, map guest memory, inject interrupts, and receive VM-exit events from the guest.
+控制接口被 `bhyvectl(8)` 和 `bhyve(8)` 用于创建、销毁和枚举虚拟机。每个 VM 的接口用于读写 VCPU 状态、映射客户机内存、注入中断以及从客户机接收 VM 退出事件。
 
-When a guest's VCPU executes code that requires emulation (reading from an I/O port, accessing a memory-mapped device register, executing a hypercall), the hardware traps the execution and the control returns to `vmm(4)`. The module either handles the exit in the kernel (for a small set of performance-critical cases, like reading the local APIC) or forwards it to `bhyve(8)` in user space (for most cases, including all VirtIO device emulation).
+当客户机的 VCPU 执行需要模拟的代码（从 I/O 端口读取、访问内存映射设备寄存器、执行超级调用）时，硬件捕获执行并将控制权返回给 `vmm(4)`。该模块要么在内核中处理退出（对于少量性能关键的情况，如读取本地 APIC），要么将其转发给用户空间中的 `bhyve(8)`（对于大多数情况，包括所有 VirtIO 设备模拟）。
 
-The kernel/user-space split is a deliberate design choice. Keeping the code in user space makes it easier to develop, debug, and audit. Keeping performance-critical paths in the kernel keeps the overhead low. For FreeBSD, the split has worked well, and `bhyve(8)` has grown from a small academic prototype to a production-quality hypervisor.
+内核/用户空间的分离是一个刻意的设计选择。将代码保留在用户空间使其更容易开发、调试和审计。将性能关键路径保留在内核中保持了低开销。对于 FreeBSD 来说，这种分离效果良好，`bhyve(8)` 已从一个小型学术原型成长为生产质量的虚拟机监控程序。
 
-For a driver author who is not extending `bhyve(8)` itself, none of this matters in detail. What matters is the observable behaviour: a guest executes code, some operations trap, the hypervisor emulates them, and the guest continues. The driver in the guest sees consistent behaviour regardless of where the emulation happens.
+对于不扩展 `bhyve(8)` 本身的驱动程序作者来说，这些细节无关紧要。重要的是可观察的行为：客户机执行代码，一些操作触发捕获，虚拟机监控程序模拟它们，客户机继续执行。无论模拟在哪里发生，客户机中的驱动程序看到的是一致的行为。
 
-### Nested Virtualisation
+### 嵌套虚拟化
 
-A brief mention of nested virtualisation, since it comes up. FreeBSD's `bhyve(8)` on amd64 currently does not support running hardware-virtualised guests inside hardware-virtualised guests (no `VIRTUAL_VMX` or `VIRTUAL_SVM` extensions yet). If you try to run `bhyve(8)` inside a `bhyve(8)` guest, the inner hypervisor will fail to initialise. Intel and AMD both support nested virtualisation in hardware, but the FreeBSD implementation has not yet enabled it.
+简要提及嵌套虚拟化，因为它会出现。FreeBSD 在 amd64 上的 `bhyve(8)` 目前不支持在硬件虚拟化客户机内运行硬件虚拟化客户机（还没有 `VIRTUAL_VMX` 或 `VIRTUAL_SVM` 扩展）。如果你尝试在 `bhyve(8)` 客户机内运行 `bhyve(8)`，内部虚拟机监控程序将无法初始化。Intel 和 AMD 都在硬件中支持嵌套虚拟化，但 FreeBSD 实现尚未启用它。
 
-This matters for labs only in the sense that you must run `bhyve(8)` on bare metal (or on a host that provides nested virtualisation, which some cloud platforms do). If your lab machine is itself a VM, you may find that `bhyve(8)` either fails to load `vmm.ko` or loads it but refuses to start guests.
+这对实验的影响仅在于你必须在裸金属上运行 `bhyve(8)`（或提供嵌套虚拟化的主机上，一些云平台提供此功能）。如果你的实验机器本身就是一个 VM，你可能会发现 `bhyve(8)` 要么无法加载 `vmm.ko`，要么加载了但拒绝启动客户机。
 
-On arm64, nested virtualisation is a different story; the ARM architecture has cleaner support, and the FreeBSD arm64 port is moving toward enabling it. For up-to-date information, consult the `bhyve(8)` and `vmm(4)` manual pages on the version of FreeBSD you are running.
+在 arm64 上，嵌套虚拟化是另一回事；ARM 架构有更干净的支持，FreeBSD arm64 移植正在朝着启用它的方向发展。获取最新信息，请查阅你运行的 FreeBSD 版本上的 `bhyve(8)` 和 `vmm(4)` 手册页。
 
-### An Example: Debugging a PCI Passthrough Driver
+### 一个示例：调试 PCI 直通驱动程序
 
-To make the host-side discussion concrete, consider a scenario that combines several of the ideas above. You have a PCI network card that your host's driver knows how to drive. You want to pass it through to a `bhyve(8)` guest and test that the same driver works unchanged in the guest.
+为了使主机侧的讨论具体化，考虑一个结合上述几个想法的场景。你有一张主机驱动程序知道如何驱动的 PCI 网卡。你想把它直通给一个 `bhyve(8)` 客户机并测试相同的驱动程序在客户机中无需更改即可工作。
 
-Step 1: Identify the device. `pciconf -lvBb` shows `em0@pci0:2:0:0` with the driver `em` attached. The device is an Intel Gigabit Ethernet controller.
+步骤 1：识别设备。`pciconf -lvBb` 显示 `em0@pci0:2:0:0`，驱动程序 `em` 已附加。该设备是 Intel 千兆以太网控制器。
 
-Step 2: Mark it for passthrough. Edit `/boot/loader.conf` and add `pptdevs="2/0/0"`. Reboot.
+步骤 2：标记为直通。编辑 `/boot/loader.conf` 并添加 `pptdevs="2/0/0"`。重启。
 
-Step 3: Verify. After reboot, `pciconf -l` shows `ppt0@pci0:2:0:0`, with `ppt` (the placeholder driver) attached instead of `em`. The device is no longer available to the host's network stack.
+步骤 3：验证。重启后，`pciconf -l` 显示 `ppt0@pci0:2:0:0`，`ppt`（占位驱动程序）替代 `em` 附加。该设备不再对主机的网络协议栈可用。
 
-Step 4: Configure the guest. In the guest's `bhyve` configuration, add `-s 4,passthru,2/0/0`. This tells `bhyve(8)` to pass through the device to the guest at PCI slot 4.
+步骤 4：配置客户机。在客户机的 `bhyve` 配置中，添加 `-s 4,passthru,2/0/0`。这告诉 `bhyve(8)` 将设备直通给客户机的 PCI 插槽 4。
 
-Step 5: Start the guest. Inside the guest, run `pciconf -lvBb`. The device appears, with its real Intel vendor and device IDs, attached to `em`. Check `dmesg`. The guest's `em` driver has attached to the passthrough device exactly as it would on bare metal.
+步骤 5：启动客户机。在客户机内部，运行 `pciconf -lvBb`。设备出现，带有真实的 Intel 供应商和设备 ID，附加到 `em`。检查 `dmesg`。客户机的 `em` 驱动程序已附加到直通设备，就像在裸金属上一样。
 
-Step 6: Exercise the device. Configure the interface (`ifconfig em0 10.0.0.1/24 up`), send traffic, verify it works.
+步骤 6：操作设备。配置接口（`ifconfig em0 10.0.0.1/24 up`），发送流量，验证其工作正常。
 
-Step 7: Shut down the guest. Back on the host, decide whether to keep the device in passthrough mode or return it to the host. If you want it back, edit `/boot/loader.conf` to remove `pptdevs`, reboot, and verify that `em` is attached again.
+步骤 7：关闭客户机。回到主机，决定是保持设备的直通模式还是将其返回给主机。如果要取回，编辑 `/boot/loader.conf` 移除 `pptdevs`，重启，并验证 `em` 再次附加。
 
-Every step in this workflow is something the administrator does; the driver itself is untouched. That is the point. If the driver is written correctly (with `bus_dma`, clean detach, no hidden platform assumptions), it works in both environments without changes.
+这个工作流程中的每一步都是管理员做的；驱动程序本身未被触及。这就是要点。如果驱动程序编写正确（使用 `bus_dma`、干净的分离、没有隐藏的平台假设），它在两种环境中无需更改即可工作。
 
 ### 总结
 
-The host side of virtualisation is where FreeBSD plays a slightly different role. Instead of writing a driver that consumes a hypervisor-provided device, you may find yourself writing (or at least interacting with) the infrastructure that provides devices to a hypervisor. `bhyve(8)`, `vmm(4)`, and `pci_passthru(4)` are the main interfaces to know about. PCI passthrough is the most relevant of these for a driver author, because it exercises the detach-and-reattach lifecycle that a well-written driver already supports.
+虚拟化的主机侧是 FreeBSD 扮演略有不同角色的地方。你可能发现自己不是在编写消费虚拟机监控程序提供设备的驱动程序，而是在编写（或至少与之交互）向虚拟机监控程序提供设备的基础设施。`bhyve(8)`、`vmm(4)` 和 `pci_passthru(4)` 是需要了解的主要接口。PCI 直通是其中与驱动程序作者最相关的，因为它锻炼了编写良好的驱动程序已经支持的分离和重新附加生命周期。
 
-With guests and hosts both covered, the next major environment in FreeBSD's virtualisation story is the one that does not use a separate kernel at all: jails. Section 6 turns to them, to devfs, and to the VNET framework that extends the jail model into the network stack.
+客户机和主机都已涵盖，FreeBSD 虚拟化故事中的下一个主要环境是完全不使用单独内核的那个：jail。第6节转向它们、devfs，以及将 jail 模型扩展到网络栈的 VNET 框架。
 
 ## 第6节：Jail、devfs、VNET 与设备可见性
-Virtualisation and containerization share a goal: they both let one physical machine host several workloads that appear, to their users, to be running on separate machines. The mechanisms they use are dramatically different. A virtual machine runs a complete guest kernel on top of a hypervisor; it has its own memory map, its own device tree, its own everything. A container, in the FreeBSD sense, shares the host's kernel entirely. What it has of its own is a filesystem view, a process table, and (if the administrator sets it up that way) a network stack. FreeBSD's answer to the container question is the jail, and jails have existed in some form since FreeBSD 4.0. For driver authors, jails matter because they change what a process can see and do with respect to devices, without changing the driver code at all.
+虚拟化和容器化共享一个目标：它们都让一台物理机器托管多个工作负载，对用户来说这些工作负载看起来运行在独立的机器上。它们使用的机制截然不同。虚拟机在虚拟机监控程序之上运行完整的客户内核；它有自己的内存映射、自己的设备树、自己的一切。容器，在 FreeBSD 的意义上，完全共享主机的内核。它拥有的是自己的文件系统视图、进程表，以及（如果管理员这样设置的话）网络栈。FreeBSD 对容器问题的回答是 jail，jail 从 FreeBSD 4.0 开始就以某种形式存在。对于驱动程序作者来说，jail 很重要，因为它们改变了进程在设备方面能看到什么和能做什么，而完全不改变驱动程序代码。
 
-This section explains how jails interact with devices. It focuses on four topics: the jail model itself, the devfs ruleset system that controls device visibility, the VNET framework that gives jails their own network stacks, and the question every container system eventually has to answer: which processes can reach which drivers.
+本节解释 jail 如何与设备交互。它关注四个主题：jail 模型本身、控制设备可见性的 devfs 规则集系统、给 jail 自己的网络栈的 VNET 框架，以及每个容器系统最终都必须回答的问题：哪些进程可以访问哪些驱动程序。
 
-### What a Jail Is, and What It Is Not
+### Jail 是什么，不是什么
 
-A jail is a subdivision of the host kernel's resources. A process running inside a jail sees a subset of the filesystem (rooted at the jail's root directory), a subset of the process table (only processes in the same jail), a subset of the network (depending on whether the jail has its own VNET), and a subset of the devices (depending on the jail's devfs ruleset). The host kernel is a single, shared kernel; there is no separate guest kernel inside the jail. System calls made inside the jail are executed by the same kernel that executes calls from outside the jail, with jail-specific checks inserted at the right places.
+jail 是主机内核资源的子划分。在 jail 内运行的进程看到文件系统的一个子集（以 jail 的根目录为根）、进程表的一个子集（只有同一 jail 中的进程）、网络的一个子集（取决于 jail 是否有自己的 VNET）和设备的一个子集（取决于 jail 的 devfs 规则集）。主机内核是单个共享内核；jail 内部没有独立的客户内核。jail 内发出的系统调用由执行 jail 外调用的同一内核执行，在正确的位置插入了 jail 特定的检查。
 
-Because the kernel is shared, drivers are shared too. There is no separate copy of a driver inside each jail; there is only the one driver that the kernel loaded at boot time. The jail just controls which of the driver's devices are visible to the jail's processes. A jail that has not been configured to see `/dev/null` will see no `/dev/null`; a jail that has been configured to see `/dev/null` will see the same `/dev/null` that the host sees. No new driver instance; no new softc; just a visibility rule.
+因为内核是共享的，驱动程序也是共享的。每个 jail 内没有单独的驱动程序副本；只有内核在启动时加载的那个驱动程序。jail 只是控制驱动程序的哪些设备对 jail 的进程可见。一个没有被配置为看到 `/dev/null` 的 jail 将看不到 `/dev/null`；一个被配置为看到 `/dev/null` 的 jail 将看到与主机相同的 `/dev/null`。没有新的驱动程序实例；没有新的 softc；只是一个可见性规则。
 
-This simplicity is both jails' great strength and their great limitation. It means jails are extremely cheap: starting a jail is roughly the cost of running a few system calls, whereas starting a VM is the cost of booting a whole kernel. It also means jails cannot isolate kernel-level failures: a driver bug that panics the host kernel panics every jail running on it. A jail is a policy boundary, not a crash boundary. For many workloads that trade-off is excellent; for others, a VM is the right answer.
+这种简单性既是 jail 的巨大优势也是其巨大局限。这意味着 jail 非常廉价：启动 jail 的成本大约是运行几个系统调用的成本，而启动 VM 是启动整个内核的成本。这也意味着 jail 无法隔离内核级别的故障：一个导致主机内核 panic 的驱动程序 bug 会导致运行在上面的每个 jail 都 panic。jail 是一个策略边界，不是崩溃边界。对于许多工作负载来说，这种权衡是出色的；对于其他工作负载，VM 是正确的答案。
 
-### The Kernel's View of Jails
+### 内核眼中的 Jail
 
-Inside the kernel, a jail is represented by a `struct prison`, defined in `/usr/src/sys/sys/jail.h`. Each process has a pointer to the prison it belongs to, via `td->td_ucred->cr_prison`. Code that wants to check whether a process is inside a jail can compare this pointer against the global `prison0`, which is the root jail (the host itself). If the pointer is `prison0`, the process is on the host; otherwise, it is in some jail.
+在内核内部，jail 由 `struct prison` 表示，定义在 `/usr/src/sys/sys/jail.h` 中。每个进程通过 `td->td_ucred->cr_prison` 指向它所属的 prison。想要检查进程是否在 jail 内的代码可以将此指针与全局 `prison0`（根 jail，即主机本身）进行比较。如果指针是 `prison0`，进程在主机上；否则，它在某个 jail 中。
 
-Several helper functions exist for the common checks a driver might want to do. `jailed(cred)` returns true if the credential belongs to a jail other than `prison0`. `prison_check(cred1, cred2)` returns zero if two credentials are in the same jail (or one is the parent of the other); it returns an error otherwise. `prison_priv_check(cred, priv)` is how privilege checks are extended for jails: a root user inside a jail does not have all privileges that root has on the host, and `prison_priv_check` implements the reduction.
+存在几个辅助函数用于驱动程序可能想要做的常见检查。`jailed(cred)` 如果凭证属于 `prison0` 以外的 jail 则返回 true。`prison_check(cred1, cred2)` 如果两个凭证在同一个 jail 中（或一个是另一个的父级）则返回零；否则返回错误。`prison_priv_check(cred, priv)` 是权限检查如何为 jail 扩展的：jail 内的 root 用户不具有主机上 root 拥有的所有权限，`prison_priv_check` 实现了这种缩减。
 
-A driver author will usually not need to call any of these directly. The framework calls them on your behalf. When a process opens a `devfs` node, for example, the devfs layer consults the jail's devfs ruleset before handing the file descriptor over. When a process tries to use a privilege-gated feature (like `bpf(4)` or `kldload(2)`), the privilege check goes through `prison_priv_check`. A driver only needs to be aware that these checks exist, and to call the framework helpers correctly when it defines its own access rules.
+驱动程序作者通常不需要直接调用其中任何一个。框架代表你调用它们。例如，当进程打开 `devfs` 节点时，devfs 层在交出文件描述符之前查询 jail 的 devfs 规则集。当进程尝试使用权限门控的特性（如 `bpf(4)` 或 `kldload(2)`）时，权限检查通过 `prison_priv_check` 进行。驱动程序只需要意识到这些检查存在，并在定义自己的访问规则时正确调用框架辅助函数。
 
-### devfs: The Filesystem Through Which Devices Are Exposed
+### devfs：暴露设备的文件系统
 
-In FreeBSD, devices are exposed through a filesystem called `devfs(5)`. Every entry under `/dev` is a `devfs` node. A driver that calls `make_dev(9)` or `make_dev_s(9)` creates a `devfs` node; the name, permissions, and uid/gid are attributes of that node. The node is visible in every `devfs` instance that the kernel mounts, and FreeBSD mounts one `devfs` instance per filesystem view: one for the host's `/dev`, one for each jail's `/dev` (if the jail has its own `/dev`), and one per chroot that mounts its own `devfs`.
+在 FreeBSD 中，设备通过一个名为 `devfs(5)` 的文件系统暴露。`/dev` 下的每个条目都是一个 `devfs` 节点。调用 `make_dev(9)` 或 `make_dev_s(9)` 的驱动程序创建一个 `devfs` 节点；名称、权限和 uid/gid 是该节点的属性。该节点在内核挂载的每个 `devfs` 实例中都可见，FreeBSD 为每个文件系统视图挂载一个 `devfs` 实例：一个用于主机的 `/dev`，每个 jail 的 `/dev` 一个（如果 jail 有自己的 `/dev`），每个挂载自己 `devfs` 的 chroot 一个。
 
-This is the first part of the visibility story. Each jail (more precisely, each filesystem view) has its own `devfs` mount, and the kernel can apply different rules to different mounts. The rules are called devfs rulesets, and they are the main tool for controlling which devices a jail can see.
+这是可见性故事的第一部分。每个 jail（更准确地说，每个文件系统视图）都有自己的 `devfs` 挂载，内核可以对不同的挂载应用不同的规则。这些规则称为 devfs 规则集，它们是控制 jail 可以看到哪些设备的主要工具。
 
-### devfs Rulesets: Declaring What a Jail Can See
+### devfs 规则集：声明监狱可以看到什么
 
-A devfs ruleset is a numbered set of rules stored in the kernel. Rules can hide nodes, reveal nodes, change their permissions, or change their ownership. The ruleset is applied to a mounted `devfs` instance; every time a lookup happens in that instance, the kernel walks the ruleset and applies the matching rule to each node.
+devfs 规则集是存储在内核中的编号规则集合。规则可以隐藏节点、显示节点、更改其权限或更改其所有权。规则集应用于已挂载的 `devfs` 实例；每次在该实例中进行查找时，内核遍历规则集并对每个节点应用匹配的规则。
 
-On a fresh FreeBSD system, four rulesets are predefined in `/etc/defaults/devfs.rules` (which is processed when the kernel starts). The file uses `devfs(8)` syntax, a small declarative language for ruleset construction. Let us look at a representative slice.
+在新的 FreeBSD 系统上，`/etc/defaults/devfs.rules` 中预定义了四个规则集（在内核启动时处理）。该文件使用 `devfs(8)` 语法，一种用于规则集构建的小型声明式语言。让我们看看一个代表性的片段。
 
 ```text
 [devfsrules_hide_all=1]
@@ -1034,21 +1034,21 @@ add path zfs unhide
 add path 'bpf*' unhide
 ```
 
-Rule 1, `devfsrules_hide_all`, hides everything. On its own it is useless, because a `devfs` mount with nothing visible is not helpful. It is the starting point for other rulesets.
+规则 1 `devfsrules_hide_all` 隐藏一切。它本身是无用的，因为一个什么都看不见的 `devfs` 挂载没有帮助。它是其他规则集的起点。
 
-Rule 2, `devfsrules_unhide_basic`, unhides a small set of essential devices: `log`, `null`, `zero`, `crypto`, `random`, `urandom`. These are the devices that essentially every program needs; without them, even basic tools fail.
+规则 2 `devfsrules_unhide_basic` 显示一小组基本设备：`log`、`null`、`zero`、`crypto`、`random`、`urandom`。这些是几乎所有程序都需要的设备；没有它们，即使是基本工具也会失败。
 
-Rule 4, `devfsrules_jail`, is the ruleset intended for non-VNET jails. It starts by including `devfsrules_hide_all` (so everything is hidden), then layers `devfsrules_unhide_basic` on top (so the essentials are visible), and adds ZFS devices. The result is a jail that sees a small, safe set of devices and nothing else.
+规则 4 `devfsrules_jail` 是为非 VNET jail 设计的规则集。它首先包含 `devfsrules_hide_all`（所以一切都被隐藏），然后在上面叠加 `devfsrules_unhide_basic`（所以基本设备可见），并添加 ZFS 设备。结果是一个 jail 只看到一小组安全的设备，其他什么都看不到。
 
-Rule 5, `devfsrules_jail_vnet`, is the equivalent for VNET jails. It is the same as rule 4 with the addition that `bpf*` devices are unhidden, because a VNET jail might legitimately need `bpf(4)` (for tools like `tcpdump(8)` or `dhclient(8)`).
+规则 5 `devfsrules_jail_vnet` 是 VNET jail 的等效规则集。它与规则 4 相同，只是增加了 `bpf*` 设备的显示，因为 VNET jail 可能合理地需要 `bpf(4)`（用于 `tcpdump(8)` 或 `dhclient(8)` 等工具）。
 
-When creating a jail, the administrator specifies which ruleset to apply to the jail's `/dev` mount, either through `jail.conf(5)` (`devfs_ruleset = 4`) or on the command line (`jail -c ... devfs_ruleset=4`). The kernel applies the ruleset to the mount, and the jail sees only what the ruleset allows.
+创建 jail 时，管理员指定将哪个规则集应用于 jail 的 `/dev` 挂载，可以通过 `jail.conf(5)`（`devfs_ruleset = 4`）或命令行（`jail -c ... devfs_ruleset=4`）。内核将规则集应用于挂载，jail 只看到规则集允许的内容。
 
-### Creating a Custom devfs Ruleset
+### 创建自定义 devfs 规则集
 
-For most jails, the default rulesets are enough. When they are not, an administrator can define new ones. A new ruleset must have a unique number (other than the reserved defaults) and can be constructed by inclusion, addition, and override.
+对于大多数 jail，默认规则集就够了。当它们不够时，管理员可以定义新的规则集。新规则集必须具有唯一的编号（除了保留的默认值），可以通过包含、添加和覆盖来构建。
 
-A classical example is a jail that needs one specific device that the default rules hide. Suppose we have a jail that runs a service that needs `/dev/tun0`, and we want to expose it without opening the whole `/dev/tun*` family. We would create a ruleset like:
+一个典型的例子是 jail 需要一个默认规则隐藏的特定设备。假设我们有一个运行服务的 jail 需要 `/dev/tun0`，我们想暴露它但不打开整个 `/dev/tun*` 系列。我们可以创建这样的规则集：
 
 ```text
 [devfsrules_myjail=100]
@@ -1056,7 +1056,7 @@ add include $devfsrules_jail
 add path 'tun0' unhide
 ```
 
-And apply it in `jail.conf(5)`:
+然后在 `jail.conf(5)` 中应用它：
 
 ```text
 myjail {
@@ -1066,58 +1066,58 @@ myjail {
 }
 ```
 
-The `devfs(8)` tool can load this ruleset into the running kernel with `devfs rule -s 100 add ...`, or the administrator can edit `/etc/devfs.rules` and restart `devfs`. For persistent configuration, the file is the right place.
+`devfs(8)` 工具可以通过 `devfs rule -s 100 add ...` 将此规则集加载到运行中的内核，或者管理员可以编辑 `/etc/devfs.rules` 并重启 `devfs`。对于持久配置，文件是正确的位置。
 
-### What devfs Rulesets Do Not Do
+### devfs 规则集不能做什么
 
-It is worth noting what devfs rulesets are not. They are not a capability system. Hiding a device from a jail means the jail cannot open that specific path, but a jail that has the `allow.raw_sockets` privilege can still send arbitrary raw packets, ruleset or no ruleset. Hiding `/dev/kmem` does not prevent a determined attacker with the right privileges from reading kernel memory via other means; it just removes one obvious path.
+值得注意的是 devfs 规则集不是什么。它们不是能力系统。对 jail 隐藏设备意味着 jail 无法打开该特定路径，但具有 `allow.raw_sockets` 权限的 jail 仍然可以发送任意原始数据包，无论有没有规则集。隐藏 `/dev/kmem` 不会阻止具有正确权限的攻击者通过其他方式读取内核内存；它只是移除了一条明显的路径。
 
-Rulesets are a visibility policy, layered on top of the standard UNIX permissions model. The UNIX permissions still apply: a file hidden by the ruleset is not openable, but a file visible to the ruleset still respects its own permissions. A jail's `root` user can open `/dev/null` because the ruleset says so and the permissions say so, not because the ruleset alone grants access.
+规则集是一种可见性策略，叠加在标准 UNIX 权限模型之上。UNIX 权限仍然适用：被规则集隐藏的文件无法打开，但对规则集可见的文件仍然遵循其自身权限。jail 的 `root` 用户可以打开 `/dev/null`，是因为规则集允许且权限允许，而不是仅凭规则集就授予了访问权。
 
-For strong isolation, combine rulesets with privilege restrictions (`allow.*` parameters in `jail.conf(5)`) and, if the workload warrants it, with a VM. Rulesets alone are one layer of defence, not the only one.
+要实现强隔离，请将规则集与权限限制（`jail.conf(5)` 中的 `allow.*` 参数）结合使用，如果工作负载需要，还应与 VM 结合。规则集只是防御的一层，而不是唯一的一层。
 
-### A Driver Author's View of devfs Rulesets
+### 驱动程序作者眼中的 devfs 规则集
 
-For a driver author, devfs rulesets matter for two reasons.
+对于驱动程序作者来说，devfs 规则集之所以重要有两个原因。
 
-First, when you create a `devfs` node with `make_dev(9)`, you pick a default owner, group, and permission. These apply to every `devfs` view that the node appears in. If your device is something that jails should generally not see (for example, a low-level hardware-management interface), consider whether the name should be obvious (so administrators can easily write a rule that hides it) or whether it should be under a subdirectory (so a single rule can hide the whole subdirectory).
+首先，当你用 `make_dev(9)` 创建 `devfs` 节点时，你选择默认的所有者、组和权限。这些适用于节点出现的每个 `devfs` 视图。如果你的设备是 jail 通常不应该看到的东西（例如，低级硬件管理接口），考虑名称是否应该明显（以便管理员可以轻松编写隐藏它的规则）或者是否应该放在子目录下（以便单条规则可以隐藏整个子目录）。
 
-Second, if your driver's device is something that jails commonly need, document that fact in your driver's manual page. The administrator who writes a jail's ruleset is usually not the person who wrote the driver, and they need to know whether to unhide your node. A line like "This device is typically used inside jails; unhide it with `add path mydev unhide` in the jail's ruleset" is very helpful.
+其次，如果你的驱动程序的设备是 jail 通常需要的东西，请在驱动程序的手册页中文档说明这一点。编写 jail 规则集的管理员通常不是编写驱动程序的人，他们需要知道是否要取消隐藏你的节点。像"此设备通常在 jail 内使用；在 jail 的规则集中使用 `add path mydev unhide` 取消隐藏"这样的一行说明非常有帮助。
 
-Neither of these is a code change. Both are decisions about naming and documentation. Driver authorship is not just about code; it is also about making the code usable by the administrators who will deploy it.
+这些都不是代码更改。两者都是关于命名和文档的决定。驱动程序编写不仅仅是关于代码；它还关于使代码对将部署它的管理员可用。
 
-### 总结 the Jail and devfs Side
+### 总结：Jail 与 devfs 侧
 
-Jails are the lightweight containerization mechanism in FreeBSD. They share the host kernel, and thus share drivers, but they control which devices are visible through the devfs ruleset mechanism. For a driver author, the relevant design decisions are at the naming and documentation level: pick names that make it easy to write rules, and document which jails should see the device.
+jail 是 FreeBSD 中的轻量级容器化机制。它们共享主机内核，因此共享驱动程序，但通过 devfs 规则集机制控制哪些设备可见。对于驱动程序作者，相关的设计决定在命名和文档层面：选择使编写规则容易的名称，并记录哪些 jail 应该看到该设备。
 
-The network side of jails is a story of its own, because FreeBSD has two models: single-stack jails that share the host's network, and VNET jails that have their own network stacks. The VNET model is the more interesting one for driver authors, because it has direct consequences for how network drivers are assigned and moved. We turn to that next.
+jail 的网络侧是一个独立的故事，因为 FreeBSD 有两种模型：共享主机网络的单一栈 jail，以及拥有自己网络栈的 VNET jail。VNET 模型对驱动程序作者来说更有趣，因为它对网络驱动程序如何分配和移动有直接影响。我们接下来讨论它。
 
-### The VNET Framework: One Kernel, Many Network Stacks
+### VNET 框架：一个内核，多个网络栈
 
-The default jail model has one network stack: the host's. Every jail sees the same routing table, the same interfaces, the same sockets. A jail can be restricted to particular IPv4 or IPv6 addresses (via `ip4.addr` and `ip6.addr` in `jail.conf(5)`), but it cannot have a genuinely independent network configuration. That is often enough for simple workloads, but it is not enough for any jail that wants to run its own firewall, use its own default gateway, or be reached by the outside world through a unique set of addresses on its own interfaces.
+默认的 jail 模型有一个网络栈：主机的。每个 jail 看到相同的路由表、相同的接口、相同的套接字。jail 可以被限制到特定的 IPv4 或 IPv6 地址（通过 `jail.conf(5)` 中的 `ip4.addr` 和 `ip6.addr`），但它不能拥有真正独立的网络配置。这对于简单工作负载通常够了，但对于任何想要运行自己的防火墙、使用自己的默认网关或通过自己接口上的唯一地址集被外部世界访问的 jail 来说是不够的。
 
-VNET (short for "virtual network stack") solves this. It is a kernel feature that replicates the parts of the network stack per jail, so each VNET jail sees its own routing table, its own interface list, its own firewall state, and its own socket namespace. The stack code still belongs to the same kernel, but many of its global variables are now per-VNET instead of truly global. A network driver's per-interface state belongs to whichever VNET it is currently assigned to, and interfaces can be moved from one VNET to another.
+VNET（"虚拟网络栈"的缩写）解决了这个问题。它是一个内核特性，按 jail 复制网络栈的各个部分，所以每个 VNET jail 看到自己的路由表、自己的接口列表、自己的防火墙状态和自己的套接字命名空间。协议栈代码仍然属于同一个内核，但它的许多全局变量现在是 per-VNET 的而非真正全局的。网络驱动程序的逐接口状态属于它当前被分配到的 VNET，接口可以从一个 VNET 移动到另一个。
 
-For driver authors, VNET is interesting in three respects. It changes how global state in network subsystems is declared. It adds a lifecycle to interfaces: interfaces can be moved, and drivers must support the move cleanly. And it interacts with jail creation and destruction through VNET-specific hooks.
+对于驱动程序作者，VNET 在三个方面很有趣。它改变了网络子系统中全局状态的声明方式。它为接口添加了生命周期：接口可以被移动，驱动程序必须干净地支持移动。它还通过 VNET 特定的钩子与 jail 的创建和销毁交互。
 
-### Declaring VNET State: VNET_DEFINE and CURVNET_SET
+### 声明 VNET 状态：VNET_DEFINE 与 CURVNET_SET
 
-VNET's design puts the work on whoever declares global state in a VNET-aware subsystem. Instead of a plain `static int mysubsys_count;`, a VNET-aware declaration looks like:
+VNET 的设计将工作放在在 VNET 感知子系统中声明全局状态的人身上。不是一个普通的 `static int mysubsys_count;`，一个 VNET 感知的声明看起来像这样：
 
 ```c
 VNET_DEFINE(int, mysubsys_count);
 #define V_mysubsys_count VNET(mysubsys_count)
 ```
 
-The `VNET_DEFINE` macro expands to a storage declaration that places the variable in a special section of the kernel. At VNET creation time, the kernel allocates a new per-VNET region of memory and initialises it from the section. The `VNET(...)` macro, used via a short alias like `V_mysubsys_count`, resolves to the correct copy for the current VNET.
+`VNET_DEFINE` 宏展开为一个存储声明，将变量放在内核的特殊段中。在 VNET 创建时，内核分配一个新的 per-VNET 内存区域并从该段初始化。`VNET(...)` 宏通过像 `V_mysubsys_count` 这样的短别名使用，解析为当前 VNET 的正确副本。
 
-"The current VNET" is thread-local context. When a thread enters code that operates on a VNET, it calls `CURVNET_SET(vnet)` to establish the context, and `CURVNET_RESTORE()` to tear it down. Inside the context, `V_mysubsys_count` resolves to the right instance. Outside the context, accessing `V_mysubsys_count` is a bug; the macro depends on the thread-local current-VNET pointer, and without that pointer set the result is undefined.
+"当前 VNET" 是线程局部上下文。当线程进入操作 VNET 的代码时，它调用 `CURVNET_SET(vnet)` 来建立上下文，调用 `CURVNET_RESTORE()` 来拆除它。在上下文内部，`V_mysubsys_count` 解析到正确的实例。在上下文外部，访问 `V_mysubsys_count` 是一个 bug；该宏依赖于线程局部的当前 VNET 指针，没有该指针集，结果是未定义的。
 
-Most driver authors do not need to write `VNET_DEFINE` declarations themselves. The network stack and the ifnet framework declare their own VNET state. Driver-level state (per-interface softcs, per-hardware private data) is not usually VNET-scoped, because it is tied to the hardware, not to the network stack. The driver's state lives wherever the driver put it, and the framework takes care of moving the right bits between VNETs when interfaces move.
+大多数驱动程序作者不需要自己编写 `VNET_DEFINE` 声明。网络栈和 ifnet 框架声明自己的 VNET 状态。驱动程序级别的状态（逐接口 softc、逐硬件私有数据）通常不是 VNET 作用域的，因为它绑定到硬件而不是网络栈。驱动程序的状态存放在驱动程序放置的地方，框架负责在接口移动时在 VNET 之间移动正确的位。
 
-What driver authors do need to do is wrap any code that touches network-stack objects in a `CURVNET_SET` / `CURVNET_RESTORE` pair if that code is called from outside a network-stack entry point. Most driver code is called from the network stack already, so the VNET context is already set. The exception is callouts and taskqueues: a callback fired from a callout does not inherit a VNET context, and the driver must establish one before touching any `V_` variable.
+驱动程序作者需要做的是将任何接触网络栈对象的代码包裹在 `CURVNET_SET` / `CURVNET_RESTORE` 对中，如果该代码从网络栈入口点之外调用。大多数驱动程序代码已经从网络栈调用，所以 VNET 上下文已经设置。例外是 callout 和 taskqueue：从 callout 触发的回调不继承 VNET 上下文，驱动程序必须在接触任何 `V_` 变量之前建立一个。
 
-A typical pattern inside a callout handler:
+callout 处理程序中的典型模式：
 
 ```c
 static void
@@ -1131,31 +1131,31 @@ mydev_callout(void *arg)
 }
 ```
 
-The driver stored a reference to the interface's VNET on attach (`sc->ifp->if_vnet` is filled in by the framework when the ifnet is created). On every callout, it establishes the context, does its work, and restores. This is one of the few places where driver authors encounter VNET directly.
+驱动程序在附加时存储了对接口 VNET 的引用（`sc->ifp->if_vnet` 在 ifnet 创建时由框架填充）。每次 callout 时，它建立上下文、执行工作并恢复。这是驱动程序作者直接遇到 VNET 的少数地方之一。
 
-### if_vmove: Moving an Interface Between VNETs
+### if_vmove：在 VNET 之间移动接口
 
-When a VNET jail starts, it typically is given one or more network interfaces to use. There are two common mechanisms. The first is that the administrator creates a virtual interface (an `epair(4)` or `vlan(4)`) and moves one end into the jail. The second is that the administrator moves a physical interface into the jail outright, so that the jail has exclusive access to it while it runs.
+当 VNET jail 启动时，通常会获得一个或多个网络接口来使用。有两种常见机制。第一种是管理员创建一个虚拟接口（`epair(4)` 或 `vlan(4)`）并将一端移入 jail。第二种是管理员将物理接口整体移入 jail，使 jail 在运行时拥有独占访问权。
 
-The move is implemented by the kernel function `if_vmove()`. It takes an interface and a destination VNET, detaches the interface from the source VNET's network stack (without destroying it), and reattaches it to the destination VNET's network stack. The interface retains its driver, its softc, its hardware state, and its configured MAC address. What changes is which VNET's routing table, firewall, and socket namespace it is attached to.
+移动由内核函数 `if_vmove()` 实现。它接受一个接口和一个目标 VNET，将接口从源 VNET 的网络栈分离（不销毁它），并重新附加到目标 VNET 的网络栈。接口保留其驱动程序、softc、硬件状态和配置的 MAC 地址。改变的是它附加到哪个 VNET 的路由表、防火墙和套接字命名空间。
 
-For a driver author, the move imposes a lifecycle requirement. The interface must be able to survive being detached from one VNET and attached to another. The driver's `if_init` function may be called again in the new context. The driver's `if_transmit` function may receive packets from the new VNET's sockets. Any state the driver caches about the "current" network stack (for example, routing-table lookups) must be invalidated or re-established.
+对于驱动程序作者，移动施加了生命周期要求。接口必须能够在从一个 VNET 分离并附加到另一个 VNET 后存活。驱动程序的 `if_init` 函数可能在新的上下文中再次被调用。驱动程序的 `if_transmit` 函数可能从新 VNET 的套接字接收数据包。驱动程序缓存的关于"当前"网络栈的任何状态（例如，路由表查找）必须被失效或重新建立。
 
-For a network driver written to the standard `ifnet(9)` interface, the move usually works without special handling. The ifnet framework does the heavy lifting, and the driver is largely unaware. What the driver must avoid is holding references to VNET-scoped state across entry points. Code like "grab a pointer to the current routing table at attach and cache it" does not survive an interface move, because the interface may later belong to a different VNET with a different table.
+对于按照标准 `ifnet(9)` 接口编写的网络驱动程序，移动通常不需要特殊处理即可工作。ifnet 框架做了大部分工作，驱动程序在很大程度上不知情。驱动程序必须避免的是在入口点之间持有对 VNET 作用域状态的引用。像"在附加时获取当前路由表的指针并缓存它"这样的代码在接口移动后无法存活，因为接口可能后来属于具有不同表的另一个 VNET。
 
-A related primitive, `if_vmove_loan()`, is used for interfaces that should return to the host when the jail shuts down. The jail gets the interface on a loan basis, and on jail destruction the interface is moved back. This is common for `epair(4)` setups where the physical connection (if any) belongs to the host and only the logical presence belongs to the jail.
+一个相关的原语 `if_vmove_loan()` 用于在 jail 关闭时应该返回主机的接口。jail 以借用方式获得接口，在 jail 销毁时接口被移回。这在 `epair(4)` 设置中很常见，其中物理连接（如果有）属于主机，只有逻辑存在属于 jail。
 
-### VNET Lifecycle Hooks
+### VNET 生命周期钩子
 
-When a VNET is created or destroyed, subsystems that keep VNET state need to initialise it or release it. The `VNET_SYSINIT` and `VNET_SYSUNINIT` macros register functions to be called at those moments. A network protocol might register an init function that creates per-VNET hash tables, and an uninit function that destroys them.
+当 VNET 被创建或销毁时，保持 VNET 状态的子系统需要初始化或释放它。`VNET_SYSINIT` 和 `VNET_SYSUNINIT` 宏注册在这些时刻调用的函数。网络协议可能注册一个创建 per-VNET 哈希表的初始化函数，以及一个销毁它们的反初始化函数。
 
-Driver authors rarely need these hooks. They are relevant to protocols and stack features, not to device drivers. They are mentioned here because you will see them scattered across the network stack code, and knowing that they are VNET lifecycle hooks helps you read the source.
+驱动程序作者很少需要这些钩子。它们与协议和栈特性相关，不与设备驱动程序相关。这里提到它们是因为你会看到它们散布在网络栈代码中，知道它们是 VNET 生命周期钩子有助于你阅读源代码。
 
-### A Concrete VNET Pattern
+### 一个具体的 VNET 模式
 
-To make the VNET abstractions concrete, consider a simplified pseudo-driver that keeps a counter of packets received per VNET. The counter must be per-VNET because the same pseudo-driver might be cloned into several VNETs simultaneously, and each clone should have its own count.
+为了使 VNET 抽象具体化，考虑一个简化的伪驱动程序，它保持一个每个 VNET 接收数据包的计数器。计数器必须是 per-VNET 的，因为同一个伪驱动程序可能被克隆到多个 VNET 中同时存在，每个克隆应该有自己的计数。
 
-The declaration looks like:
+声明看起来像这样：
 
 ```c
 #include <net/vnet.h>
@@ -1173,9 +1173,9 @@ VNET_SYSINIT(pseudo_vnet_init, SI_SUB_PSEUDO, SI_ORDER_ANY,
     pseudo_vnet_init, NULL);
 ```
 
-The `VNET_DEFINE_STATIC` places the counter in a per-VNET section of the kernel image. When a new VNET is created, the kernel copies the per-VNET section into fresh memory, so each VNET starts with its own zero-initialised copy of the counter. The `V_pseudo_rx_count` shorthand is a macro that expands to `VNET(pseudo_rx_count)`, which in turn dereferences the current VNET's storage.
+`VNET_DEFINE_STATIC` 将计数器放在内核映像的 per-VNET 段中。当新的 VNET 被创建时，内核将 per-VNET 段复制到新内存中，所以每个 VNET 都从自己的零初始化计数器副本开始。`V_pseudo_rx_count` 简写是一个展开为 `VNET(pseudo_rx_count)` 的宏，后者解引用当前 VNET 的存储。
 
-When a packet arrives, the receive path increments the counter:
+当一个数据包到达时，接收路径递增计数器：
 
 ```c
 static void
@@ -1187,9 +1187,9 @@ pseudo_receive_one(struct mbuf *m)
 }
 ```
 
-This looks like ordinary code, because the macro hides the per-VNET indirection. The condition for it to be correct is that the thread is already in the right VNET context when `pseudo_receive_one` is called. In a network driver's receive path that condition is automatic: the network stack calls the driver's entry point with the right context already established.
+这看起来像普通代码，因为宏隐藏了 per-VNET 间接引用。使其正确的条件是当调用 `pseudo_receive_one` 时线程已经在正确的 VNET 上下文中。在网络驱动程序的接收路径中，这个条件是自动的：网络栈在调用驱动程序的入口点时已经建立了正确的上下文。
 
-When the counter is accessed from an unusual context, the context must be established explicitly:
+当计数器从不寻常的上下文被访问时，必须显式建立上下文：
 
 ```c
 static void
@@ -1204,60 +1204,60 @@ pseudo_print_counter(struct vnet *vnet)
 }
 ```
 
-Here the function is called from some administrative path that does not know the current VNET, so it sets the context manually, reads the counter, restores the context, and prints the result. This is the pattern you will see repeated in VNET-aware code.
+这里函数从某个不知道当前 VNET 的管理路径被调用，所以它手动设置上下文、读取计数器、恢复上下文并打印结果。这是你会在 VNET 感知代码中看到的重复模式。
 
-### Reading Real VNET Code
+### 阅读真实的 VNET 代码
 
-If you want to see the pattern in a real driver, `/usr/src/sys/net/if_tuntap.c` is a good starting point. The `tun` and `tap` cloning drivers are VNET-aware: each clone belongs to one VNET, and creating or destroying clones respects the VNET boundaries. The code is well-commented and small enough to read in a couple of evenings.
+如果你想在一个真实驱动程序中看到这种模式，`/usr/src/sys/net/if_tuntap.c` 是一个好的起点。`tun` 和 `tap` 克隆驱动程序是 VNET 感知的：每个克隆属于一个 VNET，创建或销毁克隆遵守 VNET 边界。代码注释良好，足够小，可以在几个晚上读完。
 
-Two patterns in `if_tuntap.c` are worth noticing. The first is the use of `V_tun_cdevsw` and `V_tap_cdevsw`, per-VNET character device switch structures. Each VNET has its own copy of the switch, so `/dev/tun0` in one VNET can map to a different underlying clone than `/dev/tun0` in another VNET. This is the kind of fine-grained per-VNET duplication that the framework enables.
+`if_tuntap.c` 中有两个模式值得注意。第一个是 `V_tun_cdevsw` 和 `V_tap_cdevsw` 的使用，per-VNET 字符设备开关结构。每个 VNET 都有自己的开关副本，所以一个 VNET 中的 `/dev/tun0` 可以映射到与另一个 VNET 中 `/dev/tun0` 不同的底层克隆。这是框架启用的细粒度 per-VNET 复制的类型。
 
-The second is the use of `if_clone(9)` with VNET. The `if_clone_attach` and `if_clone_detach` functions take VNET into account automatically, so a clone created in a VNET lives in that VNET until it is explicitly moved or destroyed. The cloner does not need to carry VNET state in its softc; the framework handles it.
+第二个是 `if_clone(9)` 与 VNET 的使用。`if_clone_attach` 和 `if_clone_detach` 函数自动考虑 VNET，所以在 VNET 中创建的克隆存活在该 VNET 中，直到被显式移动或销毁。克隆器不需要在其 softc 中携带 VNET 状态；框架处理它。
 
-Studying these patterns makes the text in this chapter concrete. Read, take notes, and come back to the text if anything is unclear.
+研究这些模式使本章的文字变得具体。阅读、做笔记，如果有什么不清楚的就回来重读。
 
-### Hierarchical Jails
+### 分层监狱
 
-A brief mention of hierarchical jails, which are a feature some readers will encounter. FreeBSD supports nesting jails: a jail can create child jails, and the child jails are bounded by the parent jail's restrictions. This is useful for services that want to further subdivide their environment.
+简要提及分层 jail，这是一些读者会遇到的功能。FreeBSD 支持嵌套 jail：一个 jail 可以创建子 jail，子 jail 受父 jail 的限制约束。这对于想要进一步细分其环境的服务很有用。
 
-From a driver author's perspective, hierarchical jails do not introduce new APIs. The `prison_priv_check` helper walks the hierarchy automatically: a privilege is granted only if every level of the hierarchy allows it. A driver that uses the framework correctly works in hierarchical jails without additional code.
+从驱动程序作者的角度来看，分层 jail 不引入新的 API。`prison_priv_check` 辅助函数自动遍历层次结构：只有当层次结构的每一级都允许时，权限才被授予。正确使用框架的驱动程序在分层 jail 中无需额外代码即可工作。
 
-The administrative side is more complex (the parent jail must allow child-jail creation, the children inherit a restricted set of privileges), but the driver-side does not need to care. Knowing that the feature exists helps when you see nested jails in a deployment.
+管理侧更复杂（父 jail 必须允许子 jail 创建，子 jail 继承受限的权限集合），但驱动程序侧不需要关心。知道这个功能的存在有助于在部署中看到嵌套 jail 时不感到困惑。
 
-### Putting It All Together
+### 综合应用
 
-A FreeBSD system with jails and VNET is a system where a single kernel serves many isolated environments. Each environment sees its own filesystem view, its own process table, its own devices (filtered by devfs ruleset), and possibly its own network stack (under VNET). The driver serving all of them is a single shared binary, but it respects the isolation because it calls the framework APIs correctly.
+一个带有 jail 和 VNET 的 FreeBSD 系统是单个内核服务多个隔离环境的系统。每个环境看到自己的文件系统视图、自己的进程表、自己的设备（由 devfs 规则集过滤），可能还有自己的网络栈（在 VNET 下）。服务于所有这些的驱动程序是单个共享二进制文件，但它尊重隔离，因为它正确调用了框架 API。
 
-The framework APIs for this isolation, `priv_check`, `prison_priv_check`, `CURVNET_SET`, `VNET_DEFINE`, and the cloning helpers, are small and self-contained. A driver author who learns them once can write drivers that work correctly in every jail configuration the administrator can dream up. There is no need to special-case specific jail setups; the framework does that work.
+实现这种隔离的框架 API——`priv_check`、`prison_priv_check`、`CURVNET_SET`、`VNET_DEFINE` 和克隆辅助函数——小巧且自包含。学过一次的驱动程序作者就能编写在管理员能想到的每种 jail 配置中正确工作的驱动程序。不需要针对特定 jail 设置编写特殊代码；框架处理了这些工作。
 
-### Single-Stack Jails and the In-Between
+### 单栈监狱与中间情况
 
-Not every jail needs VNET. A jail that is running a web server that talks through a reverse proxy on the host may do perfectly well with a single-stack jail bound to a specific IPv4 address. The main cost of VNET is complexity in the stack (every protocol must be VNET-aware) and some memory overhead (each VNET has its own hash tables, caches, and counters). For lightweight jails, the single-stack model is often the better choice.
+不是每个 jail 都需要 VNET。一个通过主机上的反向代理通信的 web 服务器可能在一个绑定到特定 IPv4 地址的单一栈 jail 中运行得很好。VNET 的主要代价是栈的复杂性（每个协议都必须是 VNET 感知的）和一些内存开销（每个 VNET 有自己的哈希表、缓存和计数器）。对于轻量级 jail，单一栈模型通常是更好的选择。
 
-The trade-off for driver authors is worth knowing. A network driver that works correctly in a host-stack jail may still need attention for VNET jails, because the interface can be moved under VNET but not under the single-stack model. Writing the driver with VNET in mind from the start is the right approach; the additional discipline is small, and it future-proofs the driver.
+驱动程序作者值得了解这个权衡。一个在主机栈 jail 中正确工作的网络驱动程序可能仍需要对 VNET jail 给予关注，因为接口可以在 VNET 下移动但不在单一栈模型下移动。从一开始就考虑到 VNET 来编写驱动程序是正确的做法；额外的规范很小，而且它使驱动程序面向未来。
 
 ### 总结
 
-Jails share the host's kernel and thus the host's drivers. What they do not share is visibility: devfs rulesets control which device nodes a jail can open, and VNET controls which network interfaces a jail can use. Driver authors benefit from understanding both mechanisms, because the design choices they make (how to name `devfs` nodes, how to handle VNET context in callouts, how to support interface moves) affect how their driver behaves in jailed environments.
+jail 共享主机的内核，因此共享主机的驱动程序。它们不共享的是可见性：devfs 规则集控制 jail 可以打开哪些设备节点，VNET 控制 jail 可以使用哪些网络接口。驱动程序作者受益于理解这两种机制，因为他们的设计选择（如何命名 `devfs` 节点、如何在 callout 中处理 VNET 上下文、如何支持接口移动）影响驱动程序在 jail 环境中的行为。
 
-With the jail picture complete, we can now think about the companion question: once a jail has access to a device, what privileges does it have to use that device? Section 7 takes up resource limits and security boundaries, and looks at the other side of the jail policy story.
+jail 的全景已完成，我们现在可以思考伴随的问题：一旦 jail 有权访问设备，它有什么权限来使用该设备？第7节讨论资源限制和安全边界，并审视 jail 策略故事的另一面。
 
 ## 第7节：资源限制、安全边界与主机与 Jail 的访问
-A driver is not an isolated object. It is a consumer of kernel resources and a provider of services to processes, and both relationships are mediated by the kernel's security and accounting frameworks. When a driver runs on a FreeBSD host that contains jails, the security boundary shifts: some privileges that are unconditional on the host are restricted for jail processes, and some resources that are unmetered on a traditional system are now subject to per-jail limits. A good driver author knows where those boundaries are, because their driver's behaviour on a host is not always its behaviour inside a jail.
+驱动程序不是一个孤立的对象。它是内核资源的消费者和向进程提供服务的提供者，这两种关系都由内核的安全和记账框架中介。当驱动程序运行在包含 jail 的 FreeBSD 主机上时，安全边界发生转移：一些在主机上无条件的权限对 jail 进程受到限制，一些在传统系统上未计量的资源现在受到逐 jail 的限制。一个好的驱动程序作者知道这些边界在哪里，因为他们的驱动程序在主机上的行为不总是它在 jail 内的行为。
 
-This section covers three topics. First, the privilege framework and how `prison_priv_check` reshapes it for jails. Second, `rctl(8)` and how resource limits apply to kernel resources a driver might care about. Third, the practical distinction between attaching a driver from inside a jail (which is usually impossible) and making a driver's services available to a jail (which is the usual case).
+本节涵盖三个主题。首先是权限框架以及 `prison_priv_check` 如何为 jail 重塑它。其次是 `rctl(8)` 以及资源限制如何应用于驱动程序可能关心的内核资源。第三是从 jail 内部附加驱动程序（通常不可能）与使驱动程序的服务对 jail 可用（通常情况）之间的实际区别。
 
-### The Privilege Framework and prison_priv_check
+### 权限框架与 prison_priv_check
 
-FreeBSD uses a privilege system to make fine-grained decisions about what a process can and cannot do. Traditional UNIX has a single privilege bit (root versus not-root), and that bit determines everything. FreeBSD refines this with the `priv(9)` framework, which defines a long list of named privileges. Each privilege covers a specific kind of operation. Loading a kernel module is `PRIV_KLD_LOAD`. Setting a process's root directory is `PRIV_VFS_CHROOT`. Opening a raw socket is `PRIV_NETINET_RAW`. Configuring an interface's MAC address is `PRIV_NET_SETLLADDR`. Using a BPF device for packet capture is `PRIV_NET_BPF`.
+FreeBSD 使用权限系统来对进程能做什么和不能做什么做出细粒度决策。传统 UNIX 有一个单一的权限位（root 与非 root），该位决定一切。FreeBSD 通过 `priv(9)` 框架对此进行了细化，该框架定义了一长列命名权限。每个权限涵盖一种特定操作。加载内核模块是 `PRIV_KLD_LOAD`。设置进程的根目录是 `PRIV_VFS_CHROOT`。打开原始套接字是 `PRIV_NETINET_RAW`。配置接口的 MAC 地址是 `PRIV_NET_SETLLADDR`。使用 BPF 设备进行数据包捕获是 `PRIV_NET_BPF`。
 
-A process that is root (uid 0) has all of these privileges on the host. A process that is a jail's root has some of them, but not all. The restriction is handled by `prison_priv_check(cred, priv)`: it takes the credential and the privilege name, and returns zero if the privilege is granted and an error (usually `EPERM`) if it is denied. The kernel's privilege-checking path is structured so that for a jailed credential, `prison_priv_check` is called first; if it denies the privilege, the caller returns `EPERM` without further ado.
+主机上的 root（uid 0）进程拥有所有这些权限。jail 的 root 进程拥有其中一些，但不是全部。限制由 `prison_priv_check(cred, priv)` 处理：它接受凭证和权限名称，如果权限被授予则返回零，如果被拒绝则返回错误（通常是 `EPERM`）。内核的权限检查路径的结构使得对于 jail 内的凭证，首先调用 `prison_priv_check`；如果它拒绝了权限，调用者直接返回 `EPERM`。
 
-Which privileges a jail is allowed to exercise is determined by two things. The first is a hardcoded list inside `prison_priv_check`: some privileges are simply never granted to jails, regardless of configuration. Examples include `PRIV_KLD_LOAD` (loading kernel modules) and `PRIV_IO` (I/O port access). The second is the `allow.*` parameters in `jail.conf(5)`, which turn on or off specific categories. `allow.raw_sockets` (off by default) controls `PRIV_NETINET_RAW`. `allow.mount` (off by default) controls filesystem mounting privileges. `allow.vmm` (off by default) controls access to `vmm(4)` for running nested hypervisors. The defaults err on the side of denial: if you do not explicitly allow it, the jail does not get it.
+jail 被允许行使哪些权限由两件事决定。第一是 `prison_priv_check` 内部的硬编码列表：一些权限无论配置如何都不会授予 jail，例如 `PRIV_KLD_LOAD`（加载内核模块）和 `PRIV_IO`（I/O 端口访问）。第二是 `jail.conf(5)` 中的 `allow.*` 参数，它们开启或关闭特定类别。`allow.raw_sockets`（默认关闭）控制 `PRIV_NETINET_RAW`。`allow.mount`（默认关闭）控制文件系统挂载权限。`allow.vmm`（默认关闭）控制对 `vmm(4)` 的访问以运行嵌套虚拟机监控程序。默认偏向拒绝：如果你不明确允许，jail 就不会获得。
 
-For a driver author, the privilege framework matters whenever the driver does something that a process might or might not be allowed to do. A driver that implements a low-level hardware interface might require `PRIV_DRIVER` (the catch-all for driver-specific privilege checks) or a more specific privilege. A driver that exposes a character device whose `ioctl`s can reconfigure the hardware will call `priv_check(td, PRIV_DRIVER)` (or a more specific name) to decide whether the caller is allowed to do the reconfiguration.
+对于驱动程序作者来说，权限框架在驱动程序执行进程可能被允许或可能不被允许做的事情时很重要。实现低级硬件接口的驱动程序可能需要 `PRIV_DRIVER`（驱动程序特定权限检查的通用选项）或更具体的权限。暴露字符设备且其 `ioctl` 可以重新配置硬件的驱动程序会调用 `priv_check(td, PRIV_DRIVER)`（或更具体的名称）来决定调用者是否被允许进行重新配置。
 
-The standard pattern in driver code looks like this:
+驱动程序代码中的标准模式如下：
 
 ```c
 static int
@@ -1278,123 +1278,123 @@ mydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 }
 ```
 
-`priv_check(td, PRIV_DRIVER)` does the right thing for both host and jail callers. On a host, a root process passes; on a host, a non-root process is denied (unless the driver grants permission by other means). Inside a jail, `prison_priv_check` is consulted, and by default `PRIV_DRIVER` is denied inside jails. If the administrator has configured the jail to allow driver access (a very unusual setting), the privilege is granted and the call proceeds.
+`priv_check(td, PRIV_DRIVER)` 对主机和 jail 调用者都做正确的事情。在主机上，root 进程通过；在主机上，非 root 进程被拒绝（除非驱动程序通过其他方式授予权限）。在 jail 内，查询 `prison_priv_check`，默认情况下 `PRIV_DRIVER` 在 jail 内被拒绝。如果管理员配置了 jail 允许驱动程序访问（一个非常不寻常的设置），权限被授予，调用继续。
 
-The result is that a driver that uses `priv_check` correctly gets jail safety for free. The driver does not need to know whether the caller is in a jail; it just asks whether the caller has the right privilege, and the framework takes care of the rest.
+结果是正确使用 `priv_check` 的驱动程序免费获得了 jail 安全性。驱动程序不需要知道调用者是否在 jail 中；它只是询问调用者是否拥有正确的权限，框架处理其余的。
 
-### Named Privileges Most Relevant to Drivers
+### 与驱动程序最相关的命名权限
 
-A short reference for some of the privileges a driver author will encounter.
+驱动程序作者将遇到的一些权限的简要参考。
 
-`PRIV_IO` is for direct I/O port access on x86. It is defined in `/usr/src/sys/sys/priv.h` and is denied to jails unconditionally. Drivers that offer raw I/O port access to user space are rare (usually limited to legacy hardware like `/dev/io`), but when they exist, they use this privilege.
+`PRIV_IO` 用于 x86 上的直接 I/O 端口访问。它在 `/usr/src/sys/sys/priv.h` 中定义，对 jail 无条件拒绝。向用户空间提供原始 I/O 端口访问的驱动程序很少见（通常限于像 `/dev/io` 这样的遗留硬件），但当它们存在时，使用此权限。
 
-`PRIV_DRIVER` is the catch-all for driver-specific privileges. If a driver needs to gate an `ioctl` that only an administrator should call, `PRIV_DRIVER` is the default choice.
+`PRIV_DRIVER` 是驱动程序特定权限的通用选项。如果驱动程序需要门控一个只有管理员才应该调用的 `ioctl`，`PRIV_DRIVER` 是默认选择。
 
-`PRIV_KMEM_WRITE` gates write access to `/dev/kmem`. Like `PRIV_IO`, it is denied to jails. Writing to kernel memory is the ultimate privileged operation; no reasonable container policy allows it.
+`PRIV_KMEM_WRITE` 门控对 `/dev/kmem` 的写访问。与 `PRIV_IO` 一样，它对 jail 被拒绝。写入内核内存是终极特权操作；没有合理的容器策略允许它。
 
-`PRIV_NET_*` is a family of network-related privileges. `PRIV_NET_IFCREATE` is for creating network interfaces; `PRIV_NET_SETLLADDR` is for changing MAC addresses; `PRIV_NET_BPF` is for opening a BPF device. Each has its own jail policy, and the combinations are how a VNET jail can (for example) run `dhclient(8)` (which needs `PRIV_NET_BPF`) without also being able to arbitrarily reconfigure interfaces.
+`PRIV_NET_*` 是一系列网络相关权限。`PRIV_NET_IFCREATE` 用于创建网络接口；`PRIV_NET_SETLLADDR` 用于更改 MAC 地址；`PRIV_NET_BPF` 用于打开 BPF 设备。每个权限有自己的 jail 策略，这些组合使得 VNET jail 可以（例如）运行 `dhclient(8)`（需要 `PRIV_NET_BPF`）而不能任意重新配置接口。
 
-`PRIV_VFS_MOUNT` gates filesystem mounting. Jails have a very restricted version of this by default: they can mount `nullfs` and `tmpfs` if `allow.mount` is set, but not arbitrary filesystems.
+`PRIV_VFS_MOUNT` 控制文件系统挂载。jail 默认有非常受限的版本：如果设置了 `allow.mount`，它们可以挂载 `nullfs` 和 `tmpfs`，但不能挂载任意文件系统。
 
-A complete list is in `/usr/src/sys/sys/priv.h`. For driver authorship, you will rarely invent new privilege categories; you will pick the existing one that fits.
+完整列表在 `/usr/src/sys/sys/priv.h` 中。对于驱动程序编写，你很少需要发明新的权限类别；你会选择适合的现有权限。
 
-### rctl(8): Per-Jail and Per-Process Resource Limits
+### rctl(8)：逐监狱与逐进程的资源限制
 
-Jails (and, indeed, processes) can be subject to resource limits beyond the traditional UNIX `ulimit(1)` model. FreeBSD's `rctl(8)` (the runtime resource control framework) lets an administrator set limits on a wide variety of resources, and enforce them with specified actions when the limits are hit.
+jail（以及进程）可以受到超出传统 UNIX `ulimit(1)` 模型的资源限制。FreeBSD 的 `rctl(8)`（运行时资源控制框架）让管理员可以设置各种资源的限制，并在达到限制时以指定操作强制执行。
 
-The limits cover things like memory use, CPU time, number of processes, number of open files, I/O bandwidth, and so on. They can be applied per user, per process, per login class, or per jail. The typical use in a jail setup is to cap a jail's total memory and CPU so that a misbehaving application inside the jail cannot affect other jails on the same host.
+限制涵盖内存使用、CPU 时间、进程数、打开文件数、I/O 带宽等。它们可以按用户、按进程、按登录类或按 jail 应用。在 jail 设置中的典型用途是封顶 jail 的总内存和 CPU，使 jail 内行为异常的应用程序不能影响同一主机上的其他 jail。
 
-For a driver author, `rctl(8)` matters for a subtle reason. Drivers allocate resources on behalf of processes. When a driver calls `malloc(9)` to allocate a buffer, the memory goes somewhere. When a driver creates a file descriptor by opening a file internally, the descriptor goes somewhere. When a driver spawns a kernel thread, the thread runs as part of somebody's accounting. If the "somebody" is a process inside a jail, the accounting might hit the jail's `rctl` limits.
+对于驱动程序作者，`rctl(8)` 之所以重要有一个微妙的原因。驱动程序代表进程分配资源。当驱动程序调用 `malloc(9)` 分配缓冲区时，内存去了某个地方。当驱动程序通过内部打开文件创建文件描述符时，描述符去了某个地方。当驱动程序产生内核线程时，线程作为某个人的记账的一部分运行。如果"某个人"是 jail 内的进程，记账可能会触及 jail 的 `rctl` 限制。
 
-Usually this is exactly what you want. If a jail is supposed to be limited to 100 MB of memory, and an allocation on behalf of a jail process should count against that limit, and `rctl` hits the limit, the allocation should fail with `ENOMEM`. Your driver then propagates the failure back to user space, and the well-behaved application inside the jail handles it.
+通常这正是你想要的。如果 jail 应该被限制为 100 MB 内存，而代表 jail 进程的分配应该计入该限制，`rctl` 触及了限制，分配应该以 `ENOMEM` 失败。你的驱动程序然后将失败传播回用户空间，jail 内行为良好的应用程序处理它。
 
-Occasionally the accounting is less obvious. A driver that maintains a pool of buffers shared across all callers will, by default, charge the pool to the kernel rather than to any single process. That is fine, but it means the pool is unmetered: a very active jail can consume a larger share of the pool than it "should" under the resource limits. For most drivers this is acceptable, but for drivers whose resources are expensive (large DMA buffers, for instance) it may be worth considering whether the resource should be tracked per-process through `racct(9)`, the underlying accounting layer that `rctl` sits on top of.
+偶尔记账不太明显。维护跨所有调用者共享的缓冲池的驱动程序，默认会将缓冲池计入内核而不是任何单个进程。这没问题，但这意味着缓冲池是不计量的：一个非常活跃的 jail 可以在资源限制下消耗比它"应该"消耗的更大份额。对于大多数驱动程序这是可以接受的，但对于资源昂贵的驱动程序（例如大型 DMA 缓冲区），可能值得考虑资源是否应该通过 `racct(9)`（`rctl` 所依赖的底层记账层）按进程跟踪。
 
-The `racct(9)` framework exposes `racct_add(9)` and `racct_sub(9)` functions for drivers that want to participate in accounting. Most drivers never call these directly. Adding `racct` support is a deliberate design choice, usually made when a driver's resource consumption is large enough to matter in aggregate. For everyday character-device drivers or network drivers, the default accounting done by the kernel (per-socket buffer memory, per-process file descriptor counts, and so on) is sufficient.
+`racct(9)` 框架暴露了 `racct_add(9)` 和 `racct_sub(9)` 函数供想要参与记账的驱动程序使用。大多数驱动程序从不直接调用这些函数。添加 `racct` 支持是一个有意的设计选择，通常在驱动程序的资源消耗大到需要关注时才会做。对于日常的字符设备驱动程序或网络驱动程序，内核完成的默认记账（每套接字缓冲内存、每进程文件描述符计数等）就足够了。
 
-### Enforcement Actions and What They Mean for Drivers
+### 强制执行操作及其对驱动程序的意义
 
-When a resource limit is hit, `rctl(8)` can do one of several things: deny the operation, send a signal to the offending process, log the event, or throttle (for rate-based resources). The enforcement is handled by the kernel's accounting layer, not by drivers. What drivers see is the result: an allocation fails, a signal delivers, a rate-limited operation takes longer.
+当资源限制被触及时，`rctl(8)` 可以执行以下操作之一：拒绝操作、向违规进程发送信号、记录事件或限制速率（对于基于速率的资源）。强制执行由内核的记账层处理，而不是驱动程序。驱动程序看到的是结果：分配失败、信号送达、限速操作花费更长时间。
 
-For a driver, the practical implication is that every allocation and every resource acquisition must be written to handle failure. This is not specific to jails or `rctl`; it is good defensive coding anyway. A `malloc(9)` with `M_WAITOK` can wait for memory indefinitely, but in a jail with a memory limit, it may still fail (if `M_WAITOK` is not set) or it may block a long time waiting for memory that will never be freed (because no other process in the jail has any to free).
+对于驱动程序来说，实际的影响是每次分配和每次资源获取都必须编写为能处理失败。这不是特定于 jail 或 `rctl` 的；无论如何这都是良好的防御性编码。带有 `M_WAITOK` 的 `malloc(9)` 可以无限期等待内存，但在有内存限制的 jail 中，它仍然可能失败（如果未设置 `M_WAITOK`）或可能长时间阻塞等待永远不会被释放的内存（因为 jail 中没有其他进程有内存可释放）。
 
-The rule of thumb: if your driver is doing allocations on behalf of a user process, consider whether `M_NOWAIT` is more appropriate than `M_WAITOK`, and whether the caller can tolerate a delayed or failed allocation. Jails (and the resource limits around them) make the consideration more than theoretical.
+经验法则：如果你的驱动程序代表用户进程进行分配，考虑 `M_NOWAIT` 是否比 `M_WAITOK` 更合适，以及调用者是否能容忍延迟或失败的分配。jail（及其周围的资源限制）使这种考虑不仅是理论上的。
 
-### Host-Side Drivers versus Jail-Side Processes
+### 主机侧驱动程序与监狱侧进程
 
-A recurring question for driver authors is: can my driver be loaded or attached from inside a jail? The short answer is almost always no. Loading kernel modules (`kldload(2)`) requires `PRIV_KLD_LOAD`, which is never granted to jails. A jail that needs access to a driver's services must have that driver already loaded and attached on the host, and then the jail can use the driver through the usual user-space interfaces.
+驱动程序作者反复出现的一个问题是：我的驱动程序能从 jail 内部加载或附加吗？简短的回答几乎总是不能。加载内核模块（`kldload(2)`）需要 `PRIV_KLD_LOAD`，它从不授予 jail。需要访问驱动程序服务的 jail 必须已经在主机上加载和附加了该驱动程序，然后 jail 可以通过通常的用户空间接口使用驱动程序。
 
-This is a consequence of the single-kernel model. A jail does not have its own kernel, so it cannot load drivers of its own. What it has is access (subject to the devfs ruleset) to the drivers that the host has loaded. In practice this means:
+这是单内核模型的结果。jail 没有自己的内核，所以它不能加载自己的驱动程序。它拥有的是（受 devfs 规则集约束的）对主机已加载驱动程序的访问权。实际上这意味着：
 
-- Driver loading and unloading happen on the host. The host administrator is responsible for `kldload` and `kldunload`.
-- Device attachment to devices happens on the host. The driver's `DEVICE_ATTACH` runs in host context, not in jail context.
-- Device access from user space happens inside the jail, through `/dev` (if the ruleset allows) and through the driver's `open`/`read`/`write`/`ioctl` methods.
+- 驱动程序的加载和卸载在主机上发生。主机管理员负责 `kldload` 和 `kldunload`。
+- 设备附加在主机上发生。驱动程序的 `DEVICE_ATTACH` 在主机上下文中运行，而不是在 jail 上下文中。
+- 从用户空间对设备的访问在 jail 内发生，通过 `/dev`（如果规则集允许）和驱动程序的 `open`/`read`/`write`/`ioctl` 方法。
 
-The separation is usually clean. The driver does not need to know whether its caller is in a jail; the kernel handles the context. Where it sometimes matters is in `ioctl` handlers that want to distinguish host and jail callers, or in drivers that allocate resources per-open whose release policy differs.
+分离通常是干净的。驱动程序不需要知道其调用者是否在 jail 中；内核处理上下文。有时重要的是在想要区分主机和 jail 调用者的 `ioctl` 处理程序中，或者在分配每次打开资源的驱动程序中，这些资源的释放策略不同。
 
-A specific caveat: when a driver creates state on open, that state survives until close. If the jail that held the open file descriptor goes away before the descriptor is closed (because the jail was destroyed while processes still had the device open), the kernel will close the descriptor on the jail's behalf. The driver's `close` method will run in a safe context. But the driver should not assume that the jail still exists during close; it may not, and if the driver tries to reach into the jail's state, it will encounter a freed `struct prison`. The clean rule is that `close` should only touch driver state, not jail state.
+一个具体的注意事项：当驱动程序在打开时创建状态时，该状态一直存活到关闭。如果持有打开文件描述符的 jail 在描述符关闭之前消失了（因为 jail 在进程仍然打开设备时被销毁），内核将代表 jail 关闭描述符。驱动程序的 `close` 方法将在安全的上下文中运行。但驱动程序不应该假设 jail 在关闭期间仍然存在；它可能不存在了，如果驱动程序试图访问 jail 的状态，它将遇到已释放的 `struct prison`。干净的规则是 `close` 只应触碰驱动程序状态，而不是 jail 状态。
 
-### How Drivers Cooperate with Jails in Practice
+### 驱动程序如何在实际中与监狱协作
 
-Putting the pieces together, a typical FreeBSD setup with a driver and a jail looks like this.
+将各部分放在一起，一个带有驱动程序和 jail 的典型 FreeBSD 设置看起来像这样。
 
-1. The administrator loads the driver on the host, either at boot through `/boot/loader.conf` or at runtime through `kldload(8)`.
-2. The driver's probe and attach functions run on the host, create whatever `devfs` nodes are appropriate, and register their `cdev_methods`.
-3. The administrator creates a jail, possibly with a specific devfs ruleset and possibly with VNET.
-4. The jail's processes open the driver's devices (if they are visible through the ruleset) and make `ioctl` or `read`/`write` calls.
-5. The driver's methods execute on behalf of the jail process, with the jail's credential attached to the thread, and the driver's `priv_check` calls correctly return `EPERM` for privileges the jail does not hold.
-6. When the jail is destroyed, open file descriptors are closed, the driver's `close` methods run cleanly, and the driver's state returns to its normal host-only view.
+1. 管理员在主机上加载驱动程序，要么在启动时通过 `/boot/loader.conf`，要么在运行时通过 `kldload(8)`。
+2. 驱动程序的探测和附加函数在主机上运行，创建适当的 `devfs` 节点并注册其 `cdev_methods`。
+3. 管理员创建一个 jail，可能带有特定的 devfs 规则集，也可能带有 VNET。
+4. jail 的进程打开驱动程序的设备（如果它们通过规则集可见）并进行 `ioctl` 或 `read`/`write` 调用。
+5. 驱动程序的方法代表 jail 进程执行，jail 的凭证附加到线程上，驱动程序的 `priv_check` 调用正确地为 jail 不持有的权限返回 `EPERM`。
+6. 当 jail 被销毁时，打开的文件描述符被关闭，驱动程序的 `close` 方法干净地运行，驱动程序的状态返回到其正常的主机视图。
 
-Nothing in this flow requires the driver to know about jails explicitly. The driver is a passive participant that calls the right framework functions, and the framework handles the rest. This is the cleanest possible design, and it is what you should aim for.
+这个流程中没有任何东西要求驱动程序显式地了解 jail。驱动程序是一个被动参与者，调用正确的框架函数，框架处理其余的。这是最干净的设计，也是你应该追求的。
 
-### The Container Frameworks: ocijail and pot
+### 容器框架：ocijail 与 pot
 
-FreeBSD's jail infrastructure is a kernel mechanism; the user-space tooling around it has multiple forms. The base system provides `jail(8)`, `jail.conf(5)`, `jls(8)`, and related tools. These are enough to manage jails by hand or with shell scripts.
+FreeBSD 的 jail 基础设施是一个内核机制；围绕它的用户空间工具有多种形式。基本系统提供 `jail(8)`、`jail.conf(5)`、`jls(8)` 和相关工具。这些足以手动或通过 shell 脚本管理 jail。
 
-Higher-level container frameworks have emerged on top. `ocijail` aims to provide an OCI (Open Container Initiative) runtime that uses jails as the isolation mechanism, letting FreeBSD participate in container ecosystems that use OCI-compliant images. `pot` (available from ports) is a more FreeBSD-native container manager that bundles a jail with a filesystem layer, a network configuration, and a lifecycle. Both are external to the base system and are installed through the ports collection or packages.
+更高级的容器框架已经在其之上出现。`ocijail` 旨在提供一个使用 jail 作为隔离机制的 OCI（开放容器倡议）运行时，让 FreeBSD 参与使用 OCI 兼容镜像的容器生态系统。`pot`（可从 ports 获取）是一个更加 FreeBSD 原生的容器管理器，它将 jail 与文件系统层、网络配置和生命周期捆绑在一起。两者都不在基本系统中，通过 ports 集合或包安装。
 
-For a driver author, these frameworks do not change the fundamentals. They still use jails underneath; they still rely on devfs rulesets and VNET for isolation; they still respect the same privilege framework. What they change is how administrators describe and deploy the containers, not how the drivers interact with them. A driver that works with a hand-crafted `jail.conf(5)` will work with `ocijail` and `pot` as well.
+对于驱动程序作者来说，这些框架不改变基本面。它们仍然在底层使用 jail；它们仍然依赖 devfs 规则集和 VNET 进行隔离；它们仍然遵守相同的权限框架。它们改变的是管理员如何描述和部署容器，而不是驱动程序如何与它们交互。一个与手工编写的 `jail.conf(5)` 一起工作的驱动程序也能与 `ocijail` 和 `pot` 一起工作。
 
-The most a driver author usually needs to know is that these frameworks exist and are becoming common. If your driver's documentation mentions jails, mention that the recommendations apply equally to container frameworks built on top. That single sentence saves administrators a lot of guesswork.
+驱动程序作者通常最需要知道的就是这些框架存在并且变得越来越普遍。如果你的驱动程序文档提到了 jail，也提及这些建议同样适用于建立在其上的容器框架。这一句话可以为管理员省去很多猜测。
 
 ### 总结
 
-Jails are a policy boundary around a shared kernel. The policy extends into three dimensions: which devices are visible (devfs rulesets), which privileges are granted (`prison_priv_check` and `allow.*` parameters), and which resources can be consumed (`rctl(8)`). Driver authors encounter each of these in small, local ways: `priv_check` for privileged operations, sensible naming of `devfs` nodes, graceful handling of allocation failures. There is no large new API to learn; there are small new habits to pick up.
+jail 是围绕共享内核的策略边界。策略延伸到三个维度：哪些设备可见（devfs 规则集）、哪些权限被授予（`prison_priv_check` 和 `allow.*` 参数），以及哪些资源可以被消耗（`rctl(8)`）。驱动程序作者以小型、局部的方式遇到这些：`priv_check` 用于特权操作、合理的 `devfs` 节点命名、优雅地处理分配失败。没有大型新 API 需要学习；只有一些小的新习惯需要养成。
 
-With the security and resource picture covered, the final conceptual topic is how to actually test and develop drivers in virtualised and containerised environments. Section 8 pulls the chapter's ideas together into a development workflow.
+安全和资源的全貌已经覆盖，最后一个概念性主题是如何在虚拟化和容器化环境中实际测试和开发驱动程序。第8节将本章的想法整合为一个开发工作流。
 
 ## 第8节：为虚拟化与容器化环境测试和重构驱动程序
-A driver that runs on bare metal is a driver that works on one configuration. A driver that runs across virtualisation and containerisation has been exercised under varied conditions: different bus presentations, different interrupt delivery mechanisms, different memory-mapping behaviours, different privilege contexts. The driver that makes it through all of those without changes is the driver that will survive the next new environment too. This section describes the development and testing workflow that gets you there.
+一个只在裸金属上运行的驱动程序是一个只在一个配置上工作的驱动程序。一个跨虚拟化和容器化运行的驱动程序已经在多种条件下被测试：不同的总线呈现、不同的中断投递机制、不同的内存映射行为、不同的权限上下文。通过了所有这些而不需要更改的驱动程序也能在下一个新环境中存活。本节描述实现这一目标的开发和测试工作流程。
 
-The workflow has three layers. The development layer uses a VM as a disposable kernel host, so that panics and hangs cost you nothing. The integration layer uses VirtIO devices, passthrough, and jails to exercise the driver in realistic environments. The regression layer uses automation to run the whole suite repeatedly as the driver evolves.
+工作流程有三层。开发层使用 VM 作为一次性内核主机，所以 panic 和挂起的代价为零。集成层使用 VirtIO 设备、直通和 jail 在现实环境中测试驱动程序。回归层使用自动化随着驱动程序的演进重复运行整个套件。
 
-### Using a VM as Your Development Host
+### 使用虚拟机作为开发主机
 
-When you are writing a kernel module, the cost of a panic is your session. On a bare-metal development machine, a panic interrupts your work, possibly forces a filesystem check, and may require a reboot with manual recovery steps. On a VM, a panic is a detail: the VM stops, you restart it, and the host is untouched.
+当你编写内核模块时，panic 的代价是你的会话。在裸金属开发机器上，panic 会中断你的工作，可能强制文件系统检查，并可能需要手动恢复步骤的重启。在 VM 上，panic 是一个细节：VM 停止，你重新启动它，主机不受影响。
 
-For this reason, experienced driver authors do almost all of their new-driver development inside a `bhyve(8)` or QEMU-based VM, not on bare metal. The workflow looks like this:
+因此，经验丰富的驱动程序作者几乎所有新驱动程序开发都在 `bhyve(8)` 或基于 QEMU 的 VM 中进行，而不是在裸金属上。工作流程如下：
 
-1. A FreeBSD 14.3 VM is installed in `bhyve(8)` with a standard disk image.
-2. The source tree is either on the VM's own disk or mounted via NFS from a host-side build machine.
-3. The driver is built inside the VM (`make clean && make`) or on the host and copied in.
-4. `kldload(8)` loads the module. If the module panics the kernel, the VM crashes, and the VM is restarted.
-5. Once the module loads cleanly, it is exercised against whatever test fixture you have: a VirtIO device, a loopback mode, or a passthrough target.
+1. 在 `bhyve(8)` 中安装一个使用标准磁盘映像的 FreeBSD 14.3 VM。
+2. 源代码树或者在 VM 自己的磁盘上，或者通过 NFS 从主机侧的构建机器挂载。
+3. 驱动程序在 VM 内构建（`make clean && make`）或在主机上构建后复制进来。
+4. `kldload(8)` 加载模块。如果模块导致内核 panic，VM 崩溃，重启 VM 即可。
+5. 模块干净加载后，对你拥有的测试装置进行测试：VirtIO 设备、回环模式或直通目标。
 
-The key point is that iteration is fast. A broken module that would make a bare-metal machine unbootable is a minor inconvenience in a VM. You can try things that you would never try on a machine you rely on.
+关键点是迭代速度很快。一个会使裸金属机器无法启动的损坏模块在 VM 中只是一个小小的不便。你可以尝试在你依赖的机器上永远不会尝试的事情。
 
-For VirtIO driver development specifically, the VM is not just convenient; it is the only sensible platform. VirtIO devices only exist inside VMs (or under qemu emulation), so the VM is where the devices are. Starting a VM with a virtio-rnd device, or a virtio-net device, or a virtio-console device, gives you a target to develop against. The hypervisor provides everything a real device would provide, including interrupts, DMA, and register access, so the driver you write inside the VM is the same driver that will run anywhere else.
+对于 VirtIO 驱动程序开发来说，VM 不仅方便；它是唯一合理的平台。VirtIO 设备只存在于 VM 内（或在 qemu 模拟下），所以 VM 就是设备所在的地方。启动一个带有 virtio-rnd 设备、virtio-net 设备或 virtio-console 设备的 VM 给你一个开发目标。虚拟机监控程序提供了真实设备会提供的一切，包括中断、DMA 和寄存器访问，所以你在 VM 内编写的驱动程序与在其他任何地方运行的驱动程序相同。
 
-### Using VirtIO as a Test Substrate
+### 使用 VirtIO 作为测试基底
 
-VirtIO has a second role beyond being the target for VirtIO drivers: it is a test substrate. Because VirtIO devices are easy to define, easy to emulate, and well-documented, they are useful for building controlled test scenarios even for drivers that are not VirtIO drivers.
+VirtIO 除了作为 VirtIO 驱动程序的目标之外还有第二个角色：它是一个测试基底。因为 VirtIO 设备易于定义、易于模拟且有良好文档，它们对于为非 VirtIO 驱动程序构建受控测试场景也很有用。
 
-For example, suppose you are writing a driver for a physical PCI device, and you want to test how your driver handles a specific error condition. On the real hardware, reproducing the error may require a specific physical fault, which is hard to arrange. On a VirtIO-based proxy, you can implement a device that always returns the error, and test your driver's error path without touching the physical hardware. The caveat is that your driver must be loosely coupled to the specific hardware (the techniques from Chapter 29 matter here); the more the driver is split along the accessor/backend lines described there, the easier it is to test the upper layers against a synthetic backend.
+例如，假设你正在为一个物理 PCI 设备编写驱动程序，你想测试驱动程序如何处理特定的错误条件。在真实硬件上，重现错误可能需要特定的物理故障，这很难安排。在基于 VirtIO 的代理上，你可以实现一个总是返回错误的设备，在不触碰物理硬件的情况下测试驱动程序的错误路径。需要注意的是，你的驱动程序必须与特定硬件松耦合（第 29 章的技术在这里很重要）；驱动程序越是按照该章描述的访问器/后端方式拆分，就越容易针对合成后端测试上层代码。
 
-The mechanism for synthesizing VirtIO devices in user space is `bhyve`'s own pluggable emulated devices. Writing a new `bhyve` device emulator is beyond the scope of this chapter, but the relevant code lives in `/usr/src/usr.sbin/bhyve/` and is approachable if you have basic C skills. For simpler cases, using a pre-existing virtio-blk, virtio-net, or virtio-console device configured with specific parameters is often enough.
+在用户空间合成 VirtIO 设备的机制是 `bhyve` 自己的可插拔模拟设备。编写新的 `bhyve` 设备模拟器超出了本章范围，但相关代码位于 `/usr/src/usr.sbin/bhyve/`，如果你有基本的 C 技能是可以入门的。对于更简单的情况，使用带有特定参数的预存 virtio-blk、virtio-net 或 virtio-console 设备通常就足够了。
 
-### Using Jails for Integration Testing
+### 使用监狱进行集成测试
 
-When your driver is working and you want to verify it under container-style isolation, jails are the obvious next step. The setup is simple: create a jail with an appropriate devfs ruleset that exposes your device, and run your user-space test harness inside the jail.
+当你的驱动程序可以工作并且想在容器式隔离下验证它时，jail 是显而易见的下一步。设置很简单：创建一个带有适当 devfs 规则集（暴露你的设备）的 jail，并在 jail 内运行你的用户空间测试工具。
 
 A typical test shape:
 
@@ -1411,128 +1411,128 @@ myjail {
 }
 ```
 
-Inside the jail, you run your test harness. It opens `/dev/mydev`, exercises the `ioctl`s or the `read`/`write` methods, and records results. On the host, you run the same harness and compare. If the jail-side test passes and the host-side test passes, your driver tolerates the jail environment.
+在 jail 内部，你运行测试工具。它打开 `/dev/mydev`，测试 `ioctl` 或 `read`/`write` 方法，并记录结果。在主机上，你运行相同的测试工具进行比较。如果 jail 侧的测试通过且主机侧的测试也通过，你的驱动程序就能容忍 jail 环境。
 
-If one passes and the other does not, you have a diagnostic opportunity. Possible reasons for a divergence include: a privilege check that denies the jail call (look for `priv_check` in your driver), a device node permission the ruleset does not account for, a resource limit the host happens to avoid, or a jail-specific code path in your driver that exists by mistake. Each of these is fixable once identified.
+如果一个通过而另一个没有，你就获得了一个诊断机会。产生差异的可能原因包括：一个拒绝 jail 调用的权限检查（在驱动程序中查找 `priv_check`）、规则集未考虑的设备节点权限、主机恰好避免的资源限制，或者驱动程序中错误存在的 jail 特定代码路径。每一个问题一旦识别就可以修复。
 
-### Using VNET Jails for Network Driver Testing
+### 使用 VNET 监狱进行网络驱动程序测试
 
-For network drivers, the test is similar but uses VNET. Create a jail with `vnet = 1` in `jail.conf(5)`, move one end of an `epair(4)` into the jail, and run traffic between the jail and the host. If your driver is a physical network driver, you can also move the physical interface into the jail for a full-isolation test.
+对于网络驱动程序，测试类似但使用 VNET。在 `jail.conf(5)` 中创建一个 `vnet = 1` 的 jail，将 `epair(4)` 的一端移入 jail，在 jail 和主机之间运行流量。如果你的驱动程序是物理网络驱动程序，也可以将物理接口移入 jail 进行完全隔离测试。
 
-The VNET test exercises the `if_vmove()` lifecycle: the interface is detached from the host's VNET, reattached to the jail's VNET, and eventually returned. A driver that survives this without losing state is a driver that tolerates VNET. A driver that panics, hangs, or stops delivering packets after a move has work to do.
+VNET 测试锻炼 `if_vmove()` 生命周期：接口从主机的 VNET 分离，重新附加到 jail 的 VNET，最终返回。在不丢失状态的情况下存活下来的驱动程序就是能容忍 VNET 的驱动程序。在移动后 panic、挂起或停止传递数据包的驱动程序还有工作要做。
 
-The common failure modes in VNET testing are:
+VNET 测试中常见的故障模式有：
 
-- The driver holds a pointer to the host's ifnet or VNET across the move, and uses it from a callout after the move has happened.
-- The driver's `if_init` assumes it is called in the original VNET and fails when called in the new one.
-- The driver cleans up incorrectly at `if_detach`, because it does not distinguish "detach to move" from "detach to destroy".
+- 驱动程序在移动过程中持有指向主机 ifnet 或 VNET 的指针，并在移动发生后从 callout 中使用它。
+- 驱动程序的 `if_init` 假设它在原始 VNET 中被调用，在新 VNET 中被调用时失败。
+- 驱动程序在 `if_detach` 时清理不正确，因为它没有区分"为移动而分离"和"为销毁而分离"。
 
-Each of these is diagnosable with `dtrace(1)` or kernel printfs at the right place. The first time you see a VNET-related crash, find the point in the driver where the move happens and work backward from there.
+这些问题中的每一个都可以通过 `dtrace(1)` 或在正确位置的内核 printf 来诊断。第一次看到 VNET 相关崩溃时，找到驱动程序中发生移动的位置，然后从那里往回追踪。
 
-### Passthrough Testing
+### 直通测试
 
-PCI passthrough is the exercise that validates your driver's detach path. Create a `bhyve(8)` guest with your device passed through, install FreeBSD inside, and load your driver there. If the driver attaches cleanly in the guest, your device setup and DMA code handle IOMMU remapping correctly. If the driver loads, the test is simple: run the driver's normal workload inside the guest.
+PCI 直通是验证驱动程序分离路径的练习。创建一个直通了你的设备的 `bhyve(8)` 客户机，在其中安装 FreeBSD，并在那里加载驱动程序。如果驱动程序在客户机中干净地附加，你的设备设置和 DMA 代码能正确处理 IOMMU 重映射。如果驱动程序加载了，测试就很简单：在客户机内运行驱动程序的正常工作负载。
 
-The detach test is the harder one. Shut down the guest, rebind the device to its native driver on the host (by unloading `ppt(4)` from that device, if necessary, and letting the host's driver re-attach), and exercise the driver on the host. If the driver attaches cleanly after the guest has used the device and put it through whatever state changes, the driver's `DEVICE_ATTACH` is properly defensive. If it fails, look for assumptions about the device's initial state that should not be assumptions.
+分离测试更难。关闭客户机，将设备重新绑定到主机上的原生驱动程序（如有必要，从该设备卸载 `ppt(4)`，让主机的驱动程序重新附加），并在主机上操作驱动程序。如果驱动程序在客户机使用过设备并将其置于各种状态后仍能干净地附加，说明驱动程序的 `DEVICE_ATTACH` 是充分防御性的。如果失败，寻找关于设备初始状态的假设，这些假设不应该存在。
 
-The full round-trip (host, guest, host) is the gold standard for passthrough compatibility. A driver that passes it can be handed to any administrator with confidence.
+完整的往返（主机、客户机、主机）是直通兼容性的黄金标准。通过它的驱动程序可以放心地交给任何管理员。
 
-### Hypervisor Detection in Tests
+### 测试中的虚拟机监控程序检测
 
-If your driver uses `vm_guest` to adjust defaults, test the adjustment. Run the driver on bare metal (if available), inside `bhyve(8)`, inside QEMU/KVM, and observe whether the defaults it picks make sense. The `kern.vm_guest` sysctl is your quick check:
+如果你的驱动程序使用 `vm_guest` 调整默认值，测试这种调整。在裸金属上（如果可用）、在 `bhyve(8)` 内、在 QEMU/KVM 内运行驱动程序，观察它选择的默认值是否合理。`kern.vm_guest` sysctl 是你的快速检查：
 
 ```sh
 sysctl kern.vm_guest
 ```
 
-If your driver logs its environment at attach time ("attaching on bhyve host, defaulting to X"), the log makes the detection visible, which helps with debugging. Do not over-log: once at attach is usually enough.
+如果你的驱动程序在附加时记录其环境（"在 bhyve 主机上附加，默认为 X"），日志使检测可见，有助于调试。不要过度记录：附加时一次通常就足够了。
 
-### Automating the Test Suite
+### 自动化测试套件
 
-Once the individual tests are known, the next step is to run them repeatedly as the driver evolves. FreeBSD's `kyua(1)` test runner, combined with the `atf(7)` test framework, is the standard mechanism. A test suite that includes a "bare-metal test", a "VirtIO guest test", a "VNET jail test", and a "passthrough test" covers most of what you want to verify.
+一旦各个测试已知，下一步是在驱动程序演进过程中重复运行它们。FreeBSD 的 `kyua(1)` 测试运行器配合 `atf(7)` 测试框架是标准机制。包含"裸金属测试"、"VirtIO 客户机测试"、"VNET jail 测试"和"直通测试"的测试套件覆盖了你想要验证的大部分内容。
 
-The details of writing tests in `atf(7)` are outside this chapter; they are treated more fully in Chapter 32 (Debugging Drivers) and Chapter 33 (Testing and Validation). The point for now is that the test suite should exercise the driver across the environments it is expected to run in. A single test on bare metal proves very little about virtualisation; a suite of tests across environments proves something about portability.
+在 `atf(7)` 中编写测试的细节超出了本章范围；它们在第 32 章（调试驱动程序）和第 33 章（测试与验证）中有更详细的讨论。现在的重点是测试套件应该在驱动程序预期运行的各个环境中进行测试。在裸金属上的单个测试对虚拟化几乎没有证明力；跨环境的测试套件才对可移植性有所证明。
 
-### Refactoring Tips Revisited
+### 重温重构技巧
 
-In Chapter 29 we introduced a discipline for portability: accessor layers, backend abstractions, endian helpers, no hidden hardware assumptions. Virtualisation and containerisation put that discipline to the test. A driver written with clean abstractions will survive the variety of environments described in this chapter; a driver with hidden assumptions will hit them as soon as the environment changes.
+在第 29 章中，我们介绍了一种可移植性的规范：访问器层、后端抽象、字节序辅助函数、没有隐藏的硬件假设。虚拟化和容器化检验了这种规范。用干净抽象编写的驱动程序能在本章描述的各种环境中存活；带有隐藏假设的驱动程序会在环境改变时立即碰到问题。
 
-The refactoring tips most relevant to this chapter are:
+与本章最相关的重构技巧有：
 
-- Put all register access through accessors, so the access path can be simulated or redirected in tests.
-- Handle the full lifecycle: attach, detach, suspend, resume. Passthrough exercises attach and detach repeatedly; VNET exercises detach in a way the driver might not see on bare metal.
-- Use `bus_dma(9)` and `bus_space(9)` correctly, never physical addresses directly. The guest-versus-host address translation under passthrough depends on correct use of these APIs.
-- Use `priv_check` for privilege gating, not hardcoded uid 0 checks. Jail restrictions work correctly only if the framework is called.
-- Use `CURVNET_SET` around any callout or taskqueue code that touches network-stack state. This is the one VNET-specific discipline that catches most driver authors off guard.
+- 将所有寄存器访问通过访问器进行，这样访问路径可以在测试中被模拟或重定向。
+- 处理完整的生命周期：附加、分离、挂起、恢复。直通反复锻炼附加和分离；VNET 以驱动程序在裸金属上可能看不到的方式锻炼分离。
+- 正确使用 `bus_dma(9)` 和 `bus_space(9)`，永远不要直接使用物理地址。直通下的客户机与主机地址转换依赖于这些 API 的正确使用。
+- 使用 `priv_check` 进行权限门控，而不是硬编码 uid 0 检查。jail 限制只有在框架被调用时才能正确工作。
+- 在任何接触网络协议栈状态的 callout 或 taskqueue 代码周围使用 `CURVNET_SET`。这是让大多数驱动程序作者措手不及的 VNET 特定规范。
 
-None of these are new concepts. They are all standard FreeBSD driver practice. What this chapter adds is the context in which each one matters: which environments exercise which disciplines. Knowing that lets you prioritise when deciding what to refactor first.
+这些都不是新概念。它们都是标准的 FreeBSD 驱动程序实践。本章增加的是每个规范在什么上下文中重要的背景：哪些环境锻炼哪些规范。知道这些可以让你在决定先重构什么时排列优先级。
 
-### A Development Order That Works
+### 行之有效的开发顺序
 
-Putting the pieces together, here is a development order that has proven effective.
+将各部分放在一起，以下是已被证明有效的开发顺序。
 
-1. Start in a `bhyve(8)` VM. Write the driver's basic skeleton (module hooks, probe and attach, simple I/O path). Exercise it with `kldload` and a minimal test.
-2. Add the accessor layer and the backend abstraction from Chapter 29. Test that the simulation backend runs, even if the real hardware is not yet plugged in.
-3. If VirtIO is the target, develop against `virtio_pci.c` in the VM. You have a real device to talk to, and you can iterate quickly.
-4. If real hardware is the target, begin PCI passthrough testing when the driver reaches a stable point. The round-trip (host, guest, host) becomes part of the regular test cycle.
-5. Add jail-based tests when the driver exposes user-space interfaces. Start with a single-stack jail; move to VNET if the driver is a network driver.
-6. Add automation with `kyua(1)` and `atf(7)` as the test count grows.
-7. When a bug is found, reproduce it in the smallest environment that shows the bug, fix it, and add a regression test at that level.
+1. 在 `bhyve(8)` VM 中开始。编写驱动程序的基本骨架（模块钩子、探测和附加、简单 I/O 路径）。用 `kldload` 和最小测试来验证它。
+2. 添加第 29 章的访问器层和后端抽象。测试模拟后端能运行，即使真实硬件尚未插入。
+3. 如果 VirtIO 是目标，在 VM 中针对 `virtio_pci.c` 开发。你有一个真实的设备可以对话，可以快速迭代。
+4. 如果真实硬件是目标，当驱动程序达到稳定点时开始 PCI 直通测试。往返（主机、客户机、主机）成为常规测试周期的一部分。
+5. 当驱动程序暴露用户空间接口时添加基于 jail 的测试。从单栈 jail 开始；如果驱动程序是网络驱动程序则转向 VNET。
+6. 随着测试数量增长，用 `kyua(1)` 和 `atf(7)` 添加自动化。
+7. 发现 bug 时，在能显示 bug 的最小环境中重现它，修复它，并在该级别添加回归测试。
 
-This order keeps the iteration fast at the beginning (where it matters most) and adds environmental complexity only as the driver stabilises. Trying to test everything at once is a common beginner mistake; it is how projects stall. The incremental path is slower per step but much faster in aggregate.
+这个顺序在开始时保持快速迭代（在最重要的地方），只在驱动程序稳定时才增加环境复杂性。试图一次测试所有东西是初学者的常见错误；这就是项目停滞的原因。增量路径每步较慢，但总体上快得多。
 
-### An End-to-End Example: From Bare Metal to Passthrough
+### 端到端示例：从裸金属到直通
 
-To illustrate the workflow, here is a complete example walkthrough for a hypothetical driver called `mydev`. The driver is a PCI-based character device; it has a small register interface, uses MSI-X interrupts, and performs DMA. The development order below is condensed into a single narrative so you can see how the steps connect.
+为了说明工作流程，这里有一个名为 `mydev` 的假设驱动程序的完整示例演练。该驱动程序是一个基于 PCI 的字符设备；它有一个小型寄存器接口，使用 MSI-X 中断，并执行 DMA。下面的开发顺序被浓缩为一个单一的叙述，以便你可以看到各步骤如何连接。
 
-Day 1: skeleton in a VM. You install a FreeBSD 14.3 guest in `bhyve(8)`, set up NFS so the source tree on your host is visible in the guest, and write the module skeleton. It is a `KMOD=mydev, SRCS=mydev.c` Makefile and a `mydev.c` with `DECLARE_MODULE`, a stub probe, a stub attach, and a stub detach. It loads and unloads cleanly. `dmesg` shows "mydev: hello" on load.
+第 1 天：VM 中的骨架。你在 `bhyve(8)` 中安装 FreeBSD 14.3 客户机，设置 NFS 使主机上的源代码树在客户机中可见，并编写模块骨架。它是一个 `KMOD=mydev, SRCS=mydev.c` 的 Makefile 和一个包含 `DECLARE_MODULE`、桩探测、桩附加和桩分离的 `mydev.c`。它能干净地加载和卸载。`dmesg` 在加载时显示 "mydev: hello"。
 
-Day 2: accessor layer. You add the Chapter 29 accessor pattern: all register access goes through `mydev_reg_read32` and `mydev_reg_write32`, with the real backend calling `bus_read_4` and `bus_write_4`. You also add a simulation backend that stores register values in a small in-memory array. The simulation backend is selected by a module parameter. The accessor layer means the same driver can run against a real device or against the simulated backend without changes to the upper code.
+第 2 天：访问器层。你添加第 29 章的访问器模式：所有寄存器访问通过 `mydev_reg_read32` 和 `mydev_reg_write32` 进行，真实后端调用 `bus_read_4` 和 `bus_write_4`。你还添加了一个在小型内存数组中存储寄存器值的模拟后端。模拟后端通过模块参数选择。访问器层意味着同一个驱动程序可以针对真实设备或模拟后端运行，而无需更改上层代码。
 
-Day 3: upper-layer code. You add the driver's core logic: initialisation, the character-device interface (`open`, `close`, `read`, `write`), the `ioctl` surface, and the DMA setup. The simulation backend does not model DMA, but the upper layer is structured to treat DMA through `bus_dma(9)` handles, so the code is written correctly from the start. You exercise the code through the simulation backend in a simple test program: open the device, issue `ioctl`s, verify the responses.
+第 3 天：上层代码。你添加驱动程序的核心逻辑：初始化、字符设备接口（`open`、`close`、`read`、`write`）、`ioctl` 接口和 DMA 设置。模拟后端不模拟 DMA，但上层结构化地通过 `bus_dma(9)` 句柄处理 DMA，所以代码从一开始就是正确编写的。你通过模拟后端在一个简单测试程序中验证代码：打开设备、发出 `ioctl`、验证响应。
 
-Day 4: real hardware, passthrough setup. You have the target hardware in a workstation. You add `pptdevs` to `/boot/loader.conf`, reboot, and confirm that `ppt(4)` has claimed the device. You add `passthru` to the `bhyve(8)` guest configuration and boot the guest. Inside the guest, you load your driver. The driver attaches to the passed-through device. You have now demonstrated that the real hardware path works.
+第 4 天：真实硬件、直通设置。你将目标硬件放在工作站中。你在 `/boot/loader.conf` 中添加 `pptdevs`，重启，确认 `ppt(4)` 已占用了该设备。你向 `bhyve(8)` 客户机配置添加 `passthru` 并启动客户机。在客户机内部，你加载驱动程序。驱动程序附加到直通设备。你现在已证明真实硬件路径可以工作。
 
-Day 5: interrupts and DMA testing. The driver receives interrupts; the MSI-X setup code works. You test DMA: a short DMA read works, a long DMA read works, a simultaneous read and write works. You find one bug: the driver programs a physical address computed incorrectly, but only for DMA regions crossing a page boundary. You fix it. Total time spent debugging: two hours, all in a VM that would have required a hard reboot of the workstation on bare metal.
+第 5 天：中断和 DMA 测试。驱动程序接收中断；MSI-X 设置代码工作正常。你测试 DMA：短 DMA 读取成功，长 DMA 读取成功，同时读写成功。你发现一个 bug：驱动程序计算的物理地址不正确，但只在 DMA 区域跨越页面边界时才出现。你修复了它。总调试时间：两小时，全部在 VM 中完成，在裸金属上这会需要工作站硬重启。
 
-Day 6: jail test. You exit the guest, return to the host, and configure a jail that sees `/dev/mydev0`. Your test program runs inside the jail and exercises the driver exactly as it did on the host. One `ioctl` fails with `EPERM`; you look at the driver and find that you forgot to add a `priv_check` for an operation that should require privilege. You add the check, and now the jail behaves correctly (the ioctl is denied for non-privileged callers; the host's root can still run it).
+第 6 天：jail 测试。你退出客户机，返回主机，配置一个能看到 `/dev/mydev0` 的 jail。你的测试程序在 jail 内运行，像在主机上一样测试驱动程序。一个 `ioctl` 以 `EPERM` 失败；你查看驱动程序发现忘记为一个需要权限的操作添加 `priv_check`。你添加了检查，现在 jail 行为正确（非特权调用者的 ioctl 被拒绝；主机的 root 仍然可以运行它）。
 
-Day 7: VNET test (if the driver has a network interface). You create a VNET jail and move a cloned interface into it. The interface works. You notice that one of your callouts does not set `CURVNET_SET` before accessing a per-VNET counter; you fix it. The callout now works in both the host VNET and the jail VNET without interference.
+第 7 天：VNET 测试（如果驱动程序有网络接口）。你创建一个 VNET jail 并将克隆的接口移入其中。接口工作正常。你注意到一个 callout 在访问 per-VNET 计数器之前没有设置 `CURVNET_SET`；你修复了它。callout 现在在主机 VNET 和 jail VNET 中都能正常工作而没有干扰。
 
-Day 8: full round-trip. You destroy the jail, shut down the guest, unload `ppt(4)` from the device (or reboot without `pptdevs`), and wait for the host's driver to re-attach. The attach works cleanly. You exercise the device on the host. It works. The round trip host-guest-host is complete.
+第 8 天：完整往返。你销毁 jail，关闭客户机，从设备卸载 `ppt(4)`（或不带 `pptdevs` 重启），等待主机驱动程序重新附加。附加干净完成。你在主机上操作设备。它工作正常。主机-客户机-主机的往返完成。
 
-This eight-day cycle is a stylised version of real development; your mileage will vary. The important point is that each day's work builds on the previous one, and the test environments become more exacting as the driver stabilises. By day eight, you have exercised the driver under every environment it will see in production, and you have fixed the bugs that each environment exposes. What remains is soak testing and user-facing polish, which are topics for Chapters 33 and 34.
+这个八天周期是真实开发的一个风格化版本；你的情况会有所不同。重要的点是每天的工作建立在前一天的基础之上，测试环境随着驱动程序的稳定而变得更加严格。到第八天，你已经在驱动程序将在生产中看到的每个环境中测试了它，并修复了每个环境暴露的 bug。剩下的是浸泡测试和面向用户的打磨，这些是第 33 章和第 34 章的主题。
 
-### Measuring Virtualisation Overhead
+### 测量虚拟化开销
 
-A quick note on performance. Drivers running under virtualisation sometimes show measurable overhead compared to bare metal. The sources of overhead include VM exits on I/O, interrupt delivery through the hypervisor, and DMA address translation through the IOMMU.
+简单提一下性能。在虚拟化下运行的驱动程序有时会显示出相对于裸金属可测量的开销。开销来源包括 I/O 上的 VM 退出、通过虚拟机监控程序的中断投递以及通过 IOMMU 的 DMA 地址转换。
 
-For most drivers most of the time, the overhead is not significant. Modern hardware accelerates almost every part of the virtualisation path (posted interrupts, EPT page tables, SR-IOV), and the fraction of CPU time spent in hypervisor code is typically in the low single digits. For performance-sensitive drivers, though, measuring and understanding the overhead is essential.
+对于大多数驱动程序在大多数情况下，开销并不显著。现代硬件加速了虚拟化路径的几乎每个部分（通知中断、EPT 页表、SR-IOV），虚拟机监控程序代码消耗的 CPU 时间比例通常在低个位数。但对于性能敏感的驱动程序，测量和理解开销是必不可少的。
 
-The tools for measurement are the same ones you use in other performance work. `pmcstat(8)` samples hardware counters, including counters for VM exits and for translation-lookaside-buffer misses that the IOMMU may cause. `dtrace(1)` can trace specific kernel paths, and with the `fbt` provider you can measure how often each path is entered and how long it takes. `vmstat -i` shows interrupt rates.
+测量工具与你在其他性能工作中使用的相同。`pmcstat(8)` 采样硬件计数器，包括 VM 退出计数器和 IOMMU 可能导致的 TLB 未命中计数器。`dtrace(1)` 可以追踪特定内核路径，使用 `fbt` 提供者可以测量每个路径被进入的频率和耗时。`vmstat -i` 显示中断速率。
 
-For VirtIO drivers, the most common source of overhead is excessive notifications. Every `virtqueue_notify` potentially causes a VM exit, and a driver that notifies on every packet rather than coalescing can generate hundreds of thousands of exits per second. The `VIRTIO_F_RING_EVENT_IDX` feature, if negotiated, lets the guest and host cooperate to reduce notification frequency. Check that your driver negotiates this feature if it runs in a high-packet-rate path.
+对于 VirtIO 驱动程序，最常见的开销来源是过多的通知。每次 `virtqueue_notify` 可能导致一次 VM 退出，在每个包都通知而不是合并的驱动程序可以产生每秒数十万次退出。如果协商了 `VIRTIO_F_RING_EVENT_IDX` 特性，客户机和主机可以合作减少通知频率。如果你的驱动程序运行在高包率路径中，请检查它是否协商了此特性。
 
-For passthrough drivers, the most common source of overhead is IOMMU translation misses. Each DMA buffer must be walked through the IOMMU's page tables, and a driver that maps and unmaps buffers many times per second spends a lot of CPU on that. The fix is usually to keep DMA mappings alive for longer (using `bus_dma(9)`'s mapping-retention features) rather than map-and-unmap every transaction.
+对于直通驱动程序，最常见的开销来源是 IOMMU 转换未命中。每个 DMA 缓冲区必须遍历 IOMMU 的页表，每秒多次映射和取消映射缓冲区的驱动程序会在上面花费大量 CPU。修复通常是让 DMA 映射存活更长时间（使用 `bus_dma(9)` 的映射保留功能），而不是每个事务都映射和取消映射。
 
-Performance tuning is a whole chapter of its own (Chapter 34). For now, the takeaway is that virtualisation has measurable costs, those costs are usually small, and the standard FreeBSD tooling applies without modification.
+性能调优本身就可以写成完整的一章（第 34 章）。目前，要点是虚拟化有可测量的成本，这些成本通常很小，标准的 FreeBSD 工具无需修改即可使用。
 
 ### 总结
 
-A driver that runs correctly under virtualisation and containerisation is not the result of special virtualisation code. It is the result of standard FreeBSD driver discipline, exercised in environments that expose hidden assumptions. The test and development workflow in this section is the practical side of that discipline: a VM for fast iteration, VirtIO for a controlled test substrate, jails for privilege and visibility checks, VNET for network-stack testing, passthrough for hardware round-trips, and automation to keep the whole thing honest.
+在虚拟化和容器化下正确运行的驱动程序不是特殊虚拟化代码的结果。它是标准 FreeBSD 驱动程序规范在暴露隐藏假设的环境中实践的结果。本节中的测试和开发工作流是这种规范的实践面：用于快速迭代的 VM、用于受控测试基底的 VirtIO、用于权限和可见性检查的 jail、用于网络协议栈测试的 VNET、用于硬件往返的直通，以及用于保持一切诚实的自动化。
 
-With the conceptual and practical material in place, the rest of the chapter turns to hands-on labs that let you try these techniques yourself. Before we get there, two more sections complete the picture. Section 9 covers the quieter but equally important topics of time, memory, and interrupt handling under virtualisation, the areas where beginner drivers often fail in subtle ways that only manifest in a VM. Section 10 widens the lens to architectures beyond amd64, because FreeBSD on arm64 and riscv64 is increasingly common and the virtualisation story there has its own shape. After those two sections, we move into the labs.
+概念性和实践性材料都已就位，本章的其余部分转向让你自己尝试这些技术的动手实验。在此之前，还有两节来完成全景。第 9 节涵盖虚拟化下更安静但同样重要的话题——时间、内存和中断处理，这是初学者驱动程序经常以微妙方式失败、只在 VM 中表现出来的领域。第 10 节将视角扩大到 amd64 之外的架构，因为 FreeBSD 在 arm64 和 riscv64 上越来越普遍，那里的虚拟化故事有它自己的形态。在这两节之后，我们进入实验部分。
 
 ## 第9节：虚拟化下的时间管理、内存与中断处理
-So far the chapter has concentrated on devices, the visible artefacts that a driver binds to and talks to. But a driver also depends on three ambient services that the kernel provides transparently: time, memory, and interrupts. Under virtualisation, all three change in subtle ways that rarely break a driver outright but often make it behave strangely. A driver that ignores these differences will usually pass functional tests and then fail in production when a user notices that timeouts are wrong, throughput is lower than expected, or interrupts are being lost. This section gathers what every driver author should know.
+到目前为止，本章集中在设备上——驱动程序绑定并与之通信的可见制品。但驱动程序还依赖于内核透明提供的三个环境服务：时间、内存和中断。在虚拟化下，这三者都发生了微妙的变化，这些变化很少直接破坏驱动程序，但经常使其行为变得奇怪。忽略这些差异的驱动程序通常会通过功能测试，然后当用户注意到超时不正确、吞吐量低于预期或中断丢失时在生产环境中失败。本节汇集了每个驱动程序作者应该知道的内容。
 
-### Why Time Is Different Inside a VM
+### 为什么虚拟机内的时间不同
 
-On bare metal, the kernel has direct access to several hardware time sources. The TSC (time-stamp counter) reads a per-CPU cycle counter; the HPET (high-precision event timer) provides a system-wide counter; the ACPI PM timer provides a lower-frequency fallback. The kernel chooses one as the current `timecounter(9)` source, wraps it in a small API, and uses it to derive `getbintime`, `getnanotime`, and friends.
+在裸金属上，内核可以直接访问几个硬件时间源。TSC（时间戳计数器）读取每 CPU 周期计数器；HPET（高精度事件定时器）提供系统范围的计数器；ACPI PM 定时器提供较低频率的后备。内核选择一个作为当前 `timecounter(9)` 源，将其包装在一个小型 API 中，并使用它来派生 `getbintime`、`getnanotime` 等。
 
-Inside a VM, those same sources exist, but they are emulated or passed through, and each has its own quirks. The TSC, which is normally the best source, can become unreliable when the VM migrates between physical hosts, when the host's TSCs are unsynchronised, or when the hypervisor rate-limits the guest in ways that cause TSC skew. The HPET is emulated and costs a VM exit on every read, which is cheap for occasional use but expensive if a driver reads it in a tight loop. The ACPI PM timer is generally reliable but slow.
+在 VM 内，这些相同的源也存在，但它们是被模拟或直通的，每个都有自己的怪癖。TSC 通常是最佳源，但当 VM 在物理主机之间迁移时、当主机的 TSC 不同步时或当虚拟机监控程序以导致 TSC 偏移的方式限制客户机时，它可能变得不可靠。HPET 是模拟的，每次读取都会产生 VM 退出，偶尔使用很廉价，但如果驱动程序在紧密循环中读取它就很昂贵。ACPI PM 定时器通常可靠但很慢。
 
-To address this, major hypervisors expose *paravirtual* clock interfaces. Linux popularised the term `kvm-clock` for the KVM paravirtual clock; Xen has `xen-clock`; VMware has `vmware-clock`; Microsoft's Hyper-V has `hyperv_tsc`. Each of these is a small protocol by which the hypervisor publishes time information in a shared memory page that the guest can read without a VM exit. FreeBSD supports several of them. You can see which the kernel has chosen as follows.
+为了解决这个问题，主要虚拟机监控程序暴露了*半虚拟化*时钟接口。Linux 推广了 `kvm-clock` 这个术语用于 KVM 半虚拟时钟；Xen 有 `xen-clock`；VMware 有 `vmware-clock`；微软的 Hyper-V 有 `hyperv_tsc`。每一个都是一个小型协议，虚拟机监控程序在共享内存页中发布时间信息，客户机无需 VM 退出即可读取。FreeBSD 支持其中几个。你可以看到内核选择了哪个。
 
 ```sh
 % sysctl kern.timecounter.choice
@@ -1542,17 +1542,17 @@ kern.timecounter.choice: ACPI-fast(900) i8254(0) TSC-low(1000) dummy(-1000000)
 kern.timecounter.hardware: TSC-low
 ```
 
-On a guest under bhyve, the kernel may select `TSC-low` or one of the paravirtual options depending on the CPU flags the hypervisor advertises. The important point is that the choice is automatic and the `timecounter(9)` API is the same regardless.
+在 bhyve 下的客户机中，内核可能选择 `TSC-low` 或一个半虚拟化选项，取决于虚拟机监控程序播发的 CPU 标志。重要的点是选择是自动的，无论选择什么，`timecounter(9)` API 都是相同的。
 
-### What This Means for Drivers
+### 这对驱动程序意味着什么
 
-For a driver that only uses the high-level time APIs (`getbintime`, `ticks`, `callout`), nothing needs to change. The `timecounter(9)` abstraction shields you from the underlying details. The driver asks "what time is it" or "how many ticks have elapsed" and the kernel answers correctly, whether on bare metal or in a VM.
+对于只使用高级时间 API（`getbintime`、`ticks`、`callout`）的驱动程序，不需要改变任何东西。`timecounter(9)` 抽象使你免受底层细节的影响。驱动程序询问"现在几点"或"经过了多少 tick"，内核无论是裸金属还是 VM 都正确回答。
 
-Problems arise when a driver bypasses the abstraction and reads time sources directly. A driver that does `rdtsc()` inline and uses the result for timing will be wrong under virtualisation whenever the host's TSC changes (for example, during a live migration). A driver that spins on a device register with a timeout measured in CPU cycles will consume excessive CPU inside a VM where one "CPU cycle" is not a predictable unit.
+当驱动程序绕过抽象直接读取时间源时会出现问题。一个内联执行 `rdtsc()` 并使用结果进行计时的驱动程序在虚拟化下每当主机 TSC 改变时（例如在实时迁移期间）都会出错。一个以 CPU 周期为超时单位在设备寄存器上自旋的驱动程序在 VM 内会消耗过多的 CPU，因为一个"CPU 周期"不是一个可预测的单位。
 
-The cure is simple: use the kernel's time primitives. `DELAY(9)` for short, bounded waits. `pause(9)` for yields that can sleep. `callout(9)` for deferred work. `getbintime(9)` or `getsbinuptime(9)` for clock readings. Each of these is correct under virtualisation because the kernel has already adapted to the environment.
+解决方案很简单：使用内核的时间原语。`DELAY(9)` 用于短暂的、有界的等待。`pause(9)` 用于可以睡眠的让步。`callout(9)` 用于延迟工作。`getbintime(9)` 或 `getsbinuptime(9)` 用于时钟读取。这些中的每一个在虚拟化下都是正确的，因为内核已经适应了环境。
 
-A concrete pattern that breaks in VMs and is surprisingly common is the "reset and wait" sequence.
+在 VM 中会出问题的一个具体模式是"复位并等待"序列，这个模式出奇地常见。
 
 ```c
 /* Broken pattern: busy-wait without yielding. */
@@ -1563,9 +1563,9 @@ for (i = 0; i < 1000000; i++) {
 }
 ```
 
-On bare metal, this loop might complete in a few microseconds because the device clears the status bit quickly. In a VM, the bus read and write each cost a VM exit, and the loop body runs much slower because every iteration makes a round trip through the hypervisor. The 1,000,000 iteration bound, which is instant on bare metal, can become a multi-second hang inside a VM. Worse, during a VM pause (a live migration), the guest does not execute at all, and the timeout loses its meaning.
+在裸金属上，这个循环可能在几微秒内完成，因为设备快速清除状态位。在 VM 中，每次总线读写都会产生一次 VM 退出，循环体运行慢得多，因为每次迭代都要经过虚拟机监控程序往返。1,000,000 次迭代上限在裸金属上是瞬时的，在 VM 内可能变成持续数秒的挂起。更糟的是，在 VM 暂停期间（实时迁移），客户机根本不执行，超时就失去了意义。
 
-The corrected pattern uses `DELAY(9)` and a bounded real-time wait.
+修正后的模式使用 `DELAY(9)` 和有界的实时等待。
 
 ```c
 /* Correct pattern: bounded wait with DELAY and a wallclock timeout. */
@@ -1579,15 +1579,15 @@ if (i == RESET_TIMEOUT_MS)
 	return (ETIMEDOUT);
 ```
 
-`DELAY(9)` is calibrated against the kernel's time source, so it sleeps for the intended number of microseconds regardless of how fast or slow the CPU is executing at that moment. The loop's bound is now expressed in milliseconds, which is meaningful in both bare-metal and virtualised environments.
+`DELAY(9)` 根据内核的时间源校准，所以无论当时 CPU 执行快慢，它都会休眠预期的微秒数。循环的上限现在以毫秒表示，这在裸金属和虚拟化环境中都有意义。
 
-### Callouts and Timers Across Migration
+### 迁移期间的 Callout 与定时器
 
-A more subtle concern is what happens to a driver's callouts when the VM pauses. If a callout was scheduled to fire in 100 ms and the VM is paused for 5 seconds (during a live migration, for example), does the callout fire 5.1 seconds after it was scheduled, or 100 ms after the VM resumes?
+一个更微妙的问题是当 VM 暂停时驱动程序的 callout 会发生什么。如果一个 callout 被调度在 100 ms 后触发，而 VM 暂停了 5 秒（例如在实时迁移期间），callout 是在调度后 5.1 秒触发，还是在 VM 恢复后 100 ms 触发？
 
-The answer is that it depends on the clock source the `callout(9)` subsystem uses. `callout` uses `sbt` (signed binary time), which under normal circumstances is derived from the selected `timecounter`. For hypervisors that pause the guest's virtual TSC during migration, the callout behaves as if no time had passed during the pause; the 100 ms wait is 100 ms of guest-observed time, which may be 5.1 seconds of wallclock time. For hypervisors that do not pause the virtual TSC, the callout fires at the scheduled wallclock time, which may be "immediately" after the VM resumes.
+答案取决于 `callout(9)` 子系统使用的时钟源。`callout` 使用 `sbt`（有符号二进制时间），在正常情况下从选定的 `timecounter` 派生。对于在迁移期间暂停客户机虚拟 TSC 的虚拟机监控程序，callout 的行为就像暂停期间没有时间过去一样；100 ms 的等待是客户机观察到的 100 ms 时间，实际可能是 5.1 秒的挂钟时间。对于不暂停虚拟 TSC 的虚拟机监控程序，callout 在调度的挂钟时间触发，可能在 VM 恢复后"立即"触发。
 
-For most drivers, either behaviour is acceptable. The callout eventually fires and the code it triggers runs. But a driver that measures real-world time (for example, a driver that talks to a hardware device whose state depends on wallclock time) may need to re-sync after a resume. FreeBSD's suspend-and-resume infrastructure provides `DEVMETHOD(device_resume, ...)`, and a driver can detect a resume and take corrective action.
+对于大多数驱动程序，两种行为都是可接受的。callout 最终会触发，它触发的代码会运行。但是测量现实世界时间的驱动程序（例如，与硬件设备对话的驱动程序，其状态取决于挂钟时间）可能需要在恢复后重新同步。FreeBSD 的挂起和恢复基础设施提供 `DEVMETHOD(device_resume, ...)`，驱动程序可以检测恢复并采取纠正措施。
 
 ```c
 static int
@@ -1608,43 +1608,43 @@ mydrv_resume(device_t dev)
 }
 ```
 
-`bhyve(8)` supports guest suspend through its own suspend interface (on hypervisors that implement it); the kernel delivers a normal `device_resume` method call on wake-up. A driver that writes `device_resume` correctly works in both cases.
+`bhyve(8)` 通过自己的挂起接口（在实现它的虚拟机监控程序上）支持客户机挂起；内核在唤醒时传递正常的 `device_resume` 方法调用。正确编写 `device_resume` 的驱动程序在两种情况下都能工作。
 
-### Memory Pressure, Ballooning, and Pinned Buffers
+### 内存压力、气球与固定缓冲区
 
-Drivers that own DMA buffers or pinned memory have a relationship with the memory subsystem that changes under virtualisation. On bare metal, the physical memory the kernel sees is the memory actually installed in the machine. Inside a VM, the guest's "physical" memory is virtual from the host's point of view: it is backed by host RAM plus possibly swap, and its extent can change during the guest's lifetime.
+拥有 DMA 缓冲区或固定内存的驱动程序与内存子系统的关系在虚拟化下会发生变化。在裸金属上，内核看到的物理内存是实际安装在机器中的内存。在 VM 内，客户机的"物理"内存从主机的角度看是虚拟的：它由主机 RAM 加上可能的交换空间支持，其范围可以在客户机的生命周期内改变。
 
-The `virtio-balloon` device is the mechanism hypervisors use to reclaim memory from a guest that is not using it. When the host needs memory, it asks the guest to "inflate" its balloon, which allocates pages from the guest kernel's free pool and declares them unusable. Those pages can then be unmapped from the guest and reused by the host. Conversely, when the host has memory to spare, it can "deflate" the balloon and return pages to the guest.
+`virtio-balloon` 设备是虚拟机监控程序用来从未使用内存的客户机回收内存的机制。当主机需要内存时，它要求客户机"膨胀"其气球，这会从客户机内核的空闲池中分配页面并声明它们不可用。这些页面然后可以从客户机取消映射并被主机重用。相反，当主机有富余内存时，它可以"缩小"气球并将页面返回给客户机。
 
-FreeBSD has a `virtio_balloon` driver (in `/usr/src/sys/dev/virtio/balloon/virtio_balloon.c`) that participates in this protocol. For most drivers, this is invisible: the balloon takes from the general free pool, so only drivers that pin significant amounts of memory can be affected. If your driver allocates a 256 MB DMA buffer and pins it (for a frame buffer, for example), the balloon cannot reclaim that memory. This is the correct behaviour for a pinned buffer, but it does mean that a VM running your driver cannot shrink its memory footprint as much as a VM with only non-pinning drivers.
+FreeBSD 有一个 `virtio_balloon` 驱动程序（在 `/usr/src/sys/dev/virtio/balloon/virtio_balloon.c` 中）参与此协议。对于大多数驱动程序，这是不可见的：气球从通用空闲池中获取，所以只有固定大量内存的驱动程序才会受到影响。如果你的驱动程序分配了 256 MB 的 DMA 缓冲区并固定它（例如作为帧缓冲区），气球无法回收该内存。这对固定缓冲区来说是正确的行为，但这确实意味着运行你的驱动程序的 VM 不能像只运行非固定驱动程序的 VM 那样大幅缩减其内存占用。
 
-A pragmatic guideline: avoid allocating more pinned memory than you absolutely need. For buffers that can be allocated on demand, allocate them on demand. For buffers that must be resident, size them to a reasonable working-set bound rather than a pessimistic maximum. The balloon driver will return the rest to the host when it needs to.
+一个实用指南：避免分配超过你绝对需要的固定内存。对于可以按需分配的缓冲区，按需分配。对于必须驻留的缓冲区，将其大小调整为合理的工作集边界而不是悲观的最大值。气球驱动程序会在需要时将其余内存返回给主机。
 
-### Memory Hotplug
+### 内存热插拔
 
-Some hypervisors (including bhyve with appropriate support) can hot-add memory to a running guest. FreeBSD handles this through ACPI events and the generic hotplug machinery. Drivers that cache memory information at attach time must be prepared for that cache to become stale when hotplug occurs; the robust pattern is to re-read the information when needed rather than caching it indefinitely.
+一些虚拟机监控程序（包括适当支持的 bhyve）可以向运行中的客户机热添加内存。FreeBSD 通过 ACPI 事件和通用热插拔机制处理此操作。在附加时缓存内存信息的驱动程序必须准备好当热插拔发生时缓存会过期；健壮的模式是在需要时重新读取信息，而不是无限期缓存。
 
-Hot-removal of memory is rarer and more delicate. For driver authors, it is usually enough to note that if a driver owns pinned memory, the hypervisor cannot remove it; if the driver owns unpinned memory, the kernel's memory management handles relocation. Drivers that violate this (by expecting that physical addresses they have read from the kernel remain valid forever) will break under memory hot-removal. The fix is to go through `bus_dma(9)` for every physical address that gets programmed into hardware, not to cache physical addresses outside of a DMA map.
+内存热移除更罕见也更微妙。对于驱动程序作者来说，通常只需注意：如果驱动程序拥有固定内存，虚拟机监控程序无法移除它；如果驱动程序拥有未固定内存，内核的内存管理处理重定位。违反此规则的驱动程序（期望从内核读取的物理地址永远有效）会在内存热移除下出错。修复方法是通过 `bus_dma(9)` 处理每个被编程到硬件中的物理地址，而不是在 DMA 映射之外缓存物理地址。
 
-### DMA and the IOMMU Path
+### DMA 与 IOMMU 路径
 
-We covered IOMMU in Section 5 from the host's perspective. Here, from the driver's perspective, there are two practical consequences.
+我们在第 5 节从主机角度讨论了 IOMMU。这里从驱动程序的角度看，有两个实际后果。
 
-First, every address programmed into hardware must come from a `bus_dma(9)` load operation. Under bare metal without an IOMMU, a driver that programs a physical address obtained from `vmem_alloc` or a similar interface usually works, because physical-equals-bus in that environment. Under passthrough with an IOMMU, the bus address the device needs is not the physical address; it is the IOMMU-mapped address, which `bus_dma_load` computes. A driver that programs physical addresses directly will transfer data to or from the wrong memory, sometimes corrupting unrelated data.
+首先，每个编程到硬件中的地址必须来自 `bus_dma(9)` 的加载操作。在没有 IOMMU 的裸金属上，编程从 `vmem_alloc` 或类似接口获得的物理地址的驱动程序通常可以工作，因为在那个环境中物理地址等于总线地址。在带 IOMMU 的直通下，设备需要的总线地址不是物理地址；而是 IOMMU 映射的地址，由 `bus_dma_load` 计算。直接编程物理地址的驱动程序会将数据传输到或来自错误的内存，有时会损坏无关数据。
 
-Second, `bus_dma` mappings have lifetimes. A typical pattern is to allocate a DMA tag at attach, allocate a DMA map per buffer, load the buffer, program the device, wait for completion, and then unload the buffer. The load and unload each cost a small amount of CPU, and under the IOMMU they also cost an IOMMU invalidation. For drivers that cycle through many small buffers per second, the invalidation cost can become significant.
+其次，`bus_dma` 映射有生命周期。典型模式是在附加时分配 DMA 标签，为每个缓冲区分配 DMA 映射，加载缓冲区，编程设备，等待完成，然后卸载缓冲区。每次加载和卸载都消耗少量 CPU，在 IOMMU 下还需要一次 IOMMU 失效操作。对于每秒循环使用许多小缓冲区的驱动程序，失效成本可能变得显著。
 
-The fix, when it applies, is to keep DMA mappings alive for longer. `bus_dma` supports pre-allocated maps that can be reused; a driver that needs to DMA into the same physical region repeatedly can load it once and reuse the bus address until the region is no longer needed. This is a standard optimisation and is entirely orthogonal to virtualisation, but it matters more under passthrough because the IOMMU work is bigger than the host-to-bus work on bare metal.
+当适用时，修复方法是让 DMA 映射存活更长时间。`bus_dma` 支持可重用的预分配映射；需要重复 DMA 到同一物理区域的驱动程序可以加载一次并重用总线地址，直到该区域不再需要。这是一种标准优化，与虚拟化完全正交，但在直通下更重要，因为 IOMMU 工作比裸金属上的主机到总线工作更大。
 
-### Interrupt Delivery in Virtualised Environments
+### 虚拟化环境中的中断投递
 
-Interrupts have always been the sharp edge of driver design, and under virtualisation they become sharper. The two interrupt styles a driver encounters are *INTx* (pin-based) and *MSI/MSI-X* (message-signalled).
+中断一直是驱动程序设计中最尖锐的边缘，在虚拟化下它们变得更尖锐。驱动程序遇到的两种中断风格是 *INTx*（基于引脚）和 *MSI/MSI-X*（消息信号）。
 
-INTx is the old-style interrupt pin. In a real machine, the pin connects through the PCI bus and an interrupt controller (APIC, IOAPIC) to the CPU. In a VM, each INTx delivery requires the hypervisor to intercept the device's pin assertion, map it to an internal interrupt, and inject it into the guest. The intercept and injection both cost VM exits. For low-rate interrupts (the classic "something happened" signal) this is fine. For high-rate interrupts, it can be a bottleneck.
+INTx 是旧式的中断引脚。在真实机器中，引脚通过 PCI 总线和中断控制器（APIC、IOAPIC）连接到 CPU。在 VM 中，每次 INTx 投递需要虚拟机监控程序拦截设备的引脚断言、将其映射到内部中断并注入到客户机。拦截和注入都消耗 VM 退出。对于低速率中断（经典的"发生了某事"信号），这没问题。对于高速率中断，它可能成为瓶颈。
 
-MSI (Message-Signalled Interrupts) and its successor MSI-X avoid the pin entirely. The device writes a small message to a well-known memory-mapped address, and the interrupt controller delivers the corresponding interrupt vector. Under virtualisation, MSI-X works much better than INTx because the hypervisor can map the message write directly to a guest interrupt without needing to intercept every edge transition on a virtual pin. Modern hardware supports *posted interrupts*, which let the hypervisor deliver MSI-X interrupts to a running vCPU without any VM exit at all.
+MSI（消息信号中断）及其后继者 MSI-X 完全避免了引脚。设备向一个已知的内存映射地址写入一个小消息，中断控制器投递相应的中断向量。在虚拟化下，MSI-X 比 INTx 工作得更好，因为虚拟机监控程序可以将消息写入直接映射到客户机中断，而不需要拦截虚拟引脚上的每个边沿转换。现代硬件支持*投递中断*，让虚拟机监控程序可以将 MSI-X 中断投递到正在运行的 vCPU 而完全不需要 VM 退出。
 
-The driver-side implication is clear: prefer MSI-X. FreeBSD's `pci_alloc_msix` API lets a driver request MSI-X interrupts. Most modern drivers already use it. If you are writing a new driver or updating an old one, use MSI-X unless you have a specific reason not to.
+驱动程序侧的暗示很清楚：优先使用 MSI-X。FreeBSD 的 `pci_alloc_msix` API 让驱动程序请求 MSI-X 中断。大多数现代驱动程序已经使用它。如果你正在编写新的驱动程序或更新旧的，除非有特定原因，否则使用 MSI-X。
 
 ```c
 static int
@@ -1679,19 +1679,19 @@ mydrv_setup_msix(struct mydrv_softc *sc)
 }
 ```
 
-This is the standard MSI-X setup sequence. The `pci_alloc_msix` call negotiates with the kernel's PCI layer to allocate one MSI-X vector. The resource and interrupt handler are set up as usual. The cleanup path releases the MSI-X vector along with the other resources.
+这是标准的 MSI-X 设置序列。`pci_alloc_msix` 调用与内核的 PCI 层协商分配一个 MSI-X 向量。资源和中断处理程序照常设置。清理路径与其他资源一起释放 MSI-X 向量。
 
-For drivers with multiple queues or multiple event sources, MSI-X supports up to 2048 vectors per device, and a driver can allocate one per queue to avoid lock contention. The `pci_alloc_msix` API supports requesting multiple vectors; `count` is an in-out parameter. Under virtualisation, each vector maps to a separate guest interrupt, and posted interrupts deliver them with no VM exit on modern hardware.
+对于具有多个队列或多个事件源的驱动程序，MSI-X 支持每个设备最多 2048 个向量，驱动程序可以为每个队列分配一个以避免锁竞争。`pci_alloc_msix` API 支持请求多个向量；`count` 是一个输入输出参数。在虚拟化下，每个向量映射到一个独立的客户机中断，通知中断在现代硬件上无需 VM 退出即可投递。
 
 ### Interrupt Coalescing and Notification Suppression
 
-Even with MSI-X, an interrupt-per-transaction model can be too expensive under virtualisation. A high-rate device that fires an interrupt for every received packet can generate hundreds of thousands of interrupts per second, and although each is cheap individually, the aggregate cost is noticeable.
+即使使用 MSI-X，每个事务一次中断的模型在虚拟化下也可能过于昂贵。对每个接收的包都触发中断的高速率设备可以产生每秒数十万次中断，虽然每次中断单独来看很廉价，但总成本是明显的。
 
-Hardware interrupt coalescing addresses this on real devices: the device can be configured to deliver one interrupt for a batch of events rather than one per event. Under VirtIO, the equivalent mechanism is *notification suppression*, exposed through the `VIRTIO_F_RING_EVENT_IDX` feature.
+硬件中断合并在真实设备上解决了这个问题：设备可以配置为对一批事件传递一次中断而不是每个事件一次。在 VirtIO 中，等价的机制是*通知抑制*，通过 `VIRTIO_F_RING_EVENT_IDX` 特性暴露。
 
-With event indexes, the guest tells the device "do not interrupt me until you have processed up to descriptor N", and the device honours this by checking the guest's used_event field before raising an interrupt. A guest that is already polling the ring does not need an interrupt at all; a guest that wants to be interrupted only after a batch can set the event index to the batch size.
+使用事件索引时，客户机告诉设备"在处理到描述符 N 之前不要中断我"，设备通过在引发中断前检查客户机的 used_event 字段来遵守这一点。已经在轮询环的客户机根本不需要中断；只想在一批完成后被中断的客户机可以将事件索引设置为批量大小。
 
-FreeBSD's `virtqueue(9)` framework supports event indexes when negotiated. A driver that knows it may process multiple buffers per interrupt can enable event indexes to reduce interrupt rate. The classic pattern is:
+FreeBSD 的 `virtqueue(9)` 框架在协商后支持事件索引。知道自己可能每次中断处理多个缓冲区的驱动程序可以启用事件索引来降低中断率。经典模式是：
 
 ```c
 static void
@@ -1713,148 +1713,148 @@ mydrv_intr(void *arg)
 }
 ```
 
-The `virtqueue_disable_intr` call tells the device not to interrupt again until re-enabled. The driver then drains the ring. The `virtqueue_enable_intr` call arms interrupts, but only if no new buffer has arrived in the meantime; if one has, it returns nonzero and the loop continues. This is a standard pattern that minimises interrupt rate without ever missing a completion.
+`virtqueue_disable_intr` 调用告诉设备在重新启用前不要再次中断。驱动程序然后排空环。`virtqueue_enable_intr` 调用启用中断，但仅在此期间没有新缓冲区到达时；如果有，它返回非零值，循环继续。这是一种最小化中断率而不遗漏任何完成的标准模式。
 
 ### Putting the Pieces Together
 
-Time, memory, and interrupts are not glamorous topics, but they are where the rubber meets the road for drivers that want to be correct under virtualisation. The guidelines distil to a small set of disciplines:
+时间、内存和中断不是引人注目的话题，但它们是希望在虚拟化下正确工作的驱动程序真正面对挑战的地方。这些指南浓缩为一小组规范：
 
-- Use the kernel's time APIs rather than rolling your own.
-- Treat the device's state as a thing that can disappear on resume; write `device_resume` correctly.
-- Do not pin more memory than necessary, and go through `bus_dma(9)` for every DMA address.
-- Prefer MSI-X over INTx.
-- Use the virtqueue event-index mechanism where appropriate to reduce interrupt rate.
+- 使用内核的时间 API 而不是自己实现。
+- 将设备状态视为可能在恢复时消失的东西；正确编写 `device_resume`。
+- 不要固定超过必要的内存，每个 DMA 地址都通过 `bus_dma(9)` 处理。
+- 优先使用 MSI-X 而非 INTx。
+- 在适当的地方使用虚拟队列事件索引机制来降低中断率。
 
-These are the disciplines of any well-written driver; under virtualisation they are not optional. A driver that follows them will work in a VM. A driver that violates them will work on bare metal and fail in the field on a customer's VM, sometimes in ways that are difficult to reproduce.
+这些是任何编写良好的驱动程序的规范；在虚拟化下它们不是可选的。遵循它们的驱动程序会在 VM 中工作。违反它们的驱动程序会在裸金属上工作但在客户的 VM 上失败，有时以难以重现的方式失败。
 
-With that grounding in place, we can zoom out one more time and look at how these ideas travel to architectures other than amd64.
+有了这些基础，我们可以再一次放大视角，看看这些想法如何适用于 amd64 之外的架构。
 
 ## 第10节：其他架构上的虚拟化
-FreeBSD runs well on amd64, arm64, and riscv64. The virtualisation story on amd64 is the one we have been telling: `bhyve(8)` uses Intel VT-x or AMD-V, guests see PCI-based VirtIO devices, the IOMMU is VT-d or AMD-Vi, and the general flow is familiar. On the other architectures, the pieces are similar but the specifics differ. For a driver author, most of this is invisible, because FreeBSD's virtualisation APIs are architecture-independent. But a few practical points are worth knowing, and a few drivers have architecture-specific behaviour that only surfaces under virtualisation.
+FreeBSD 在 amd64、arm64 和 riscv64 上运行良好。amd64 上的虚拟化方案是我们一直在讲述的：`bhyve(8)` 使用 Intel VT-x 或 AMD-V，客户机看到基于 PCI 的 VirtIO 设备，IOMMU 是 VT-d 或 AMD-Vi，总体流程是熟悉的。在其他架构上，各个部分类似但具体细节不同。对于驱动程序作者来说，大部分是不可见的，因为 FreeBSD 的虚拟化 API 是架构无关的。但一些实用要点值得了解，一些驱动程序具有只在虚拟化下才会显现的架构特定行为。
 
-### arm64 Virtualisation
+### arm64 虚拟化
 
-On arm64, the hypervisor mode is called *EL2* (Exception Level 2), and the virtualisation extensions are part of the architecture's standard specification (ARMv8-A virtualisation). A guest runs in EL1 under the hypervisor in EL2. There is no direct amd64-style INTx; the interrupt controller is the *GICv3* (Generic Interrupt Controller version 3), and interrupt virtualisation is provided by the GIC's *virtual CPU interface*.
+在 arm64 上，虚拟机监控程序模式称为 *EL2*（异常级别 2），虚拟化扩展是架构标准规范的一部分（ARMv8-A 虚拟化）。客户机在虚拟机监控程序的 EL2 下的 EL1 中运行。没有直接的 amd64 风格 INTx；中断控制器是 *GICv3*（通用中断控制器版本 3），中断虚拟化由 GIC 的*虚拟 CPU 接口*提供。
 
-FreeBSD has an arm64 `bhyve(8)` host-side port under development that targets a future release; as of FreeBSD 14.3 the vmm implementation ships only for amd64, so arm64 hosts do not yet run guests natively. The guest side of FreeBSD, however, already uses the same `virtio_mmio` and `virtio_pci` transports that amd64 does, so a FreeBSD guest running on an arm64 hypervisor (for example, KVM or a future arm64 `bhyve`) does not know or care that the host is arm64.
+FreeBSD 有一个 arm64 `bhyve(8)` 主机侧移植正在开发中，目标是一个未来版本；截至 FreeBSD 14.3，vmm 实现仅随 amd64 提供，因此 arm64 主机还不能原生运行客户机。然而，FreeBSD 的客户机侧已经使用了与 amd64 相同的 `virtio_mmio` 和 `virtio_pci` 传输，所以在 arm64 虚拟机监控程序（例如 KVM 或未来的 arm64 `bhyve`）上运行的 FreeBSD 客户机不知道也不关心主机是 arm64。
 
-For VirtIO specifically, arm64 guests more often use the MMIO transport. This is a practical consequence of how the virtual platforms are typically configured: arm64 hypervisors often expose VirtIO devices as MMIO regions rather than as emulated PCI buses. FreeBSD's `virtio_mmio.c` (in `/usr/src/sys/dev/virtio/mmio/`) provides the transport. A driver that uses `VIRTIO_DRIVER_MODULE` is automatically compatible with both transports, because the macro registers the driver with both `virtio_mmio` and `virtio_pci`.
+对于 VirtIO 来说，arm64 客户机更常使用 MMIO 传输。这是虚拟平台通常配置方式的实际结果：arm64 虚拟机监控程序通常将 VirtIO 设备暴露为 MMIO 区域而不是模拟 PCI 总线。FreeBSD 的 `virtio_mmio.c`（在 `/usr/src/sys/dev/virtio/mmio/` 中）提供了传输层。使用 `VIRTIO_DRIVER_MODULE` 的驱动程序自动兼容两种传输，因为该宏同时在 `virtio_mmio` 和 `virtio_pci` 上注册驱动程序。
 
-This is one of the quiet wins of the `virtio_bus` design. A VirtIO driver written once runs across every VirtIO transport on every architecture that FreeBSD supports. No `#ifdef __amd64__` clauses, no per-architecture translation layer. The `virtio_bus` abstracts the transport; the driver talks to the abstraction.
+这是 `virtio_bus` 设计的一个安静胜利。编写一次的 VirtIO 驱动程序可以在 FreeBSD 支持的每个架构上的每个 VirtIO 传输上运行。没有 `#ifdef __amd64__` 子句，没有逐架构的转换层。`virtio_bus` 抽象了传输；驱动程序与抽象对话。
 
-### riscv64 Virtualisation
+### riscv64 虚拟化
 
-On riscv64, virtualisation is provided by the *H extension* (Hypervisor extension). FreeBSD has a `bhyve` port for riscv64 as well, though it is less mature than the amd64 and arm64 ports as of FreeBSD 14.3. The VirtIO transports work the same way: drivers use `VIRTIO_DRIVER_MODULE` and the kernel's `virtio_bus` handles the transport specifics.
+在 riscv64 上，虚拟化由 *H 扩展*（虚拟机监控程序扩展）提供。FreeBSD 也有一个 riscv64 的 `bhyve` 移植，尽管截至 FreeBSD 14.3 它不如 amd64 和 arm64 移植成熟。VirtIO 传输的工作方式相同：驱动程序使用 `VIRTIO_DRIVER_MODULE`，内核的 `virtio_bus` 处理传输细节。
 
-For driver authors working on riscv64, the most important thing to know is that the architecture-independent APIs all apply. `bus_dma(9)`, `callout(9)`, `mtx(9)`, `sx(9)`, and the VirtIO framework all work on riscv64. Code that is correct on amd64 usually runs unchanged on riscv64. The differences are in lower-level details (memory ordering, cache flushing, interrupt routing) that the kernel handles under the hood.
+对于在 riscv64 上工作的驱动程序作者来说，最重要的是知道架构无关的 API 都适用。`bus_dma(9)`、`callout(9)`、`mtx(9)`、`sx(9)` 和 VirtIO 框架在 riscv64 上都能工作。在 amd64 上正确的代码通常在 riscv64 上无需更改即可运行。差异在于底层细节（内存排序、缓存刷新、中断路由），由内核在底层处理。
 
-### Cross-Architecture Considerations for Driver Authors
+### 驱动程序作者的跨架构考量
 
-If you are writing a driver that should work on multiple architectures, the guidelines from Chapter 29 apply directly. Use the architecture-independent APIs. Avoid inline assembly except where strictly necessary (and then isolate it behind a portable wrapper). Do not assume a specific cache-line size or a specific page size. Do not assume an architecture's endianness unless you have explicitly used a conversion macro.
+如果你正在编写应该在多个架构上工作的驱动程序，第29章的指南直接适用。使用架构无关的 API。避免内联汇编，除非严格必要（然后将其隔离在可移植包装器后面）。不要假设特定的缓存行大小或特定的页大小。不要假设架构的字节序，除非你已显式使用了转换宏。
 
-For virtualisation specifically, the main cross-architecture concern is *which VirtIO transports are present*. On amd64, VirtIO is almost always PCI. On arm64 with QEMU or Ampere hypervisors, VirtIO is often MMIO. On riscv64 with QEMU, VirtIO is often MMIO. A driver that only handles PCI VirtIO will not work in MMIO environments. The fix is to use `VIRTIO_DRIVER_MODULE`, which registers the driver with both transports, and to avoid assuming that the device's parent bus is PCI.
+对于虚拟化来说，主要的跨架构关注点是*存在哪些 VirtIO 传输*。在 amd64 上，VirtIO 几乎总是 PCI。在使用 QEMU 或 Ampere 虚拟机监控程序的 arm64 上，VirtIO 通常是 MMIO。在使用 QEMU 的 riscv64 上，VirtIO 通常是 MMIO。只处理 PCI VirtIO 的驱动程序在 MMIO 环境中不工作。修复方法是使用 `VIRTIO_DRIVER_MODULE`，它在两种传输上注册驱动程序，并避免假设设备的父总线是 PCI。
 
-A concrete test: on your target architecture, run `pciconf -l` inside a guest and see whether VirtIO devices appear. If they do, the transport is PCI. If they do not (but the devices work), the transport is MMIO. On arm64 guests, you can also check `sysctl dev.virtio_mmio` to see MMIO VirtIO devices. A driver that works with both transports will not produce different output in these checks, because the `virtio_bus` API is what it interacts with.
+一个具体的测试：在你的目标架构上，在客户机内运行 `pciconf -l` 查看 VirtIO 设备是否出现。如果出现了，传输是 PCI。如果没有出现（但设备工作），传输是 MMIO。在 arm64 客户机上，你也可以检查 `sysctl dev.virtio_mmio` 来查看 MMIO VirtIO 设备。与两种传输都工作的驱动程序在这些检查中不会产生不同的输出，因为它与 `virtio_bus` API 交互。
 
-### When Architecture Matters for Real
+### 架构何时真正重要
 
-Most drivers are architecture-independent if written in the FreeBSD idiom. The exceptions are:
+如果按照 FreeBSD 的惯用法编写，大多数驱动程序是架构无关的。例外有：
 
-- Drivers that deal with hardware-specific features: for example, ARM's SMMU is architecturally different from Intel's VT-d, and a driver that manipulates the IOMMU directly (rare) must handle both.
-- Drivers that perform byte-order conversion: network drivers do this routinely, but they use portable helpers (`htonl`, `ntohs`, etc.) rather than architecture-specific code.
-- Drivers that need specific CPU instructions: for example, cryptographic drivers that use AES-NI on amd64 or the AES extensions on arm64 need per-architecture code paths. These are rare and are already isolated by the kernel's crypto framework.
+- 处理硬件特定功能的驱动程序：例如，ARM 的 SMMU 在架构上不同于 Intel 的 VT-d，直接操作 IOMMU 的驱动程序（罕见）必须处理两者。
+- 执行字节序转换的驱动程序：网络驱动程序经常这样做，但它们使用可移植的辅助函数（`htonl`、`ntohs` 等）而不是架构特定的代码。
+- 需要特定 CPU 指令的驱动程序：例如，在 amd64 上使用 AES-NI 或在 arm64 上使用 AES 扩展的加密驱动程序需要逐架构的代码路径。这些很少见，已被内核的加密框架隔离。
 
-For most driver work on most architectures, the right mental model is "FreeBSD is FreeBSD". The APIs are the same. The idioms are the same. The virtualisation framework is the same. The architecture is a detail the kernel manages for you.
+对于大多数架构上的大多数驱动程序工作，正确的思维模型是"FreeBSD 就是 FreeBSD"。API 是相同的。惯用法是相同的。虚拟化框架是相同的。架构是内核为你管理的细节。
 
-With architecture considerations covered, we have the complete picture of virtualisation and containerisation as it affects a FreeBSD driver author. The remaining sections of the chapter turn to hands-on practice.
+架构考虑已经覆盖，我们现在有了虚拟化和容器化影响 FreeBSD 驱动程序作者的完整图景。本章的其余部分转向动手实践。
 
 ## 实践实验
 
-The labs below walk you through four small exercises that put the chapter's ideas into practice. Each lab has a clear goal, a set of prerequisites, and a series of steps. Companion files are available under `examples/part-07/ch30-virtualisation/` for the ones that need more than a handful of lines of code.
+下面的实验引导你完成四个小练习，将本章的想法付诸实践。每个实验都有明确的目标、先决条件和一系列步骤。对于需要不止几行代码的实验，配套文件可在 `examples/part-07/ch30-virtualisation/` 下找到。
 
-Work through them in order. The first lab gets you comfortable inspecting a VirtIO guest from inside a VM. The second gets you writing a tiny VirtIO-adjacent driver. The third and fourth move into jails and VNET. Allow a couple of hours of hands-on time for the whole set; longer if the `bhyve(8)` or QEMU setup is new to you.
+按顺序完成它们。第一个实验让你熟悉在 VM 内检查 VirtIO 客户机。第二个实验让你编写一个微型 VirtIO 相关驱动程序。第三个和第四个实验进入 jail 和 VNET。整个集合需要两到三个小时的动手时间；如果 `bhyve(8)` 或 QEMU 设置对你来说是新的，时间会更长。
 
-### 实验1：Exploring a VirtIO Guest
-**Goal**: Confirm that you can start a FreeBSD 14.3 guest under `bhyve(8)`, log in, and observe the VirtIO devices it has attached. This establishes the development environment you will use for later labs.
+### 实验1：探索 VirtIO 客户机
+**目标**：确认你能在 `bhyve(8)` 下启动 FreeBSD 14.3 客户机、登录并观察它附加的 VirtIO 设备。这建立了你在后续实验中使用的开发环境。
 
-**Prerequisites**: A FreeBSD 14.3 host (bare metal or nested in another hypervisor, provided the outer hypervisor supports nested virtualisation). Enough memory for a small guest (2 GB is plenty). The `vmm.ko` module loadable on the host, which it is on any standard FreeBSD 14.3 kernel.
-
-**Steps**:
-
-1. Fetch a FreeBSD 14.3 VM image. The base project provides prebuilt VM images at `https://download.freebsd.org/`. Choose a `bhyve`-friendly image (typically the "BASIC-CI" or "VM-IMAGE" variants in the `amd64` directory).
-2. Install the `vm-bhyve` port or package: `pkg install vm-bhyve`. This wraps `bhyve(8)` in a friendlier management interface.
-3. Configure a VM directory: `zfs create -o mountpoint=/vm zroot/vm` (or `mkdir /vm` if you are not using ZFS). In `/etc/rc.conf`, add `vm_enable="YES"` and `vm_dir="zfs:zroot/vm"` (or `vm_dir="/vm"`).
-4. Initialise the directory: `vm init`. Copy a default template: `cp /usr/local/share/examples/vm-bhyve/default.conf /vm/.templates/default.conf`.
-5. Create a VM: `vm create -t default -s 10G guest0`. Attach the downloaded image: `vm install guest0 /path/to/FreeBSD-14.3-RELEASE-amd64.iso`.
-6. Log in once the installer finishes and reboots. The login prompt comes up on `vm console guest0`.
-7. Inside the guest, run `pciconf -lvBb | head -40`. You will see virtio-blk, virtio-net, and possibly virtio-random devices, depending on the template. Note the driver each device is bound to.
-8. Run `sysctl kern.vm_guest`. The output should be `bhyve`.
-9. Run `dmesg | grep -i virtio`. Observe the attach messages for each VirtIO device.
-10. Record your observations in a text file. You will refer to them in Labs 2 and 4.
-
-**Expected outcome**: A running VM, a clear listing of attached VirtIO devices, and a confirmed `kern.vm_guest = bhyve` reading.
-
-**Common pitfalls**: Not enabling VT-x or AMD-V in the host's BIOS. Not having enough memory for the guest. Misconfigured network bridge preventing the guest from reaching the network (which is harmless for this lab but will matter later).
-
-### 实验2：Using Hypervisor Detection in a Kernel Module
-**Goal**: Write a small kernel module that reads `vm_guest` and logs the environment at load time. This is the smallest possible example of environment-aware driver behaviour.
-
-**Prerequisites**: A working FreeBSD 14.3 guest from Lab 1. Kernel build tools installed (they come with the base system on the development kit). The `bsd.kmod.mk` build system, accessed via a simple `Makefile`.
+**先决条件**：一台 FreeBSD 14.3 主机（裸金属或嵌套在另一个虚拟机监控程序中，前提是外层虚拟机监控程序支持嵌套虚拟化）。足够用于小型客户机的内存（2 GB 即可）。主机上可加载 `vmm.ko` 模块，这在任何标准 FreeBSD 14.3 内核上都可用。
 
 **Steps**:
 
-1. Under `/home/ebrandi/FDD-book/examples/part-07/ch30-virtualisation/lab02-detect/` in the companion examples tree, you will find a starter `detectmod.c` and `Makefile`. If you are not using the companion tree, create these files by hand.
-2. The source file should define a kernel module that, on load, prints which environment it is in based on `vm_guest`.
-3. Build the module: `make clean && make`.
-4. Load it: `sudo kldload ./detectmod.ko`.
-5. Check the dmesg output: `dmesg | tail`. You should see a line like `detectmod: running on bhyve`.
-6. Unload: `sudo kldunload detectmod`.
-7. Reboot the guest on a different hypervisor if possible (QEMU/KVM, for example) and re-run. The output should now reflect the new environment.
+1. 获取 FreeBSD 14.3 VM 映像。基础项目在 `https://download.freebsd.org/` 提供预构建的 VM 映像。选择一个 `bhyve` 友好的映像（通常是 `amd64` 目录中的"BASIC-CI"或"VM-IMAGE"变体）。
+2. 安装 `vm-bhyve` port 或软件包：`pkg install vm-bhyve`。它将 `bhyve(8)` 包装在更友好的管理界面中。
+3. 配置 VM 目录：`zfs create -o mountpoint=/vm zroot/vm`（如果不使用 ZFS 则用 `mkdir /vm`）。在 `/etc/rc.conf` 中添加 `vm_enable="YES"` 和 `vm_dir="zfs:zroot/vm"`（或 `vm_dir="/vm"`）。
+4. 初始化目录：`vm init`。复制默认模板：`cp /usr/local/share/examples/vm-bhyve/default.conf /vm/.templates/default.conf`。
+5. 创建 VM：`vm create -t default -s 10G guest0`。附加下载的映像：`vm install guest0 /path/to/FreeBSD-14.3-RELEASE-amd64.iso`。
+6. 安装程序完成并重启后登录。登录提示在 `vm console guest0` 上出现。
+7. 在客户机内，运行 `pciconf -lvBb | head -40`。你将看到 virtio-blk、virtio-net，可能还有 virtio-random 设备，具体取决于模板。注意每个设备绑定的驱动程序。
+8. 运行 `sysctl kern.vm_guest`。输出应该是 `bhyve`。
+9. 运行 `dmesg | grep -i virtio`。观察每个 VirtIO 设备的附加消息。
+10. 将你的观察记录到文本文件中。你将在实验 2 和 4 中引用它们。
 
-**Expected outcome**: A module that correctly identifies the hypervisor it is running on, using `vm_guest`.
+**预期结果**：一个运行中的 VM、清晰的已附加 VirtIO 设备列表，以及确认的 `kern.vm_guest = bhyve` 读数。
 
-**Common pitfalls**: Forgetting to include `<sys/systm.h>` for the `vm_guest` declaration. Linking errors from mistyped macros. Forgetting to set `KMOD=` and `SRCS=` in the Makefile.
+**常见陷阱**：未在主机 BIOS 中启用 VT-x 或 AMD-V。客户机内存不足。网络桥配置错误导致客户机无法访问网络（对此实验无害但后续会有影响）。
 
-### 实验3：A Minimal Character Device Driver Inside a Jail
-**Goal**: Write a small character device driver, expose it from the host, create a jail with a custom devfs ruleset that makes the device visible inside, and verify that the jail's processes can use it while the host's privilege checks are still enforced.
+### 实验2：在内核模块中使用虚拟机监控程序检测
+**目标**：编写一个读取 `vm_guest` 并在加载时记录环境的小型内核模块。这是环境感知驱动程序行为的最小示例。
 
-**Prerequisites**: A FreeBSD 14.3 host. A working jail setup directory (typically `/jails/`). Basic familiarity with `make_dev(9)`, `d_read`, and `d_write`.
+**先决条件**：实验 1 中可工作的 FreeBSD 14.3 客户机。已安装内核构建工具（开发套件的基础系统附带）。通过简单 `Makefile` 访问的 `bsd.kmod.mk` 构建系统。
 
 **Steps**:
 
-1. Under `examples/part-07/ch30-virtualisation/lab03-jaildev/`, you will find `jaildev.c` and `Makefile`. The driver creates a `/dev/jaildev` character device whose `read` returns a fixed greeting.
-2. Build and load the module on the host: `make && sudo kldload ./jaildev.ko`.
-3. Verify `/dev/jaildev` exists and is readable: `cat /dev/jaildev`.
-4. Create a jail root: `mkdir -p /jails/test && cp /bin/sh /jails/test/` (this is a minimal jail; for a real setup, use a proper filesystem layout).
-5. Add a devfs ruleset to `/etc/devfs.rules`:
+1. 在配套示例树的 `/home/ebrandi/FDD-book/examples/part-07/ch30-virtualisation/lab02-detect/` 下，你会找到起始的 `detectmod.c` 和 `Makefile`。如果你不使用配套代码树，请手动创建这些文件。
+2. 源文件应定义一个内核模块，在加载时根据 `vm_guest` 打印它所处的环境。
+3. 构建模块：`make clean && make`。
+4. 加载它：`sudo kldload ./detectmod.ko`。
+5. 检查 dmesg 输出：`dmesg | tail`。你应该看到类似 `detectmod: running on bhyve` 的一行。
+6. 卸载：`sudo kldunload detectmod`。
+7. 如果可能，在不同虚拟机监控程序上重启客户机（例如 QEMU/KVM）并重新运行。输出现在应该反映新环境。
+
+**预期结果**：一个使用 `vm_guest` 正确识别其运行虚拟机监控程序的模块。
+
+**常见陷阱**：忘记包含 `<sys/systm.h>` 来获取 `vm_guest` 声明。宏拼写错误导致的链接错误。忘记在 Makefile 中设置 `KMOD=` 和 `SRCS=`。
+
+### 实验3：监狱内的最小字符设备驱动程序
+**目标**：编写一个小型字符设备驱动程序，从主机暴露它，创建一个带有自定义 devfs 规则集的 jail 使设备在其中可见，并验证 jail 的进程可以使用它，同时主机的权限检查仍然被执行。
+
+**先决条件**：一台 FreeBSD 14.3 主机。一个可工作的 jail 设置目录（通常是 `/jails/`）。对 `make_dev(9)`、`d_read` 和 `d_write` 的基本了解。
+
+**Steps**:
+
+1. 在 `examples/part-07/ch30-virtualisation/lab03-jaildev/` 下，你会找到 `jaildev.c` 和 `Makefile`。驱动程序创建一个 `/dev/jaildev` 字符设备，其 `read` 返回一个固定问候。
+2. 在主机上构建并加载模块：`make && sudo kldload ./jaildev.ko`。
+3. 验证 `/dev/jaildev` 存在且可读：`cat /dev/jaildev`。
+4. 创建 jail 根目录：`mkdir -p /jails/test && cp /bin/sh /jails/test/`（这是一个最小 jail；对于真实设置，使用适当的文件系统布局）。
+5. 在 `/etc/devfs.rules` 中添加 devfs 规则集：
    ```text
    [devfsrules_jaildev=100]
    add include $devfsrules_hide_all
    add include $devfsrules_unhide_basic
    add path 'jaildev' unhide
    ```
-6. Reload the rules: `sudo service devfs restart`.
-7. Start the jail: `sudo jail -c path=/jails/test devfs_ruleset=100 persist command=/bin/sh`.
-8. In another terminal, enter the jail: `sudo jexec test /bin/sh`.
-9. Inside the jail, run `cat /dev/jaildev`. The greeting should appear. Try `ls /dev/`: only the allowed devices (including `jaildev`) are visible.
-10. Test the privilege boundary: modify the driver to require `PRIV_DRIVER` for an ioctl, rebuild, reload, and verify that the jail's root cannot run the ioctl while the host's root can.
+6. 重新加载规则：`sudo service devfs restart`。
+7. 启动 jail：`sudo jail -c path=/jails/test devfs_ruleset=100 persist command=/bin/sh`。
+8. 在另一个终端中，进入 jail：`sudo jexec test /bin/sh`。
+9. 在 jail 内，运行 `cat /dev/jaildev`。问候应该出现。尝试 `ls /dev/`：只有允许的设备（包括 `jaildev`）可见。
+10. 测试权限边界：修改驱动程序以要求 `PRIV_DRIVER` 才能执行 ioctl，重新构建、重新加载，并验证 jail 的 root 无法运行 ioctl 而主机的 root 可以。
 
-**Expected outcome**: A driver visible in the jail only because the ruleset allows it, with privilege checks that behave differently for host root and jail root.
+**预期结果**：驱动程序仅在规则集允许时在 jail 中可见，权限检查对主机 root 和 jail root 的行为不同。
 
-**Common pitfalls**: Forgetting to restart `devfs` after editing the rules. Not setting `persist` on the jail (without it, the jail dies as soon as the initial process exits). Misreading the ruleset syntax (whitespace is significant).
+**常见陷阱**：编辑规则后忘记重启 `devfs`。未在 jail 上设置 `persist`（没有它，jail 在初始进程退出时即死亡）。误读规则集语法（空格是有意义的）。
 
-### 实验4：A Network Driver Inside a VNET Jail
-**Goal**: Create a VNET jail, move one end of an `epair(4)` into it, and verify that network traffic flows between the host and the jail using only the jail's VNET. This exercises `if_vmove()` and the VNET lifecycle.
+### 实验4：VNET 监狱内的网络驱动程序
+**目标**：创建一个 VNET jail，将 `epair(4)` 的一端移入其中，并验证网络流量仅使用 jail 的 VNET 在主机和 jail 之间流动。这锻炼了 `if_vmove()` 和 VNET 生命周期。
 
-**Prerequisites**: A FreeBSD 14.3 host with `if_epair.ko` loadable. Root privileges.
+**先决条件**：一台可加载 `if_epair.ko` 的 FreeBSD 14.3 主机。Root 权限。
 
 **Steps**:
 
-1. Load the `if_epair` module: `sudo kldload if_epair`.
-2. Create an `epair`: `sudo ifconfig epair create`. You will get a device pair `epair0a` and `epair0b`.
-3. Assign an IP to `epair0a` on the host: `sudo ifconfig epair0a 10.100.0.1/24 up`.
-4. Create a jail root directory: `mkdir -p /jails/vnet-test`. Place a minimal shell and `ifconfig` binary inside (or bind-mount `/bin`, `/sbin`, `/usr/bin` for testing).
-5. Create the jail with VNET enabled:
+1. 加载 `if_epair` 模块：`sudo kldload if_epair`。
+2. 创建一个 `epair`：`sudo ifconfig epair create`。你将获得一个设备对 `epair0a` 和 `epair0b`。
+3. 在主机上为 `epair0a` 分配 IP：`sudo ifconfig epair0a 10.100.0.1/24 up`。
+4. 创建 jail 根目录：`mkdir -p /jails/vnet-test`。在其中放置最小的 shell 和 `ifconfig` 二进制文件（或绑定挂载 `/bin`、`/sbin`、`/usr/bin` 用于测试）。
+5. 创建启用 VNET 的 jail：
    ```sh
    sudo jail -c \
        name=vnet-test \
@@ -1865,485 +1865,485 @@ Work through them in order. The first lab gets you comfortable inspecting a Virt
        persist \
        command=/bin/sh
    ```
-   The `vnet.interface=epair0b` parameter triggers the `if_vmove()` that moves the interface into the jail.
-6. Enter the jail: `sudo jexec vnet-test /bin/sh`.
-7. Inside the jail, configure the interface: `ifconfig epair0b 10.100.0.2/24 up`.
-8. Still inside the jail, ping the host: `ping -c 3 10.100.0.1`. It should succeed.
-9. From the host, ping the jail: `ping -c 3 10.100.0.2`. It should succeed.
-10. Stop the jail: `sudo jail -r vnet-test`. The `epair0b` interface is moved back to the host (because it was moved with `vnet.interface`, which uses `if_vmove_loan()` under the hood in recent FreeBSD releases).
-11. Verify the interface is back on the host: `ifconfig epair0b`. It should still exist but belong to the host's VNET again.
+   `vnet.interface=epair0b` 参数触发 `if_vmove()` 将接口移入 jail。
+6. 进入 jail：`sudo jexec vnet-test /bin/sh`。
+7. 在 jail 内，配置接口：`ifconfig epair0b 10.100.0.2/24 up`。
+8. 仍在 jail 内，ping 主机：`ping -c 3 10.100.0.1`。应该成功。
+9. 从主机 ping jail：`ping -c 3 10.100.0.2`。应该成功。
+10. 停止 jail：`sudo jail -r vnet-test`。`epair0b` 接口被移回主机（因为它通过 `vnet.interface` 移动，后者在最近的 FreeBSD 版本中底层使用 `if_vmove_loan()`）。
+11. 验证接口已回到主机：`ifconfig epair0b`。它应该仍然存在但再次属于主机的 VNET。
 
-**Expected outcome**: A jail with its own network stack, moving an interface cleanly in and out.
+**预期结果**：一个拥有自己网络栈的 jail，干净地将接口移入和移出。
 
-**Common pitfalls**: Forgetting to enable VNET in the kernel (`options VIMAGE` is enabled in `GENERIC`, so this should be fine, but custom kernels might not have it). Trying to use a physical interface instead of `epair(4)` for the first attempt (this works but causes the host to lose that interface while the jail has it). Not giving the jail enough binaries to run a shell (the simplest workaround is a `nullfs` mount of the host's `/rescue` or a minimal bind-mount setup).
+**常见陷阱**：忘记在内核中启用 VNET（`options VIMAGE` 在 `GENERIC` 中已启用，所以应该没问题，但自定义内核可能没有）。首次尝试使用物理接口而不是 `epair(4)`（这可以工作但会导致主机在 jail 占用接口期间失去该接口）。没有给 jail 足够的二进制文件来运行 shell（最简单的解决方法是 `nullfs` 挂载主机的 `/rescue` 或最小绑定挂载设置）。
 
-### 实验5：PCI Passthrough Simulation (Optional)
-**Goal**: Observe how PCI passthrough changes a device's ownership, using a non-critical device as the target. This lab is marked optional because it requires a spare PCI device and an IOMMU-capable host. If those are not available, read through the steps; they illustrate the workflow even without running them.
+### 实验5：PCI 直通模拟（可选）
+**目标**：使用非关键设备作为目标，观察 PCI 直通如何改变设备的所有权。此实验标记为可选，因为它需要一个空闲 PCI 设备和支持 IOMMU 的主机。如果这些不可用，请通读步骤；即使不运行，它们也说明了工作流程。
 
-**Prerequisites**: A FreeBSD 14.3 host with VT-d or AMD-Vi enabled in firmware. A spare PCI device that is safe to remove from the host (an unused NIC is a common choice). A `bhyve(8)` guest configuration.
+**先决条件**：一台在固件中启用 VT-d 或 AMD-Vi 的 FreeBSD 14.3 主机。一个可以安全从主机移除的空闲 PCI 设备（常见选择是未使用的网卡）。一个 `bhyve(8)` 客户机配置。
 
 **Steps**:
 
-1. Identify the target device: `pciconf -lvBb | grep -B 1 -A 10 'Ethernet'` (or whatever type the spare device is). Note its bus, slot, and function (e.g., `pci0:5:0:0`).
-2. Edit `/boot/loader.conf` and add the device to the passthrough list:
+1. 识别目标设备：`pciconf -lvBb | grep -B 1 -A 10 'Ethernet'`（或空闲设备的任何类型）。记下它的总线、插槽和功能号（例如 `pci0:5:0:0`）。
+2. 编辑 `/boot/loader.conf` 并将设备添加到直通列表：
    ```text
    pptdevs="5/0/0"
    ```
-3. Reboot the host. The device should now be bound to `ppt(4)` rather than its native driver. Confirm with `pciconf -l` (look for `ppt0`).
-4. Configure a guest to pass the device through:
+3. 重启主机。设备现在应该绑定到 `ppt(4)` 而不是其原生驱动程序。用 `pciconf -l` 确认（查找 `ppt0`）。
+4. 配置客户机以直通设备：
    ```text
    passthru0="5/0/0"
    ```
-   (Using the `vm-bhyve` configuration; the raw `bhyve` command is more verbose.)
-5. Boot the guest. Inside the guest, run `pciconf -lvBb`. The device now appears in the guest with its real vendor and device IDs, attached to its native driver.
-6. Exercise the device inside the guest: configure the NIC, send traffic, verify it works.
-7. Shut down the guest. Edit `/boot/loader.conf` to remove the `pptdevs` line, reboot, and verify that the device returns to the host with its native driver attached.
+   （使用 `vm-bhyve` 配置；原始 `bhyve` 命令更冗长。）
+5. 启动客户机。在客户机内，运行 `pciconf -lvBb`。设备现在以真实的供应商和设备 ID 出现在客户机中，附加到其原生驱动程序。
+6. 在客户机内操作设备：配置 NIC，发送流量，验证其工作。
+7. 关闭客户机。编辑 `/boot/loader.conf` 移除 `pptdevs` 行，重启，验证设备以其原生驱动程序返回主机。
 
-**Expected outcome**: A clean round trip of a PCI device from host to guest and back, exercising the detach and reattach paths of the native driver.
+**预期结果**：PCI 设备从主机到客户机再回来的干净往返，锻炼原生驱动程序的分离和重新附加路径。
 
-**Common pitfalls**: The host firmware does not have VT-d or AMD-Vi enabled (look for it in the BIOS/UEFI setup). The chosen device is in the same IOMMU group as a device the host needs, forcing a multi-device passthrough. The device is attached to its native driver at boot before `ppt(4)` can claim it (usually this is fine if `pptdevs` is set early enough).
+**常见陷阱**：主机固件未启用 VT-d 或 AMD-Vi（在 BIOS/UEFI 设置中查找）。所选设备与主机需要的设备在同一 IOMMU 组中，迫使进行多设备直通。设备在启动时已附加到其原生驱动程序，`ppt(4)` 无法声明它（如果 `pptdevs` 设置得足够早，通常没问题）。
 
-### 实验6：Building and Loading the vtedu Driver
-**Goal**: Build the pedagogical `vtedu` driver from the case study, load it under a FreeBSD 14.3 guest, and observe its behaviour even without a matching backend. This lab exercises the kernel module build process in the VirtIO context and verifies the module structure.
+### 实验6：构建并加载 vtedu 驱动程序
+**目标**：从案例研究构建教学用的 `vtedu` 驱动程序，在 FreeBSD 14.3 客户机下加载它，并观察其行为（即使没有匹配的后端）。此实验锻炼 VirtIO 上下文中的内核模块构建过程并验证模块结构。
 
-**Prerequisites**: A FreeBSD 14.3 guest (the one from Lab 1 is fine). The FreeBSD source tree under `/usr/src` or the kernel headers installed (`pkg install kernel-14.3-RELEASE` works on stock systems). Root privileges inside the guest.
-
-**Steps**:
-
-1. Copy the companion files to the guest. From the book's examples tree, `examples/part-07/ch30-virtualisation/vtedu/` contains `vtedu.c`, `Makefile`, and `README.md`. Transfer them to the guest (via `scp`, `9p` share, or a shared volume).
-2. Inside the guest, change into the `vtedu` directory: `cd /tmp/vtedu`.
-3. Build the module: `make clean && make`. If the build fails because `/usr/src` is not installed, install it with `pkg install kernel-14.3-RELEASE` or point `SYSDIR` at an alternative kernel source tree: `make SYSDIR=/path/to/sys`.
-4. A successful build produces `virtio_edu.ko` in the current directory.
-5. Load the module: `sudo kldload ./virtio_edu.ko`. The load succeeds regardless of whether a matching device is present.
-6. Check module status: `kldstat -v | grep -A 5 virtio_edu`. You will see the module is loaded, but no device is bound. This is expected without a backend.
-7. Unload the module: `sudo kldunload virtio_edu`.
-8. Inspect the module's PNP information: `kldxref -d /boot/modules` lists modules and their PNP entries. If you moved the module into `/boot/modules`, you will see the `VirtIO simple` PNP entry advertising device ID 0xfff0.
-9. Look at `dmesg` output during load and unload. There should be no errors. The absence of an attach message confirms that no device is bound, which is the expected behaviour.
-
-**Expected outcome**: A successful build and load cycle that demonstrates the module is well-formed. Without a backend, the module is inert; this is a useful confirmation that the build and load plumbing work independently of the device side.
-
-**Common pitfalls**: Missing kernel sources (install the `src` package). Missing `virtio.ko` dependency (load `virtio` first if it was somehow absent, though it is built into `GENERIC`). Confusion when no device attaches (re-read Section 1 of the vtedu README; this is by design).
-
-**What to do next**: The real learning comes from pairing this module with a backend. Challenge 5 in the Challenge Exercises describes writing a matching backend in `bhyve(8)`. If you complete that, the driver will attach to the backend-provided device, a `/dev/vtedu0` node will appear, and you will be able to `echo hello > /dev/vtedu0 && cat /dev/vtedu0` to exercise the full VirtIO round-trip you studied in the case study.
-
-### 实验7：Measuring VirtIO Overhead
-**Goal**: Quantify the performance characteristics of VirtIO by running a simple workload under emulated, paravirtualised, and passthrough device configurations. This lab is about building intuition for what virtualisation costs, not about optimising a specific driver.
-
-**Prerequisites**: A FreeBSD 14.3 host with bhyve, at least 8 GB of RAM, and the `vm-bhyve` tool installed. A NVMe drive is ideal but not required. The `fio(1)` benchmarking tool (available from ports as `benchmarks/fio`). Optional: a spare NIC for passthrough comparison.
+**先决条件**：一台 FreeBSD 14.3 客户机（实验 1 的即可）。`/usr/src` 下的 FreeBSD 源代码树或已安装的内核头文件（`pkg install kernel-14.3-RELEASE` 在标准系统上可用）。客户机内的 root 权限。
 
 **Steps**:
 
-1. Create a baseline guest with VirtIO block and network devices (this is the default in `vm-bhyve`).
-2. Inside the guest, install `fio`: `pkg install fio`.
-3. Run a baseline disk benchmark: `fio --name=baseline --rw=randread --bs=4k --size=1G --numjobs=4 --iodepth=32 --runtime=30s --group_reporting`. Record the IOPS and latency.
-4. On the host, measure the same workload directly (not inside the guest) using the backing storage as the target. Compare.
-5. Run a baseline network benchmark: `iperf3 -c 10.0.0.1 -t 30` (server on the host, client in the guest). Record the throughput.
-6. If you have a spare NIC, reconfigure the guest to use passthrough for the NIC (see Lab 5). Re-run the iperf3 benchmark. Compare.
-7. On the host, observe interrupt and VM exit counts while the benchmarks run: `vmstat -i`, `pmcstat -S instructions -l 10`. The most interesting counters are VM exit rates, which correlate with overhead.
-8. For the disk benchmark, try varying the VirtIO features. Modify the guest configuration to disable `VIRTIO_F_RING_EVENT_IDX` (if the backend supports disabling it) and observe the change in interrupt rate.
+1. 将配套文件复制到客户机。从本书的示例树中，`examples/part-07/ch30-virtualisation/vtedu/` 包含 `vtedu.c`、`Makefile` 和 `README.md`。将它们传输到客户机（通过 `scp`、`9p` 共享或共享卷）。
+2. 在客户机内，进入 `vtedu` 目录：`cd /tmp/vtedu`。
+3. 构建模块：`make clean && make`。如果构建因 `/usr/src` 未安装而失败，用 `pkg install kernel-14.3-RELEASE` 安装，或将 `SYSDIR` 指向替代的内核源代码树：`make SYSDIR=/path/to/sys`。
+4. 成功的构建会在当前目录产生 `virtio_edu.ko`。
+5. 加载模块：`sudo kldload ./virtio_edu.ko`。无论是否存在匹配的设备，加载都会成功。
+6. 检查模块状态：`kldstat -v | grep -A 5 virtio_edu`。你会看到模块已加载，但没有设备被绑定。没有后端这是预期的。
+7. 卸载模块：`sudo kldunload virtio_edu`。
+8. 检查模块的 PNP 信息：`kldxref -d /boot/modules` 列出模块及其 PNP 条目。如果你将模块移入了 `/boot/modules`，你会看到播发设备 ID 0xfff0 的 `VirtIO simple` PNP 条目。
+9. 查看加载和卸载期间的 `dmesg` 输出。不应该有错误。缺少附加消息确认没有设备被绑定，这是预期行为。
 
-**Expected outcome**: A small set of numbers that quantify the cost of virtualisation for your particular setup. Typically, VirtIO paravirtualised I/O is within 10-20% of bare metal for sustained workloads and within 30-40% for latency-sensitive random workloads; passthrough is within a few percent of bare metal but forfeits flexibility; pure emulation (for example, emulated E1000 instead of virtio-net) is 5-10x slower than VirtIO and should be avoided for any serious workload.
+**预期结果**：一个成功的构建和加载循环，证明模块是格式良好的。没有后端时，模块是惰性的；这是一个有用的确认，表明构建和加载管道独立于设备侧工作。
 
-**Common pitfalls**: Benchmarks can be noisy; run each multiple times and take medians rather than single samples. The host's cache state affects disk benchmarks; run a warmup pass before the measured runs. CPU frequency scaling can skew results; pin the guest to specific cores and disable scaling on the host for reproducibility.
+**常见陷阱**：缺少内核源代码（安装 `src` 包）。缺少 `virtio.ko` 依赖（如果它因为某种原因不存在，先加载 `virtio`，虽然它已内置于 `GENERIC`）。没有设备附加时的困惑（重读 vtedu README 的第 1 节；这是设计如此）。
 
-**What this teaches**: The numbers are secondary; the method is primary. Being able to measure overhead and attribute it to a specific layer (emulation vs. paravirtualisation vs. passthrough, interrupt rate vs. throughput, guest CPU vs. host CPU) is the foundation of performance work in virtualised environments. The same technique applies to any driver you write: if it has a performance requirement, you need to measure, and the measurement techniques are the ones in this lab.
+**下一步**：真正的学习来自将此模块与后端配对。挑战练习中的挑战 5 描述了在 `bhyve(8)` 中编写匹配的后端。如果你完成了它，驱动程序将附加到后端提供的设备，一个 `/dev/vtedu0` 节点将出现，你将能够 `echo hello > /dev/vtedu0 && cat /dev/vtedu0` 来锻炼你在案例研究中学习的完整 VirtIO 往返。
 
-### A Note on Labs You Cannot Complete Today
+### 实验7：测量 VirtIO 开销
+**目标**：通过在模拟、半虚拟化和直通设备配置下运行简单工作负载来量化 VirtIO 的性能特征。此实验是为了建立虚拟化成本的直觉，而不是优化特定驱动程序。
 
-Not every reader will have the hardware for every lab. Labs 1 through 4 are doable on essentially any FreeBSD 14.3 machine with enough memory and the `vmm` module. Lab 5 requires specific hardware that many readers will not have. Treat Lab 5 as a read-along walkthrough if you cannot run it; the concepts translate to any passthrough scenario, and the exact commands are documented in `pci_passthru(4)` and the `bhyve(8)` manual page.
+**先决条件**：一台装有 bhyve 的 FreeBSD 14.3 主机，至少 8 GB RAM，以及 `vm-bhyve` 工具。NVMe 驱动器最理想但不是必需的。`fio(1)` 基准测试工具（可通过 ports 获取，为 `benchmarks/fio`）。可选：用于直通比较的空闲 NIC。
 
-If you are blocked on a lab, write down exactly what went wrong and come back to it. Virtualisation and containerization are areas where small environmental details can derail a whole setup, and the diagnostic skill of narrowing down the failure is as important as completing the lab.
+**Steps**:
+
+1. 创建一个带有 VirtIO 块和网络设备的基线客户机（这是 `vm-bhyve` 的默认配置）。
+2. 在客户机内，安装 `fio`：`pkg install fio`。
+3. 运行基线磁盘基准测试：`fio --name=baseline --rw=randread --bs=4k --size=1G --numjobs=4 --iodepth=32 --runtime=30s --group_reporting`。记录 IOPS 和延迟。
+4. 在主机上，直接（不在客户机内）使用后备存储作为目标测量相同的工作负载。进行比较。
+5. 运行基线网络基准测试：`iperf3 -c 10.0.0.1 -t 30`（服务器在主机上，客户端在客户机内）。记录吞吐量。
+6. 如果你有空闲的 NIC，重新配置客户机使用 NIC 直通（参见实验 5）。重新运行 iperf3 基准测试。进行比较。
+7. 在主机上，观察基准测试运行期间的中断和 VM 退出计数：`vmstat -i`、`pmcstat -S instructions -l 10`。最有趣的计数器是 VM 退出率，它与开销相关。
+8. 对于磁盘基准测试，尝试改变 VirtIO 特性。修改客户机配置以禁用 `VIRTIO_F_RING_EVENT_IDX`（如果后端支持禁用它）并观察中断率的变化。
+
+**预期结果**：一组量化你的特定设置虚拟化成本的数据。通常，VirtIO 半虚拟化 I/O 在持续工作负载下与裸金属差距在 10-20% 以内，在延迟敏感的随机工作负载下差距在 30-40% 以内；直通与裸金属差距在几个百分点以内但丧失灵活性；纯模拟（例如模拟 E1000 而不是 virtio-net）比 VirtIO 慢 5-10 倍，应避免用于任何严肃的工作负载。
+
+**常见陷阱**：基准测试可能有噪声；每次运行多次并取中位数而不是单次采样。主机的缓存状态影响磁盘基准测试；在测量运行之前运行预热。CPU 频率缩放可能偏斜结果；将客户机固定到特定核心并在主机上禁用缩放以确保可重现性。
+
+**这教会什么**：数字是次要的；方法是主要的。能够测量开销并将其归因于特定层（模拟 vs. 半虚拟化 vs. 直通，中断率 vs. 吞吐量，客户机 CPU vs. 主机 CPU）是虚拟化环境中性能工作的基础。相同的技术适用于你编写的任何驱动程序：如果它有性能要求，你需要测量，而测量技术就是本实验中的那些。
+
+### 关于今天无法完成的实验的说明
+
+不是每个读者都有完成每个实验的硬件。实验 1 到 4 基本上可以在任何有足够内存和 `vmm` 模块的 FreeBSD 14.3 机器上完成。实验 5 需要许多读者没有的特定硬件。如果你无法运行实验 5，请将其作为阅读演练；概念适用于任何直通场景，确切的命令记录在 `pci_passthru(4)` 和 `bhyve(8)` 手册页中。
+
+如果你在某个实验上受阻，准确记录出了什么问题，然后再回来。虚拟化和容器化是小型环境细节可能破坏整个设置的领域，缩小失败范围的诊断技能与完成实验同样重要。
 
 ## 挑战练习
 
-The labs above guide you through the standard paths. The challenges below ask you to extend the work. They are harder, less prescriptive, and designed to reward experimentation. Pick whichever one interests you most; all of them stretch different muscles.
+上面的实验引导你通过标准路径。下面的挑战要求你扩展这些工作。它们更难、更不规定性，旨在奖励实验精神。选择你最感兴趣的一个；它们都锻炼不同的能力。
 
-### 挑战1：Extend the Detect Module
-The Lab 2 module reads `vm_guest` and prints an environment label. Extend it so that it also reads the CPU vendor string (using `cpu_vendor` and `cpu_vendor_id`), the total physical memory (`realmem`), and the hypervisor signature where applicable. Produce a single structured log line that a test script can parse.
+### 挑战1：扩展检测模块
+实验 2 的模块读取 `vm_guest` 并打印环境标签。扩展它使其也读取 CPU 供应商字符串（使用 `cpu_vendor` 和 `cpu_vendor_id`）、总物理内存（`realmem`）以及适用的虚拟机监控程序签名。生成一条测试脚本可以解析的结构化日志行。
 
-The CPU vendor string is a well-known part of CPU identification; look at `/usr/src/sys/x86/x86/identcpu.c` to see how the kernel reads it. The physical memory total is exposed through the `realmem` global and through the `hw.physmem` sysctl. The hypervisor signature lives in CPUID leaf 0x40000000 on most hypervisors; reading it requires a small piece of assembly or an intrinsic.
+CPU 供应商字符串是 CPU 识别的知名部分；查看 `/usr/src/sys/x86/x86/identcpu.c` 了解内核如何读取它。物理内存总量通过 `realmem` 全局变量和 `hw.physmem` sysctl 暴露。虚拟机监控程序签名在大多数虚拟机监控程序上位于 CPUID 叶 0x40000000；读取它需要一小段汇编或内联函数。
 
-The interesting design question is how to expose this information to user space. You could log it at module load, add a sysctl, or create a `/dev/envinfo` device. Each has trade-offs. Think about which is most appropriate for a real production driver.
+有趣的设计问题是如何将这些信息暴露给用户空间。你可以在模块加载时记录它、添加 sysctl，或创建一个 `/dev/envinfo` 设备。每种方法都有权衡。思考哪种对真正的生产驱动程序最合适。
 
-### 挑战2：A Simulation Backend for a Real VirtIO Driver
-Chapter 29's techniques encourage splitting a driver into accessors, backends, and a thin upper layer. Apply this to `virtio_random`. The real driver (in `/usr/src/sys/dev/virtio/random/virtio_random.c`) is small and tightly written. Can you refactor it so that the virtqueue operations go through an accessor layer, and a simulation backend that does not need a real VirtIO device can be selected for tests?
+### 挑战2：为真实 VirtIO 驱动程序构建模拟后端
+第 29 章的技术鼓励将驱动程序拆分为访问器、后端和薄上层。将此应用于 `virtio_random`。真实驱动程序（在 `/usr/src/sys/dev/virtio/random/virtio_random.c` 中）小而紧凑。你能重构它使虚拟队列操作通过访问器层进行，并且可以选择一个不需要真实 VirtIO 设备的模拟后端进行测试吗？
 
-The refactor is subtle because the VirtIO framework provides most of the accessor layer for you: `virtqueue_enqueue`, `virtqueue_dequeue`, `virtio_notify` are already abstractions. The challenge is to find a layer above them that can be swapped out. One possibility is to move the harvest loop into a function that takes a callback for "get one buffer's worth of data", and implement that callback either as "call the virtqueue" (real) or as "read from `/dev/urandom` on the host" (simulation).
+重构是微妙的，因为 VirtIO 框架为你提供了大部分访问器层：`virtqueue_enqueue`、`virtqueue_dequeue`、`virtio_notify` 已经是抽象。挑战在于找到一个可以在它们之上交换的层。一种可能性是将收获循环移入一个接受回调的函数，并将该回调实现为“调用虚拟队列”（真实）或“从主机上的 `/dev/urandom` 读取”（模拟）。
 
-This is a design exercise more than a coding exercise. The goal is to understand how far Chapter 29's advice can be stretched in a real driver that already has good abstractions.
+这与其说是编码练习，不如说是设计练习。目标是了解第 29 章的建议在已经有良好抽象的真实驱动程序中能延伸多远。
 
-### 挑战3：A VNET-Aware Driver Skeleton
-Write a skeleton kernel module that creates a pseudo-network interface (using the `if_clone(9)` framework), supports being moved between VNETs, and reports its VNET identity in a sysctl. Verify with a VNET jail that the interface can be moved into the jail, used, and moved back.
+### 挑战3：VNET 感知的驱动程序骨架
+编写一个骨架内核模块，创建一个伪网络接口（使用 `if_clone(9)` 框架），支持在 VNET 之间移动，并在 sysctl 中报告其 VNET 身份。用 VNET jail 验证接口可以被移入 jail、使用并移回。
 
-The key subtlety is handling the VNET context correctly. Read the code in `/usr/src/sys/net/if_tuntap.c` for a reference. The `if_vmove` lifecycle requires the driver to clean up per-VNET state when the interface leaves and re-create it when the interface arrives. Pay attention to `VNET_SYSINIT` and `VNET_SYSUNINIT` if your driver needs per-VNET state.
+关键的微妙之处在于正确处理 VNET 上下文。阅读 `/usr/src/sys/net/if_tuntap.c` 中的代码作为参考。`if_vmove` 生命周期要求驱动程序在接口离开时清理 per-VNET 状态，在接口到达时重新创建。如果你的驱动程序需要 per-VNET 状态，请注意 `VNET_SYSINIT` 和 `VNET_SYSUNINIT`。
 
-This is a deep challenge that will take you into the VNET internals. Do not expect to complete it in a single sitting. Treat it as a multi-day project.
+这是一个深度挑战，会带你进入 VNET 内部。不要期望一次完成。把它当作一个多天项目。
 
-### 挑战4：A Jail-Visible Status Device
-Write a driver that exposes a `/dev/status` character device. The device's `read` returns different information depending on whether the caller is in a jail. If the caller is on the host, it returns system-wide status. If the caller is in a jail, it returns jail-specific status (number of processes, current memory use, and so on).
+### 挑战4：监狱可见的状态设备
+编写一个暴露 `/dev/status` 字符设备的驱动程序。设备的 `read` 根据调用者是否在 jail 中返回不同信息。如果调用者在主机上，返回系统范围的状态。如果调用者在 jail 中，返回 jail 特定的状态（进程数、当前内存使用等）。
 
-The interesting part is how to distinguish the caller's jail. The `struct thread` passed to the `read` method has `td->td_ucred->cr_prison`, and `prison0` is the host. From the prison pointer you can read the jail's name, its process count (`pr_nprocs`), and so on. Be careful about locking: the prison's fields are mostly read under a mutex that the driver must acquire.
+有趣的部分是如何区分调用者的 jail。传递给 `read` 方法的 `struct thread` 有 `td->td_ucred->cr_prison`，`prison0` 是主机。从 prison 指针你可以读取 jail 的名称、进程计数（`pr_nprocs`）等。注意加锁：prison 的字段大多需要在驱动程序获取互斥锁后读取。
 
-This challenge is a good way to learn about the jail API without writing anything hypervisor-related. It also teaches you about `struct thread` and `struct ucred`, which are central to FreeBSD's privilege model.
+这个挑战是学习 jail API 的好方法，不需要编写任何虚拟机监控程序相关的东西。它还教你关于 `struct thread` 和 `struct ucred`，这些是 FreeBSD 权限模型的核心。
 
-### 挑战5：A bhyve Emulated Device in User Space
-If you are ready for a bigger project, study how `bhyve(8)` emulates a simple VirtIO device (for example, virtio-rnd) in user space, and write a new emulated device of your own. The easiest target is a "hello" device that returns a fixed string through a VirtIO interface. The guest-side driver is your Chapter 29 or Chapter 30 work; the host-side emulator lives in `/usr/src/usr.sbin/bhyve/`.
+### 挑战5：用户空间的 bhyve 模拟设备
+如果你准备好做更大的项目，研究 `bhyve(8)` 如何在用户空间模拟一个简单的 VirtIO 设备（例如 virtio-rnd），并编写你自己的新模拟设备。最简单的目标是返回固定字符串的 hello 设备。客户机侧的驱动程序是你第 29 章或第 30 章的工作；主机侧的模拟器位于 `/usr/src/usr.sbin/bhyve/`。
 
-This exercise ties together everything in the chapter: you write a VirtIO device in user space on the host, your driver inside the guest reads from it, the virtqueue transport between them is what you have been studying, and the whole thing exercises the full guest-host loop.
+这个练习将本章的所有内容联系在一起：你在主机上的用户空间编写 VirtIO 设备，你的驱动程序在客户机内从中读取，它们之间的虚拟队列传输就是你一直在学习的内容，整个事情锻炼了完整的客户机-主机循环。
 
-It is a substantial project, and it requires some familiarity with `bhyve(8)`'s code structure. Consider it a reach goal. If you finish it, you have genuinely learned both sides of the VirtIO story.
+这是一个实质性的项目，需要对 `bhyve(8)` 的代码结构有一定了解。把它当作一个远大目标。如果你完成了它，你真正学会了 VirtIO 故事的双方。
 
-### 挑战6：Container Orchestration for Driver Testing
-Write a shell script (or a more elaborate tool) that automates the Lab 3 and Lab 4 workflows. Given a driver and a test harness, the script should:
+### 挑战6：用于驱动程序测试的容器编排
+编写一个 shell 脚本（或更复杂的工具）来自动化实验 3 和实验 4 的工作流程。给定驱动程序和测试工具，脚本应该：
 
-1. Build the driver.
-2. Load it on the host.
-3. Create a jail (or a VNET jail) with an appropriate ruleset.
-4. Run the harness inside the jail.
-5. Collect results.
-6. Destroy the jail.
-7. Unload the driver.
-8. Report pass/fail with diagnostics.
+1. 构建驱动程序。
+2. 在主机上加载它。
+3. 创建一个带有适当规则集的 jail（或 VNET jail）。
+4. 在 jail 内运行测试工具。
+5. 收集结果。
+6. 销毁 jail。
+7. 卸载驱动程序。
+8. 报告通过/失败及诊断信息。
 
-The script should be idempotent (running it twice should not leave residue) and it should handle common failures gracefully. The end result is a tool you can run in CI to verify that your driver continues to work under jails as it evolves.
+脚本应该是幂等的（运行两次不应该留下残留），并且应该优雅地处理常见故障。最终结果是一个你可以在 CI 中运行的工具，以验证你的驱动程序在演进过程中继续在 jail 下工作。
 
-This is not a deep technical challenge but a practical one. Building this kind of automation is a significant fraction of real-world driver work, and building it yourself once teaches you what is involved.
+这不是一个深度技术挑战，而是一个实践挑战。构建这种自动化是真实驱动程序工作的重要部分，自己构建一次会教你涉及什么。
 
-### How to Approach These Challenges
+### 如何对待这些挑战
 
-Each challenge could be a weekend project. Pick one that seems interesting and set aside time for it. Do not try to do all of them at once; your energy for unfamiliar work is limited, and you learn more from one challenge finished than from three challenges half-done.
+每个挑战都可以是一个周末项目。选择一个看起来有趣的并为它留出时间。不要试图一次完成所有；你对不熟悉工作的精力是有限的，从一个完成的挑战中学到的东西比从三个半途而废的挑战中学到的更多。
 
-If you get stuck, do two things. First, re-read the relevant section of the chapter; the hints are there. Second, look at real FreeBSD drivers that do something similar. The source tree is your best teacher for the idiomatic way to solve problems that have been solved before.
+如果你卡住了，做两件事。首先，重新阅读本章的相关节次；提示就在那里。其次，看看做了类似事情的真实 FreeBSD 驱动程序。源代码树是你解决之前已被解决过的问题的最佳老师。
 
-## 故障排除 and Common Mistakes
+## 故障排除与常见错误
 
-This section collects the problems that driver authors most often hit when working with virtualised and containerised environments. Each entry describes the symptom, the likely cause, and the way to verify and fix it. Keep this as a reference; the first time you see a symptom, it will be new, and the next time it will be familiar.
+本节汇集了驱动程序作者在使用虚拟化和容器化环境时最常遇到的问题。每个条目描述症状、可能的原因以及验证和修复的方法。把它当作参考保留；第一次看到症状时它是新的，下次就会熟悉了。
 
-### VirtIO Device Not Detected in the Guest
+### 客户机中未检测到 VirtIO 设备
 
-**Symptom**: The guest boots, but `pciconf -l` does not show the VirtIO device, and `dmesg` contains no `virtio` attach messages.
+**症状**：客户机启动了，但 `pciconf -l` 不显示 VirtIO 设备，`dmesg` 中没有 `virtio` 附加消息。
 
-**Cause**: Either the host did not configure the device (wrong `bhyve` command line, wrong `vm-bhyve` template), or the guest kernel is missing the VirtIO module. On FreeBSD 14.3, VirtIO drivers are built into `GENERIC` and auto-load; the guest side should almost never be the cause.
+**原因**：要么是主机没有配置设备（错误的 `bhyve` 命令行、错误的 `vm-bhyve` 模板），要么是客户机内核缺少 VirtIO 模块。在 FreeBSD 14.3 上，VirtIO 驱动程序内置于 `GENERIC` 并自动加载；客户机侧几乎不应该是原因。
 
-**Fix**: On the host, verify that the `bhyve` command line includes the device. For `vm-bhyve`, look at the VM's configuration file and check for lines like `disk0_type="virtio-blk"` or `network0_type="virtio-net"`. If the device is listed but still missing, check that the hypervisor has permission to access the backing resource (the disk image, the tap device).
+**修复**：在主机上，验证 `bhyve` 命令行包含该设备。对于 `vm-bhyve`，查看 VM 的配置文件，检查是否有 `disk0_type="virtio-blk"` 或 `network0_type="virtio-net"` 这样的行。如果设备已列出但仍然缺失，检查虚拟机监控程序是否有权访问后备资源（磁盘映像、tap 设备）。
 
-Inside the guest, confirm the kernel has VirtIO: `kldstat -m virtio` or `kldstat | grep -i virtio`. If the module is not loaded, try `kldload virtio`.
+在客户机内，确认内核有 VirtIO：`kldstat -m virtio` 或 `kldstat | grep -i virtio`。如果模块未加载，尝试 `kldload virtio`。
 
-### virtqueue_enqueue Fails With ENOBUFS
+### virtqueue_enqueue 返回 ENOBUFS
 
-**Symptom**: A VirtIO driver tries to enqueue a buffer and gets `ENOBUFS`.
+**症状**：VirtIO 驱动程序尝试入队缓冲区时得到 `ENOBUFS`。
 
-**Cause**: The virtqueue is full. Either the driver has not been draining completed buffers through `virtqueue_dequeue`, or the ring size is smaller than expected and the driver is enqueueing more than it can hold.
+**原因**：虚拟队列已满。要么是驱动程序没有通过 `virtqueue_dequeue` 排空已完成的缓冲区，要么是环形大小比预期的小，驱动程序入队的内容超过了它能容纳的。
 
-**Fix**: Call `virtqueue_dequeue` in the interrupt handler to drain completed buffers and free their associated state. If the ring is genuinely too small, negotiate a larger ring size at feature-negotiation time, if the device supports `VIRTIO_F_RING_INDIRECT_DESC` or similar features.
+**修复**：在中断处理程序中调用 `virtqueue_dequeue` 排空已完成的缓冲区并释放其关联状态。如果环形确实太小，在特性协商时协商更大的环形大小，前提是设备支持 `VIRTIO_F_RING_INDIRECT_DESC` 或类似特性。
 
-A common beginner error is to forget that enqueue produces a descriptor that must be matched by a dequeue. Every successful enqueue must eventually produce a dequeue; otherwise the ring fills up.
+一个常见的初学者错误是忘记入队产生一个必须与出队匹配的描述符。每次成功的入队最终必须产生一次出队；否则环形会被填满。
 
-### Passthrough Device Not Available in the Guest
+### 客户机中直通设备不可用
 
-**Symptom**: The host has marked a device as passthrough-capable, the guest is configured to use it, but the guest does not see the device.
+**症状**：主机已将设备标记为可直通，客户机已配置使用它，但客户机看不到该设备。
 
-**Cause**: Several possible. The host did not actually bind the device to `ppt(4)` at boot (check `pciconf -l` for `pptN`). The host's firmware does not have the IOMMU enabled (check `dmesg | grep -i dmar` or `grep -i iommu`). The device is in an IOMMU group that cannot be split (so you need to pass through the whole group).
+**原因**：有几种可能。主机实际上没有在启动时将设备绑定到 `ppt(4)`（检查 `pciconf -l` 中的 `pptN`）。主机固件没有启用 IOMMU（检查 `dmesg | grep -i dmar` 或 `grep -i iommu`）。设备在一个无法拆分的 IOMMU 组中（所以需要直通整个组）。
 
-**Fix**: Verify each of the above in turn. `dmesg | grep -i dmar` should show initialisation messages from `dmar(4)` on Intel hosts or `amdvi(4)` on AMD hosts. If those are missing, enable VT-d or AMD-Vi in the firmware. If the device is in a shared IOMMU group, either pass through the whole group or move the device to a different PCI slot that is better isolated (an administrator task requiring chassis access).
+**修复**：依次验证上述各项。`dmesg | grep -i dmar` 应该显示 Intel 主机上 `dmar(4)` 或 AMD 主机上 `amdvi(4)` 的初始化消息。如果缺失，在固件中启用 VT-d 或 AMD-Vi。如果设备在共享的 IOMMU 组中，要么直通整个组，要么将设备移到隔离更好的不同 PCI 插槽（需要物理机箱访问的管理员任务）。
 
-### Kernel Panic at Module Load Inside a Guest
+### 客户机内加载模块时内核崩溃
 
-**Symptom**: `kldload` of a new driver inside a guest causes a kernel panic.
+**症状**：在客户机内 `kldload` 新驱动程序导致内核 panic。
 
-**Cause**: Usually a bug in the driver, but sometimes a VirtIO-specific one: the driver assumes a device feature that the backend does not provide, or it accesses config space using the wrong layout (legacy versus modern).
+**原因**：通常是驱动程序的 bug，但有时是 VirtIO 特有的：驱动程序假设了后端不提供的设备特性，或者它使用错误的布局（传统与现代）访问配置空间。
 
-**Fix**: Use the guest as your development platform precisely to make panics cheap. Capture the panic output (either from the serial console or from a `bhyve` log), narrow down the faulting function with `ddb(4)` if you have it configured, and iterate. The combination of a VM (so panics are cheap) and `printf` debugging (so you can see what happens before the panic) is usually enough to fix a VirtIO driver bug quickly.
+**修复**：使用客户机作为你的开发平台正是为了让 panic 的代价低廉。捕获 panic 输出（从串行控制台或 `bhyve` 日志），如果你配置了 `ddb(4)` 就用它缩小故障函数范围，然后迭代。VM（所以 panic 代价低）和 `printf` 调试（所以你可以看到 panic 之前发生了什么）的组合通常足以快速修复 VirtIO 驱动程序 bug。
 
-For VirtIO-specific bugs, double-check the feature bits your driver negotiates. A driver that claims a feature but then does not implement it correctly (for example, claims `VIRTIO_F_VERSION_1` but uses legacy config space) will break in surprising ways.
+对于 VirtIO 特有的 bug，仔细检查驱动程序协商的特性位。声明了特性但没有正确实现的驱动程序（例如，声明 `VIRTIO_F_VERSION_1` 但使用传统配置空间）会以令人惊讶的方式出错。
 
-### Jail Cannot See a Device Even After Unhiding
+### 取消隐藏后监狱仍看不到设备
 
-**Symptom**: A devfs ruleset includes the device, the ruleset is applied to the jail, but the jail's `ls /dev` does not show it.
+**症状**：devfs 规则集包含该设备，规则集已应用到 jail，但 jail 的 `ls /dev` 不显示它。
 
-**Cause**: The `devfs` mount inside the jail was not re-mounted or re-ruled after the ruleset change. devfs caches the visibility decision at mount time, so later changes do not propagate until the mount is refreshed.
+**原因**：jail 内的 `devfs` 挂载在规则集更改后没有被重新挂载或重新应用规则。devfs 在挂载时缓存可见性决定，所以后续更改不会传播，直到挂载被刷新。
 
-**Fix**: Run `devfs -m /jails/myjail/dev rule -s 100 applyset` (replace the path and ruleset number as appropriate) to force a reapply. Alternatively, stop the jail, restart `devfs`, and start the jail again. The `service devfs restart` command applies the rules in `/etc/devfs.rules` to the host's `/dev`; for jails, you generally need to restart the jail.
+**修复**：运行 `devfs -m /jails/myjail/dev rule -s 100 applyset`（替换路径和规则集编号）来强制重新应用。或者，停止 jail，重启 `devfs`，再启动 jail。`service devfs restart` 命令将 `/etc/devfs.rules` 中的规则应用到主机的 `/dev`；对于 jail，通常需要重启 jail。
 
-### Privilege Denied Inside a Jail That Should Work
+### 监狱内权限被拒绝但应能工作
 
-**Symptom**: A driver operation works on the host as root but fails with `EPERM` inside a jail's root.
+**症状**：驱动程序操作在主机上以 root 身份可以工作，但在 jail 的 root 内以 `EPERM` 失败。
 
-**Cause**: The operation requires a privilege that `prison_priv_check` denies by default. This is the intended behaviour. The fix is either to use a less-privileged operation, to configure the jail with `allow.*` to grant the privilege, or (if appropriate) to change the driver to use a different privilege.
+**原因**：操作需要 `prison_priv_check` 默认拒绝的权限。这是预期行为。修复方法是使用较低权限的操作，用 `allow.*` 配置 jail 以授予权限，或（如果适当）更改驱动程序以使用不同的权限。
 
-**Fix**: Look at the driver's `priv_check` call and identify which privilege is being checked. Consult `/usr/src/sys/sys/priv.h` and `prison_priv_check` in `/usr/src/sys/kern/kern_jail.c` to see whether the privilege is allowed inside jails. If it is not, consider whether the restriction is appropriate (usually yes) and adjust the jail's configuration accordingly (`allow.raw_sockets`, `allow.mount`, etc.).
+**修复**：查看驱动程序的 `priv_check` 调用并识别正在检查的权限。查阅 `/usr/src/sys/sys/priv.h` 和 `/usr/src/sys/kern/kern_jail.c` 中的 `prison_priv_check` 以了解该权限是否在 jail 内被允许。如果不被允许，考虑该限制是否适当（通常是）并相应调整 jail 的配置（`allow.raw_sockets`、`allow.mount` 等）。
 
-Do not be tempted to remove the `priv_check` call just to make the jail work. The check is there for a reason; work with the framework, not against it.
+不要为了使 jail 工作而删除 `priv_check` 调用。检查是有原因的；与框架合作，而不是对抗它。
 
-### VNET Jail Cannot Send or Receive Packets
+### VNET 监狱无法发送或接收数据包
 
-**Symptom**: A VNET jail is created, an interface is moved in, but network traffic does not flow.
+**症状**：创建了 VNET jail，接口已移入，但网络流量不流动。
 
-**Cause**: Several possibilities. The interface was not configured inside the jail (each VNET has its own ifconfig state). The default route was not set inside the jail. The host's firewall is blocking traffic between the jail's interface and the rest of the network. The interface is not in an `UP` state.
+**原因**：有几种可能。接口没有在 jail 内配置（每个 VNET 有自己的 ifconfig 状态）。jail 内没有设置默认路由。主机的防火墙阻止了 jail 接口和其余网络之间的流量。接口不在 `UP` 状态。
 
-**Fix**: Inside the jail, run `ifconfig` and confirm the interface has an address and is `UP`. Run `netstat -rn` and confirm the routing table has the entries you expect. If you are using `pf(4)` or `ipfw(8)` on the host, check the rules: filter rules apply to the host's VNET, and the jail's packets may be rejected if the host's filter blocks them (depending on how the topology is set up).
+**修复**：在 jail 内，运行 `ifconfig` 确认接口有地址且为 `UP`。运行 `netstat -rn` 确认路由表有你期望的条目。如果在主机上使用 `pf(4)` 或 `ipfw(8)`，检查规则：过滤规则应用于主机的 VNET，jail 的数据包可能被主机的过滤器拒绝（取决于拓扑的设置方式）。
 
-For `epair(4)` setups specifically, remember that both ends need configuration, and that the host side stays on the host. The jail configures the end that was moved in; the host configures the end that stayed.
+对于 `epair(4)` 设置，记住两端都需要配置，主机侧留在主机上。jail 配置移入的那端；主机配置留下的那端。
 
-### PCI Passthrough Driver Fails to Attach in the Guest
+### PCI 直通驱动程序在客户机中附加失败
 
-**Symptom**: The guest sees the passed-through device in `pciconf -l`, but the driver fails to attach, or the attach succeeds but `read`/`write` fails.
+**症状**：客户机在 `pciconf -l` 中看到直通设备，但驱动程序附加失败，或附加成功但 `read`/`write` 失败。
 
-**Cause**: Usually one of two things. Either the driver assumes a platform-specific feature that is not present in the guest (an ACPI table, a BIOS entry), or the driver is programming physical addresses directly rather than going through `bus_dma(9)`, and the IOMMU is redirecting DMA in a way the driver does not expect.
+**原因**：通常是以下两种之一。要么是驱动程序假设了客户机中不存在的平台特定功能（ACPI 表、BIOS 条目），要么是驱动程序直接编程物理地址而不是通过 `bus_dma(9)`，IOMMU 正在以驱动程序不期望的方式重定向 DMA。
 
-**Fix**: For the first case, look at the driver's attach code for calls that read platform tables (ACPI, FDT, etc.). If the guest's firmware does not expose the expected tables, the driver must either provide defaults or refuse gracefully.
+**修复**：对于第一种情况，查看驱动程序的附加代码中读取平台表（ACPI、FDT 等）的调用。如果客户机的固件没有暴露预期的表，驱动程序必须提供默认值或优雅地拒绝。
 
-For the second case, audit the driver's DMA code. Every address programmed into the device must come from a `bus_dma(9)` load operation, not from a `vtophys` call or similar. This is standard practice anyway, but it becomes mandatory under passthrough.
+对于第二种情况，审计驱动程序的 DMA 代码。编程到设备中的每个地址必须来自 `bus_dma(9)` 的加载操作，而不是 `vtophys` 调用或类似方法。这本身就是标准实践，但在直通下是强制性的。
 
-### Host Becomes Unresponsive When a Guest Starts
+### 客户机启动时主机变得无响应
 
-**Symptom**: Running `bhyve(8)` makes the host sluggish or unresponsive.
+**症状**：运行 `bhyve(8)` 使主机变得迟钝或无响应。
 
-**Cause**: Resource contention. The guest is allocated more memory or more VCPUs than the host can afford to share. The host is swapping or spinning on a shared lock.
+**原因**：资源争用。客户机被分配了比主机能够承受分享的更多内存或更多 VCPU。主机在交换或在共享锁上自旋。
 
-**Fix**: Check the guest's resource allocation. A guest with all the host's memory will starve the host; a guest with more VCPUs than the host has cores will cause thrashing. A common rule of thumb is to give guests no more than half the host's memory and no more VCPUs than (host cores - 1), to leave room for the host itself.
+**修复**：检查客户机的资源分配。占用主机全部内存的客户机会使主机内存不足；VCPU 超过主机核心数的客户机会导致抖动。常用的经验法则是给客户机不超过主机一半的内存，VCPU 不超过（主机核心数 - 1），为主机本身留出空间。
 
-If the sluggishness persists after sensible allocation, check `top -H` on the host for the `bhyve(8)` process and its threads. Heavy CPU use by `bhyve(8)` suggests the guest is doing something CPU-intensive; heavy CPU use by `vmm` kernel threads suggests excessive VM exits, which may indicate a guest driver that is polling too aggressively.
+如果在合理分配后仍然迟钝，检查主机上的 `top -H` 查看 `bhyve(8)` 进程及其线程。`bhyve(8)` 的 CPU 使用率高表明客户机在做 CPU 密集型操作；`vmm` 内核线程的 CPU 使用率高表明 VM 退出过多，可能表示客户机驱动程序轮询过于激进。
 
-### `kldunload` Hangs
+### `kldunload` 挂起
 
-**Symptom**: Unloading a driver module hangs the process and cannot be interrupted.
+**症状**：卸载驱动程序模块时进程挂起且无法中断。
 
-**Cause**: Some resource the driver owns is still in use. A file descriptor is still open on the driver's device, a callout is still scheduled, a taskqueue still has pending tasks, or a kernel thread the driver spawned has not exited.
+**原因**：驱动程序拥有的某些资源仍在使用。驱动程序设备上的文件描述符仍然打开、callout 仍在调度、taskqueue 仍有待处理任务，或驱动程序生成的内核线程尚未退出。
 
-**Fix**: Find and release the holder. `fstat` or `lsof` lists open file descriptors; `procstat -kk` shows kernel threads. The driver's module unload handler must drain every async mechanism it starts: cancel callouts, drain taskqueues, wait for kernel threads to exit, close any held file descriptors. If any of these is missing, unload hangs.
+**修复**：找到并释放持有者。`fstat` 或 `lsof` 列出打开的文件描述符；`procstat -kk` 显示内核线程。驱动程序的模块卸载处理程序必须排空它启动的每个异步机制：取消 callout、排空 taskqueue、等待内核线程退出、关闭任何持有的文件描述符。如果缺少其中任何一个，卸载就会挂起。
 
-For VNET-aware drivers, the unload must correctly clean up per-VNET state. A common mistake is to clean up in `mod_event(MOD_UNLOAD)` but forget that one of the VNETs the module is attached to is not the current one; accessing its state without `CURVNET_SET` leads to either a wrong-context access (fast) or a hang (slow). The correct pattern is to iterate over VNETs and clean up each explicitly.
+对于 VNET 感知的驱动程序，卸载必须正确清理 per-VNET 状态。一个常见错误是在 `mod_event(MOD_UNLOAD)` 中清理但忘记模块附加的某个 VNET 不是当前的；不使用 `CURVNET_SET` 就访问其状态会导致错误的上下文访问（快）或挂起（慢）。正确的模式是遍历 VNET 并显式清理每个。
 
-### Timing-Related Bugs Only in VMs
+### 仅在虚拟机中出现的时序相关错误
 
-**Symptom**: The driver works on bare metal but hangs or loses interrupts inside a VM.
+**症状**：驱动程序在裸金属上工作但在 VM 内挂起或丢失中断。
 
-**Cause**: Timing assumptions that fail under virtualisation. Guest execution is sometimes paused for milliseconds at a time (during VM exits), and a driver that polls a status register in a tight loop without yielding may fail to make progress or may consume excessive CPU.
+**原因**：在虚拟化下失效的时序假设。客户机执行有时会被暂停数毫秒（在 VM 退出期间），在紧密循环中轮询状态寄存器而不让步的驱动程序可能无法取得进展或消耗过多 CPU。
 
-**Fix**: Replace tight polling with `DELAY(9)` for microsecond-scale waits, `pause(9)` for short waits, or proper sleep with `tsleep(9)` for longer waits. Use interrupt-driven designs instead of polling wherever possible. Test with virtio-blk's performance counters to see whether the driver is generating an unreasonable number of VM exits.
+**修复**：将紧密轮询替换为 `DELAY(9)`（微秒级等待）、`pause(9)`（短等待）或 `tsleep(9)`（更长的适当睡眠）。尽可能使用中断驱动设计而不是轮询。用 virtio-blk 的性能计数器测试驱动程序是否产生了不合理的 VM 退出数量。
 
-A driver that works correctly on bare metal but fails on a VM is almost always making a timing assumption. The solution is to use the kernel's time primitives correctly; they work on both.
+在裸金属上正确工作但在 VM 上失败的驱动程序几乎总是在做时序假设。解决方案是正确使用内核的时间原语；它们在两种环境中都能工作。
 
-### VirtIO Negotiation Fails or Returns Unexpected Features
+### VirtIO 协商失败或返回意外特性
 
-**Symptom**: The driver logs that feature negotiation produced a feature set that is missing bits you expected, or the probe-and-attach path succeeds but the device behaves unexpectedly.
+**症状**：驱动程序记录特性协商产生的特性集缺少你期望的位，或者探测和附加路径成功但设备行为异常。
 
-**Cause**: Two classes of issue. The first is that the device (or its backend) advertises a feature set that does not include the bit you requested. This is normal when the hypervisor's backend is older or intentionally minimal. The second is that the guest-side code is requesting a feature bit that the framework does not know about, in which case the framework may strip it silently.
+**原因**：两类问题。第一类是设备（或其后端）播发的特性集不包含你请求的位。当虚拟机监控程序的后端较旧或有意的最小时，这是正常的。第二类是客户机侧代码请求了框架不知道的特性位，框架可能会静默地剥离它。
 
-**Fix**: Log `sc->features` immediately after `virtio_negotiate_features` returns. Compare it to the set you requested. If the device is missing a bit you thought was mandatory, your driver needs to fall back gracefully or refuse to attach with a clear error message. Never assume a bit is present without checking the post-negotiation value.
+**修复**：在 `virtio_negotiate_features` 返回后立即记录 `sc->features`。将它与你请求的集合进行比较。如果设备缺少你认为必需的位，驱动程序需要优雅地回退或以明确的错误消息拒绝附加。永远不要在不检查协商后值的情况下假设位存在。
 
-For backend-side investigation (if you are using a hypervisor whose source you can read, such as `bhyve(8)` or QEMU), look at the device emulator's feature advertisement. The backend holds the truth: the guest sees only what the backend advertises. A mismatch between what you expect and what you see almost always traces back to the backend.
+对于后端侧的调查（如果你使用的是可以阅读源代码的虚拟机监控程序，如 `bhyve(8)` 或 QEMU），查看设备模拟器的特性播发。后端掌握真相：客户机只看到后端播发的内容。你期望的和看到的之间的不匹配几乎总是追溯到后端。
 
-### `bus_alloc_resource` Fails Inside a Guest
+### 客户机内 `bus_alloc_resource` 失败
 
-**Symptom**: The attach path calls `bus_alloc_resource_any` or `bus_alloc_resource` and receives `NULL`, causing the driver to fail attach.
+**症状**：附加路径调用 `bus_alloc_resource_any` 或 `bus_alloc_resource` 并收到 `NULL`，导致驱动程序附加失败。
 
-**Cause**: Under a hypervisor, the device's resources (BARs, IRQ lines, MMIO windows) may differ from their bare-metal layout. A driver that hard-codes resource IDs or assumes specific BAR numbers can fail if the hypervisor presents a different layout.
+**原因**：在虚拟机监控程序下，设备的资源（BAR、IRQ 线、MMIO 窗口）可能与其裸金属布局不同。硬编码资源 ID 或假设特定 BAR 编号的驱动程序在虚拟机监控程序呈现不同布局时可能失败。
 
-**Fix**: Always use `pci_read_config(dev, PCIR_...)` to read actual BAR contents rather than assuming. Use `bus_alloc_resource_any` with the rid obtained from the resource list, not a hard-coded number. If the resource allocation still fails, compare `pciconf -lvBb` output from bare metal and from the guest to see what has changed.
+**修复**：始终使用 `pci_read_config(dev, PCIR_...)` 读取实际 BAR 内容而不是假设。使用从资源列表获取的 rid 配合 `bus_alloc_resource_any`，而不是硬编码的数字。如果资源分配仍然失败，比较裸金属和客户机的 `pciconf -lvBb` 输出以查看变化。
 
-A concrete example: a device that uses BAR 0 for MMIO and BAR 2 for I/O on bare metal may be configured differently by the hypervisor. Always read the BARs at runtime and allocate resources based on what is actually present.
+一个具体的例子：在裸金属上使用 BAR 0 作为 MMIO、BAR 2 作为 I/O 的设备可能被虚拟机监控程序以不同方式配置。始终在运行时读取 BAR 内容并根据实际存在的资源进行分配。
 
-### `kldload` Succeeds but No Device Attaches
+### `kldload` 成功但无设备附加
 
-**Symptom**: `kldload` of a VirtIO driver returns success, but `kldstat -v` shows no device bound to the module, and no dmesg messages are produced.
+**症状**：VirtIO 驱动程序的 `kldload` 返回成功，但 `kldstat -v` 显示没有设备绑定到该模块，且没有产生 dmesg 消息。
 
-**Cause**: The driver's PNP table does not match any device advertised by the hypervisor. This is normal when a backend is not providing the expected device. For `vtedu` in the case study, this is the expected behaviour without a matching `bhyve(8)` backend.
+**原因**：驱动程序的 PNP 表与虚拟机监控程序播发的任何设备都不匹配。当后端未提供预期设备时，这是正常的。对于案例研究中的 `vtedu`，在没有匹配的 `bhyve(8)` 后端时，这是预期行为。
 
-**Fix**: Run `devctl list` (or `devinfo -v`) on the host or in the guest to see which devices are present but unbound. If the device is not listed at all, the backend is not running or is misconfigured. If the device is listed but unbound, check its PNP identifiers (`vendor`, `device` for PCI, or the VirtIO type ID for VirtIO) and compare against the driver's PNP table. Mismatch is the most common cause.
+**修复**：在主机或客户机上运行 `devctl list`（或 `devinfo -v`）查看哪些设备存在但未绑定。如果设备根本未列出，则后端未运行或配置错误。如果设备已列出但未绑定，检查其 PNP 标识符（PCI 的 `vendor`、`device`，或 VirtIO 的类型 ID）并与驱动程序的 PNP 表进行比较。不匹配是最常见的原因。
 
-A common beginner error is to believe that `kldload` success means the driver is working. It only means the module loaded. Use `kldstat -v | grep yourdriver` to see whether any device has been claimed.
+一个常见的初学者错误是认为 `kldload` 成功意味着驱动程序正在工作。它仅表示模块已加载。使用 `kldstat -v | grep yourdriver` 查看是否有任何设备已被声明。
 
-### Module Is Loaded but `/dev` Node Does Not Appear
+### 模块已加载但 `/dev` 节点未出现
 
-**Symptom**: The driver has loaded, `kldstat -v` shows it attached to a device, but the expected `/dev` node does not appear.
+**症状**：驱动程序已加载，`kldstat -v` 显示它已附加到设备，但预期的 `/dev` 节点未出现。
 
-**Cause**: Either the driver did not call `make_dev(9)`, or the `devfs` mount inside the current jail is filtered by a ruleset that hides the node, or the `make_dev` call failed silently because the device unit number clashed with an existing one.
+**原因**：要么驱动程序未调用 `make_dev(9)`，要么当前 jail 内的 `devfs` 挂载被隐藏该节点的规则集过滤，要么 `make_dev` 调用因设备单元号与现有单元号冲突而静默失败。
 
-**Fix**: On the host, check `ls /dev/yourdev*`. If it is missing there too, the driver did not create the node. Check the attach path for the `make_dev` call, and verify its return value. If the node is present on the host but missing inside a jail, the devfs ruleset is the cause. Run `devfs -m /path/to/jail/dev rule show` to see the active ruleset inside the jail.
+**修复**：在主机上，检查 `ls /dev/yourdev*`。如果那里也缺失，则驱动程序未创建该节点。检查附加路径中的 `make_dev` 调用并验证其返回值。如果节点在主机上存在但在 jail 内缺失，则 devfs 规则集是原因。运行 `devfs -m /path/to/jail/dev rule show` 查看 jail 内的活动规则集。
 
-For a driver that is intended to be visible inside jails, the correct practice is to document which devfs ruleset exposes the node and to provide an example ruleset in the driver's README. Do not assume the administrator will figure it out.
+对于预期在 jail 内可见的驱动程序，正确的做法是记录哪个 devfs 规则集暴露了该节点，并在驱动程序的 README 中提供示例规则集。不要假设管理员会自己弄明白。
 
-### Virtqueue Interrupts Never Fire
+### 虚拟队列中断从未触发
 
-**Symptom**: The driver's interrupt handler is never called, even though the driver has submitted work to the virtqueue.
+**症状**：驱动程序的中断处理程序从未被调用，尽管驱动程序已向虚拟队列提交了工作。
 
-**Cause**: One of several possibilities. The backend never processes the work (bug in the backend). The driver did not register the interrupt handler correctly. The driver did not call `virtio_setup_intr`, so no interrupt plumbing exists. The driver disabled interrupts via `virtqueue_disable_intr` and never re-enabled them.
+**原因**：以下几种可能性之一。后端从未处理该工作（后端中的 bug）。驱动程序未正确注册中断处理程序。驱动程序未调用 `virtio_setup_intr`，因此不存在中断管道。驱动程序通过 `virtqueue_disable_intr` 禁用了中断且从未重新启用。
 
-**Fix**: Systematically check each step. In the attach path, verify that `virtio_setup_intr` was called and returned 0. In the interrupt handler, verify that you are re-enabling interrupts when appropriate. Add a `printf` at the top of the handler to confirm it is never called. If the handler is genuinely never called, run `vmstat -i | grep yourdriver` to see the interrupt count; a count of zero confirms the interrupt is not arriving.
+**修复**：系统地检查每一步。在附加路径中，验证 `virtio_setup_intr` 已被调用并返回 0。在中断处理程序中，验证您正在适当地重新启用中断。在处理程序顶部添加 `printf` 以确认它从未被调用。如果处理程序确实从未被调用，运行 `vmstat -i | grep yourdriver` 查看中断计数；计数为零确认中断未到达。
 
-If the count is nonzero but the handler does no work, the handler is running but finding nothing in the virtqueue. This suggests the backend is acknowledging but not producing real completions; look at the backend.
+如果计数非零但处理程序不做任何工作，则处理程序正在运行但在虚拟队列中找不到任何内容。这表明后端正在确认但未产生真正的完成；检查后端。
 
-### Interrupt Storm Under Virtualisation
+### 虚拟化下的中断风暴
 
-**Symptom**: Inside a VM, `vmstat -i` shows interrupt rates in the hundreds of thousands per second, and CPU utilisation is high even without real work.
+**症状**：在虚拟机内部，`vmstat -i` 显示每秒数十万次的中断速率，即使没有实际工作，CPU 利用率也很高。
 
-**Cause**: An interrupt that is not being cleared, or a driver that interrupts on every event without coalescing. Under INTx specifically, a level-triggered interrupt that remains asserted causes the handler to be called in a loop.
+**原因**：未被清除的中断，或驱动程序在每个事件上触发中断而不进行合并。特别是在 INTx 下，保持断言状态的电平触发中断会导致处理程序在循环中被调用。
 
-**Fix**: For MSI-X, confirm that the handler acknowledges completions and that the virtqueue ring is being drained. For INTx, confirm that the handler clears the device's interrupt status register. For VirtIO specifically, negotiate `VIRTIO_F_RING_EVENT_IDX` if the backend supports it; this lets the device suppress unnecessary interrupts.
+**修复**：对于 MSI-X，确认处理程序确认了完成并且虚拟队列环正在被排空。对于 INTx，确认处理程序清除了设备的中断状态寄存器。对于 VirtIO 特别地，如果后端支持，协商 `VIRTIO_F_RING_EVENT_IDX`；这使设备可以抑制不必要的中断。
 
-Look at the Section 9 pattern with `virtqueue_disable_intr` / `virtqueue_enable_intr`. A correct driver disables interrupts on entry, drains the ring, and only re-enables interrupts when the ring is empty. Missing this structure is a common cause of interrupt storms.
+查看第9节中使用 `virtqueue_disable_intr` / `virtqueue_enable_intr` 的模式。正确的驱动程序在进入时禁用中断，排空环，并且仅在环为空时重新启用中断。缺少这种结构是中断风暴的常见原因。
 
-### DMA Failures Only Under Passthrough
+### 仅在直通下出现的 DMA 故障
 
-**Symptom**: The driver works correctly with an emulated device, but when the same hardware is passed through via `ppt(4)`, DMA transfers fail silently or corrupt memory.
+**症状**：驱动程序在使用模拟设备时正常工作，但当同一硬件通过 `ppt(4)` 直通时，DMA 传输静默失败或破坏内存。
 
-**Cause**: Most often, the driver is programming physical addresses directly rather than going through `bus_dma(9)`. Under emulation, the hypervisor intercepts all I/O and translates addresses on the fly, hiding the bug. Under passthrough, the device DMA's directly through the IOMMU, and the physical address the driver programmed is not the bus address the IOMMU expects.
+**原因**：最常见的是，驱动程序直接编程物理地址而非通过 `bus_dma(9)`。在模拟下，虚拟机监控程序拦截所有 I/O 并即时转换地址，隐藏了该 bug。在直通下，设备直接通过 IOMMU 进行 DMA，驱动程序编程的物理地址不是 IOMMU 期望的总线地址。
 
-**Fix**: Audit every place the driver computes an address to program into the device. Each must come from `bus_dma_load` or `bus_dma_load_mbuf` or similar, not from `vtophys` or a raw physical address. This is a mandatory discipline for passthrough and is strongly recommended for all drivers.
+**修复**：审计驱动程序计算要编程到设备中的地址的每个位置。每个地址必须来自 `bus_dma_load` 或 `bus_dma_load_mbuf` 或类似的 API，而不是来自 `vtophys` 或原始物理地址。这是直通的强制性规范，强烈建议所有驱动程序遵守。
 
-A useful diagnostic: enable IOMMU verbose logging (`sysctl hw.dmar.debug=1` on Intel, or the equivalent on AMD) and watch the kernel log for IOMMU page faults while the driver runs. A page fault reveals exactly which bus address the device attempted to access; if it does not match a mapped region, the driver's address calculation is wrong.
+一个有用的诊断方法：启用 IOMMU 详细日志记录（Intel 上为 `sysctl hw.dmar.debug=1`，或 AMD 上的等效设置），并在驱动程序运行时观察内核日志中的 IOMMU 页错误。页错误会精确揭示设备尝试访问的总线地址；如果与映射区域不匹配，则驱动程序的地址计算错误。
 
-### A VirtIO Device Appears but Has the Wrong Type
+### VirtIO 设备出现但类型错误
 
-**Symptom**: The guest sees a VirtIO device at the expected PCI address, but `pciconf -lv` or `devinfo` reports a different VirtIO device type than expected.
+**症状**：客户机在预期的 PCI 地址看到 VirtIO 设备，但 `pciconf -lv` 或 `devinfo` 报告了与预期不同的 VirtIO 设备类型。
 
-**Cause**: Device-ID confusion. The PCI vendor ID for VirtIO is always 0x1af4, but the device ID encodes the VirtIO type, and different VirtIO versions use different device-ID ranges. Legacy VirtIO uses 0x1000 + VIRTIO_ID. Modern VirtIO uses 0x1040 + VIRTIO_ID. A hypervisor that exposes a mix of modern and legacy devices can confuse a driver that only probes one range.
+**原因**：设备 ID 混淆。VirtIO 的 PCI 厂商 ID 始终为 0x1af4，但设备 ID 编码了 VirtIO 类型，不同的 VirtIO 版本使用不同的设备 ID 范围。传统 VirtIO 使用 0x1000 + VIRTIO_ID。现代 VirtIO 使用 0x1040 + VIRTIO_ID。一个暴露了现代和传统设备混合的虚拟机监控程序可能混淆仅探测一个范围的驱动程序。
 
-**Fix**: FreeBSD's `virtio_pci` transport handles both ranges transparently, so most drivers are immune. For driver authors who inspect `pciconf -lv` directly, be aware that both 0x1000-0x103f (legacy) and 0x1040-0x107f (modern) are VirtIO. The `VIRTIO_DRIVER_MODULE` macro registers the driver with both transports and does the right thing for both device-ID ranges.
+**修复**：FreeBSD 的 `virtio_pci` 传输透明地处理两个范围，因此大多数驱动程序不受影响。对于直接检查 `pciconf -lv` 的驱动程序作者，请注意 0x1000-0x103f（传统）和 0x1040-0x107f（现代）都是 VirtIO。`VIRTIO_DRIVER_MODULE` 宏在两种传输上注册驱动程序，并为两种设备 ID 范围做正确的事情。
 
-### Jail-Specific Ioctl Fails With ENOTTY
+### 监狱特定的 Ioctl 返回 ENOTTY
 
-**Symptom**: An ioctl that works on the host returns `ENOTTY` when issued from inside a jail, even though the ioctl number is recognised by the driver.
+**症状**：在主机上正常工作的 ioctl 在 jail 内发出时返回 `ENOTTY`，即使驱动程序识别该 ioctl 编号。
 
-**Cause**: The driver's ioctl handler checks jail visibility and returns `ENOTTY` to hide the ioctl's existence from jailed callers. This is a security-by-obscurity pattern used by some drivers that expose host-only administrative operations through otherwise jail-visible devices.
+**原因**：驱动程序的 ioctl 处理程序检查 jail 可见性并返回 `ENOTTY` 以对 jail 调用者隐藏该 ioctl 的存在。这是一种通过模糊实现安全性的模式，被一些通过原本 jail 可见的设备暴露仅限主机的管理操作的驱动程序使用。
 
-**Fix**: If the jail should be able to use the ioctl, review the driver's visibility check. The idiomatic approach is to return `EPERM` (permission denied) rather than `ENOTTY` when an operation exists but is not permitted; `ENOTTY` implies the ioctl does not exist, which can confuse callers. Consider whether the jailed caller should see the ioctl; if so, remove the hiding logic and use `priv_check` for access control instead.
+**修复**：如果 jail 应该能够使用该 ioctl，请复查驱动程序的可见性检查。惯用的做法是在操作存在但不被允许时返回 `EPERM`（权限被拒绝）而不是 `ENOTTY`；`ENOTTY` 暗示该 ioctl 不存在，这可能混淆调用者。考虑 jail 调用者是否应该看到该 ioctl；如果是，移除隐藏逻辑并使用 `priv_check` 进行访问控制。
 
-### VNET Move Leaks Per-VNET State
+### VNET 移动泄漏逐 VNET 状态
 
-**Symptom**: After moving an interface in and out of a VNET multiple times, the kernel's memory usage grows, eventually triggering a memory pressure event.
+**症状**：将接口移入和移出 VNET 多次后，内核的内存使用量增长，最终触发内存压力事件。
 
-**Cause**: The driver allocates per-VNET state when an interface enters a VNET but does not free it when the interface leaves. Each VNET move leaks a fixed amount of memory.
+**原因**：当接口进入 VNET 时驱动程序分配逐 VNET 状态，但接口离开时不释放它。每次 VNET 移动泄漏固定数量的内存。
 
-**Fix**: Implement the VNET-move lifecycle correctly. When an interface enters a VNET (`if_vmove` into the new VNET), allocate per-VNET state. When it leaves (`if_vmove` out), free it. The `CURVNET_SET` and `CURVNET_RESTORE` pair delineates the VNET context; use them when allocating or freeing.
+**修复**：正确实现 VNET 移动生命周期。当接口进入 VNET（`if_vmove` 进入新的 VNET）时，分配逐 VNET 状态。当它离开（`if_vmove` 移出）时，释放它。`CURVNET_SET` 和 `CURVNET_RESTORE` 对界定了 VNET 上下文；在分配或释放时使用它们。
 
-Look at `/usr/src/sys/net/if_tuntap.c` for a correct VNET-move implementation. The lifecycle is subtle and easy to get wrong; a reference implementation is the best teacher.
+查看 `/usr/src/sys/net/if_tuntap.c` 了解正确的 VNET 移动实现。生命周期很微妙且容易出错；参考实现是最好的老师。
 
-### Guest Kernel Panics with "Fatal Trap 12" on First I/O
+### 客户机内核在首次 I/O 时出现"Fatal Trap 12"崩溃
 
-**Symptom**: The guest boots, the driver attaches, the first user-space I/O to the driver's device causes a "Fatal Trap 12: page fault while in kernel mode" panic.
+**症状**：客户机启动，驱动程序附加，对驱动程序设备的首次用户空间 I/O 导致"Fatal Trap 12: page fault while in kernel mode"崩溃。
 
-**Cause**: Almost always a NULL pointer dereference in the driver's `read`, `write`, or `ioctl` path. Under virtualisation, the fault is immediate rather than merely corrupt-then-continue, because the guest's memory protection is exact.
+**原因**：几乎总是驱动程序 `read`、`write` 或 `ioctl` 路径中的空指针解引用。在虚拟化下，故障是立即发生的，而不仅仅是破坏后继续执行，因为客户机的内存保护是精确的。
 
-**Fix**: Use the kernel's debugger (`ddb(4)` or `dtrace(1)`) to find the faulting instruction. A typical cause is a `dev->si_drv1 = sc` that was forgotten in attach, so when user space opens `/dev/yourdriver` and calls `read`, `dev->si_drv1` is NULL. The fix is to always set `si_drv1` in attach, right after creating the cdev.
+**修复**：使用内核调试器（`ddb(4)` 或 `dtrace(1)`）找到故障指令。典型的原因是在附加时忘记了 `dev->si_drv1 = sc`，因此当用户空间打开 `/dev/yourdriver` 并调用 `read` 时，`dev->si_drv1` 为 NULL。修复方法是在附加时紧接在创建 cdev 之后始终设置 `si_drv1`。
 
-Under VMs, these panics are cheap: fix the code, rebuild, reload. On bare metal, each panic costs a reboot. One more reason to develop under virtualisation.
+在虚拟机中，这些崩溃代价低廉：修复代码、重新构建、重新加载。在裸金属上，每次崩溃都需要重启。这是在虚拟化下开发的又一个理由。
 
-### Live Migration Fails or Causes Guest Hang
+### 实时迁移失败或导致客户机挂起
 
-**Symptom**: A guest under a hypervisor that supports live migration (currently limited in `bhyve(8)`, more common in Linux KVM and VMware) is migrated to a different host, and the guest hangs or corrupts after migration.
+**症状**：在支持实时迁移的虚拟机监控程序下（目前在 `bhyve(8)` 中有限支持，在 Linux KVM 和 VMware 中更常见）的客户机被迁移到不同主机后，客户机挂起或损坏。
 
-**Cause**: The guest driver holds state that is tied to the source host (a specific physical TSC, a specific IOMMU mapping, a specific passed-through device). Migration transfers the guest's memory and CPU state but cannot transfer physical hardware state.
+**原因**：客户机驱动程序持有与源主机绑定的状态（特定的物理 TSC、特定的 IOMMU 映射、特定的直通设备）。迁移传输客户机的内存和 CPU 状态，但无法传输物理硬件状态。
 
-**Fix**: For driver authors, the advice is simple: do not cache values that are tied to the physical host. Re-read TSC frequency from `timecounter(9)` rather than storing a local copy. Do not pass through PCI devices that you need to migrate. For VirtIO devices, live migration is supported by the standard, and the guest driver needs no special code.
+**修复**：对于驱动程序作者，建议很简单：不要缓存与物理主机绑定的值。从 `timecounter(9)` 重新读取 TSC 频率，而不是存储本地副本。不要直通您需要迁移的 PCI 设备。对于 VirtIO 设备，标准支持实时迁移，客户机驱动程序不需要特殊代码。
 
-If you are writing a driver for a live-migration-supporting environment, the main design rule is: all state should be in the guest's memory; anything on the host side should be recreatable after migration. Standard VirtIO drivers meet this bar because the virtqueue state is in guest memory.
+如果您正在为支持实时迁移的环境编写驱动程序，主要设计规则是：所有状态应在客户机的内存中；主机侧的任何内容都应在迁移后可重新创建。标准 VirtIO 驱动程序满足这一要求，因为虚拟队列状态在客户机内存中。
 
-### Unexpected devfs Entries Appear Inside a Jail
+### 监狱内出现意外的 devfs 条目
 
-**Symptom**: A jail has a minimal devfs ruleset, but entries appear that the administrator did not expect.
+**症状**：jail 拥有最小的 devfs 规则集，但出现了管理员未预期的条目。
 
-**Cause**: Either the ruleset was not applied correctly, or the jail inherited the default ruleset before the custom one was applied, or a new device appeared after the ruleset was set.
+**原因**：要么规则集未正确应用，要么 jail 在自定义规则集应用之前继承了默认规则集，要么在规则集设置后出现了新设备。
 
-**Fix**: Run `devfs -m /jail/path/dev rule show` to see what rules are active. Compare with `/etc/devfs.rules`. If a later rule is adding visibility the earlier rule denied, the order is wrong. If the jail was started before the ruleset was finalised, restart the jail.
+**修复**：运行 `devfs -m /jail/path/dev rule show` 查看哪些规则处于活动状态。与 `/etc/devfs.rules` 进行比较。如果后一条规则添加了前一条规则拒绝的可见性，则顺序错误。如果 jail 在规则集最终确定之前已启动，请重启 jail。
 
-A robust practice is to always start a jail with a known ruleset specified in `/etc/jail.conf` rather than relying on the devfs default. The `devfs_ruleset = NNN` directive in the jail configuration ensures the jail's devfs mount uses the expected ruleset from the moment the jail starts.
+一个健壮的做法是始终使用 `/etc/jail.conf` 中指定的已知规则集启动 jail，而不是依赖 devfs 默认值。jail 配置中的 `devfs_ruleset = NNN` 指令确保 jail 的 devfs 挂载从 jail 启动之时起就使用预期的规则集。
 
-### Two Drivers Fight Over the Same Device
+### 两个驱动程序争夺同一设备
 
-**Symptom**: Loading driver A works, but loading driver B after A (or vice versa) causes one of them to fail attach with a cryptic message about resource conflicts.
+**症状**：加载驱动程序 A 正常工作，但在 A 之后加载驱动程序 B（反之亦然）导致其中一个因资源冲突的隐晦消息而附加失败。
 
-**Cause**: Two drivers are trying to claim the same device. This can happen if the device has multiple valid drivers (for example, a generic driver and a specific driver for a particular chipset variant) and the load order determines which one wins.
+**原因**：两个驱动程序试图声明同一设备。当设备有多个有效驱动程序（例如通用驱动程序和特定芯片组变体的专用驱动程序）时可能发生这种情况，加载顺序决定哪个获胜。
 
-**Fix**: FreeBSD's Newbus arbitrates driver priority through `DRIVER_MODULE`'s ordering, but the exact semantics depend on which driver attached first. The general rule is that once a device is attached, another driver cannot steal it. If you need to switch drivers, detach the first one (`devctl detach yourdev0`) before loading the second.
+**修复**：FreeBSD 的 Newbus 通过 `DRIVER_MODULE` 的顺序仲裁驱动程序优先级，但确切的语义取决于哪个驱动程序先附加。一般规则是，一旦设备被附加，另一个驱动程序无法抢夺它。如果您需要切换驱动程序，在加载第二个之前先分离第一个（`devctl detach yourdev0`）。
 
-Under virtualisation this can show up when you load a test driver after the VirtIO framework has already attached a production driver to the device. The test driver must either use a different PNP entry or explicitly detach the existing one.
+在虚拟化下，当您在 VirtIO 框架已将生产驱动程序附加到设备后加载测试驱动程序时，可能出现这种情况。测试驱动程序必须使用不同的 PNP 条目或显式分离现有驱动程序。
 
-### `vm_guest` Shows "no" Inside an Obvious VM
+### 在明显是虚拟机的环境中 `vm_guest` 显示"no"
 
-**Symptom**: `sysctl kern.vm_guest` returns "no" inside a guest that is definitely running under a hypervisor.
+**症状**：在确定运行在虚拟机监控程序下的客户机内部，`sysctl kern.vm_guest` 返回"no"。
 
-**Cause**: The hypervisor is not setting the CPUID hypervisor-present bit, or is setting a vendor string that the FreeBSD kernel does not recognise. This can happen with exotic or customised hypervisors.
+**原因**：虚拟机监控程序未设置 CPUID 虚拟机监控程序存在位，或设置了 FreeBSD 内核无法识别的供应商字符串。这可能在特殊或自定义的虚拟机监控程序上发生。
 
-**Fix**: This is informational, not a fix. If your driver needs to detect virtualisation but `vm_guest` does not cooperate, use alternative signals: the presence of VirtIO devices, the absence of physical hardware that would be present on bare metal, specific CPUID leaves that expose hypervisor-specific information. But recognise that accurate hypervisor detection is hard to guarantee; design your driver to work correctly regardless of the environment, and use `vm_guest` only for non-critical defaults.
+**修复**：这是信息性的，而非修复方案。如果您的驱动程序需要检测虚拟化但 `vm_guest` 不配合，请使用替代信号：VirtIO 设备的存在、裸金属上应存在但缺失的物理硬件、暴露虚拟机监控程序特定信息的特定 CPUID 叶。但请认识到精确的虚拟机监控程序检测难以保证；设计您的驱动程序使其无论环境如何都能正确工作，并且仅将 `vm_guest` 用于非关键的默认值。
 
-### General Diagnostic Approach
+### 通用诊断方法
 
-When something breaks in a virtualised or containerised environment, the pattern for diagnosis is consistent. First, reduce the environment to the simplest setup that shows the problem: strip the VM down to a single VirtIO device, remove extra jails, disable VNET if it is not needed. Second, try the same operation at the next layer up: if the problem shows in a jail, try it on the host; if on the host, try it on a guest; if in a guest, try it on bare metal. The layer where the problem disappears is usually the layer where the problem lives.
+当虚拟化或容器化环境中出现问题时，诊断模式是一致的。首先，将环境简化到显示问题的最简单设置：将 VM 剥离到单个 VirtIO 设备、移除额外的 jail、如果不需要则禁用 VNET。其次，在上一层尝试相同的操作：如果问题出现在 jail 中，在主机上尝试；如果在主机上，在客户机上尝试；如果在客户机中，在裸金属上尝试。问题消失的层通常是问题所在的层。
 
-Third, once you have localised the layer, add logging. `printf` in the kernel is still a valid debugging tool; combined with `dmesg`, it gives you a timestamped trace of what the driver does. `dtrace(1)` is more capable but has a higher setup cost. For a first diagnosis, `printf` is usually enough.
+第三，一旦你定位了层，添加日志。内核中的 `printf` 仍然是一个有效的调试工具；结合 `dmesg`，它给你一个带时间戳的驱动程序行为跟踪。`dtrace(1)` 更强大但设置成本更高。对于首次诊断，`printf` 通常就够了。
 
-Fourth, if the problem is a race or a timing issue, simplify before you complicate. A race that happens once in ten thousand iterations can be investigated with a test loop that runs ten thousand iterations. A timing issue under VM execution can be made reproducible by pinning the VM to specific host CPUs and disabling frequency scaling.
+第四，如果问题是竞态或时序问题，先简化再复杂化。每万次迭代发生一次的竞态可以通过运行万次迭代的测试循环来调查。虚拟机执行下的时序问题可以通过将虚拟机固定到特定主机 CPU 并禁用频率缩放来使其可重现。
 
-None of this is specific to virtualisation. It is good general debugging discipline. Virtualisation just happens to be an environment where the discipline pays off quickly, because the layers are clearly separated and the layers can be swapped in and out easily.
+这些都不是虚拟化特定的。这是良好的通用调试规范。虚拟化恰好是一个规范回报很快的环境，因为各层清晰分离，各层可以轻松替换。
 
-## Wrapping Up
+## 总结
 
-Virtualisation and containerization are two names for what they are in FreeBSD: two different answers to the same broad question. Virtualisation multiplies kernels; containerization subdivides one. A driver lives inside a kernel, and the way it interacts with its environment depends on which of these is in use.
+虚拟化和容器化在 FreeBSD 中是两个不同的名称，代表对同一个广泛问题的两种不同回答。虚拟化使内核倍增；容器化使一个内核细分。驱动程序存在于内核内部，它与环境的交互方式取决于正在使用哪种方式。
 
-The virtualisation side is where the VirtIO story lives. VirtIO is the mature, standardised, high-performance paravirtual interface between a guest driver and a hypervisor-provided device. FreeBSD's VirtIO framework (in `/usr/src/sys/dev/virtio/`) implements the standard cleanly, and the `virtio_random` driver you studied in Section 3 is a minimal example of how a VirtIO driver is structured. The key concepts, feature negotiation, virtqueue management, notification, are the same whether the device is a random-number generator, a network card, or a block device. Learn them once, and every VirtIO driver becomes more approachable.
+虚拟化方面是 VirtIO 故事所在的位置。VirtIO 是客户机驱动程序与虚拟机监控程序提供的设备之间成熟、标准化、高性能的半虚拟化接口。FreeBSD 的 VirtIO 框架（在 `/usr/src/sys/dev/virtio/` 中）干净地实现了该标准，你在第3节中学习的 `virtio_random` 驱动程序是 VirtIO 驱动程序的极小示例。关键概念——特性协商、虚拟队列管理、通知——无论设备是随机数生成器、网卡还是块设备都是相同的。只需学习一次，每个 VirtIO 驱动程序都变得更容易理解。
 
-The hypervisor detection mechanism, `vm_guest`, gives a driver a small window into the environment. It is useful for adjusting defaults but dangerous when used to work around bugs. The right mindset is "this is informational"; the wrong mindset is "this is a branch target".
+虚拟机监控程序检测机制 `vm_guest` 为驱动程序提供了一个窥视环境的小窗口。它在调整默认值时很有用，但用于绕过 bug 时很危险。正确的心态是"这是信息性的"；错误的心态是"这是一个分支目标"。
 
-The host side, where FreeBSD runs `bhyve(8)` and provides devices to guests, is where driver authorship meets hypervisor authorship. Most driver authors never touch `vmm(4)` directly, but the PCI passthrough facility is worth understanding, because it exercises the detach and reattach paths that a well-written driver already supports. A driver that survives a round trip through `ppt(4)` is a driver whose lifecycle is honest.
+主机侧是 FreeBSD 运行 `bhyve(8)` 并向客户机提供设备的地方，也是驱动程序编写与虚拟机监控程序编写相遇的地方。大多数驱动程序作者从不直接接触 `vmm(4)`，但 PCI 直通设施值得理解，因为它锻炼了编写良好的驱动程序早已支持的分离和重新附加路径。一个通过 `ppt(4)` 完整往返的驱动程序是一个生命周期诚实的驱动程序。
 
-The containerization side is where jails, devfs rulesets, and VNET come together. Jails share the kernel, so drivers are not multiplied; they are filtered. The filter operates on three axes: which devices the jail can see (devfs rulesets), which privileges it can exercise (`prison_priv_check` and `allow.*`), and how much it can consume (`rctl(8)` and `racct(9)`). For a driver author, the design decisions are small and local: pick sensible `devfs` names, call `priv_check` correctly, handle allocation failures gracefully.
+容器化方面是 jail、devfs 规则集和 VNET 汇聚的地方。Jail 共享内核，因此驱动程序不会被复制；它们被过滤。过滤在三个轴向上运行：jail 可以看到哪些设备（devfs 规则集）、它可以行使哪些权限（`prison_priv_check` 和 `allow.*`），以及它可以消耗多少资源（`rctl(8)` 和 `racct(9)`）。对于驱动程序作者来说，设计决策是小而局部的：选择合理的 `devfs` 名称、正确调用 `priv_check`、优雅地处理分配失败。
 
-The VNET framework extends the jail model into the network stack. It is the part of jails that comes closest to requiring explicit driver cooperation. Drivers that write to per-VNET state from outside a network-stack entry point (for example, from callouts) must establish the VNET context with `CURVNET_SET`. Drivers that survive `if_vmove` cleanly are drivers that will work in VNET jails.
+VNET 框架将 jail 模型扩展到网络栈。它是 jail 中最接近需要显式驱动程序协作的部分。从网络栈入口点之外（例如从 callout 中）写入逐 VNET 状态的驱动程序必须使用 `CURVNET_SET` 建立 VNET 上下文。能够干净地通过 `if_vmove` 存活的驱动程序就是将在 VNET jail 中工作的驱动程序。
 
-Together, these mechanisms shape FreeBSD as a platform for both hypervisor workloads and container workloads. A single kernel, a single driver set, several different ways for that driver to appear to its users. Understanding the mechanisms is what lets you write drivers that work correctly across all of them, without special-casing any of them.
+这些机制共同将 FreeBSD 塑造为一个既能运行虚拟机监控程序工作负载又能运行容器工作负载的平台。一个内核、一个驱动程序集、几种不同的方式让驱动程序呈现给其用户。理解这些机制使你能够编写在所有这些环境中正确工作的驱动程序，而不需要为任何环境特殊处理。
 
-The discipline the chapter has advocated, sometimes explicitly, sometimes by example, is a continuation of Chapter 29's theme. Write clean abstractions. Use the framework APIs. Do not reach around them. Do not invent your own DMA or privilege or visibility mechanisms; FreeBSD already has well-tested ones. If you do all of this, your driver will work in environments you did not have in mind when you wrote it, and that is the best definition of portable a driver can have.
+本章倡导的规范——有时明确，有时通过示例——是第29章主题的延续。编写干净的抽象。使用框架 API。不要绕过它们。不要发明自己的 DMA、权限或可见性机制；FreeBSD 已经有了经过良好测试的。如果你做到了所有这些，你的驱动程序将能在你编写时没有想到的环境中工作，这就是驱动程序可移植性的最佳定义。
 
-If you worked through the labs, you now have hands-on experience with starting a `bhyve` guest, writing a small module that uses `vm_guest`, putting a character device behind a devfs ruleset in a jail, and moving a network interface through VNET. Those four skills are all you need to start doing real work on driver code that runs in virtualised and containerised environments. Everything else in the chapter is supporting context.
+如果你完成了实验，你现在就有了启动 `bhyve` 客户机、编写使用 `vm_guest` 的小型模块、将字符设备放在 jail 的 devfs 规则集后，以及通过 VNET 移动网络接口的实践经验。这四个技能是你在虚拟化和容器化环境中对驱动程序代码进行实际工作所需的全部。本章中的其他一切都是辅助背景。
 
-If you tackled one or more of the challenges, you have stretched further: into simulation backends, into VNET-aware interfaces, into the bhyve emulator itself, or into test automation. Any of these is a genuine piece of FreeBSD driver craft, and the work compounds. Every hour you spend on these topics comes back in every driver you write afterwards.
+如果你完成了一个或多个挑战，你已经走得更远：深入到模拟后端、VNET 感知的接口、bhyve 模拟器本身或测试自动化。这些中的每一个都是真正的 FreeBSD 驱动程序技艺，并且这些工作会不断积累。你在这些主题上花费的每一个小时都会在你之后编写的每个驱动程序中得到回报。
 
-A final note on attitude. Virtualisation and containerization can feel overwhelming because they introduce so many new pieces at once: hypervisors, paravirtual devices, jails, VNET, rulesets, privileges. But every piece has a clear purpose and a small, well-designed API. The sense of overwhelm goes away once you have seen each one in isolation, and this chapter's pacing was chosen to let you do that. If you are still feeling overwhelmed, go back to Section 3 (VirtIO) or Section 6 (jails and devfs) and re-read with a specific small question in mind. The answers are there.
+最后关于态度的一句话。虚拟化和容器化可能会让人感到不知所措，因为它们一次引入了太多新部分：虚拟机监控程序、半虚拟化设备、jail、VNET、规则集、权限。但每个部分都有明确的目的和一个小巧、设计良好的 API。一旦你单独看过每个部分，不知所措的感觉就会消失，本章的节奏选择正是为了让你做到这一点。如果你仍然感到不知所措，回到第3节（VirtIO）或第6节（jail 和 devfs），带着一个具体的小问题重新阅读。答案就在那里。
 
-## Looking Ahead: Security and Privilege
+## 展望：安全与权限
 
-Chapter 31, "Security and Privilege in Device Drivers," builds directly on the foundations laid in this chapter. Jails and virtual machines are one kind of security boundary; drivers have many others. A driver that exposes an `ioctl` is a driver that has created a new interface into the kernel, and that interface must be checked, validated, and restricted.
+第31章"设备驱动程序中的安全与权限"直接建立在本章所奠定的基础之上。jail 和虚拟机是一种安全边界；驱动程序还有许多其他安全边界。暴露 `ioctl` 的驱动程序是一个创建了进入内核的新接口的驱动程序，该接口必须被检查、验证和限制。
 
-Chapter 31 will cover the privilege framework in depth (you saw `priv_check` here; Chapter 31 goes through the whole list), the `ucred(9)` structure and how credentials flow through the kernel, the `capsicum(4)` capability framework for finer-grained restrictions, and the MAC (Mandatory Access Control) framework for policy-based security. It will also revisit jails from a security-first perspective, complementing the container-first perspective of this chapter.
+第31章将深入介绍权限框架（你在这里看到了 `priv_check`；第31章会覆盖整个列表）、`ucred(9)` 结构以及凭证如何在内核中流动、用于更细粒度限制的 `capsicum(4)` 能力框架，以及用于基于策略的安全性的 MAC（强制访问控制）框架。它还将从安全优先的角度重新审视 jail，补充本章的容器优先视角。
 
-The thread that runs through Chapters 29, 30, and 31 is environment. Chapter 29 was about architectural environment: running on the same kernel with different buses or bit-widths. Chapter 30 was about operational environment: running inside a VM, a container, or on a host. Chapter 31 is about policy environment: running under the constraints a security-conscious administrator chooses to apply. A driver that handles all three kinds of environment well is a driver that can be deployed anywhere FreeBSD runs.
+贯穿第29、30和31章的线索是环境。第29章是关于架构环境：在具有不同总线或位宽的同一内核上运行。第30章是关于运行环境：在 VM、容器或主机内运行。第31章是关于策略环境：在安全意识强的管理员选择应用的约束下运行。能良好处理这三种环境的驱动程序是一个可以在 FreeBSD 运行的任何地方部署的驱动程序。
 
-With Chapter 31, Part 7 approaches its midpoint. The remaining chapters of the part turn to debugging (Chapter 32), testing (Chapter 33), performance tuning (Chapter 34), and specialised driver topics in later chapters. Each builds on what you have learned so far. Take the time to let this chapter settle; the concepts will keep paying off as you continue.
+随着第31章的到来，第7部分已接近其中点。本部分接下来的章节转向调试（第32章）、测试（第33章）、性能调优（第34章）以及后续章节中的专业驱动程序主题。每一章都建立在你已学内容的基础上。花时间让本章沉淀；这些概念将在你继续前进时持续产生回报。
 
-## Case Study: Designing a Pedagogical VirtIO Driver
+## 案例研究：设计一个教学用 VirtIO 驱动程序
 
-This closing case study pulls together the threads of the chapter into a single design walkthrough. It does not present a complete implementation. Instead, it walks through the decisions you would make if you sat down today to design a pedagogical VirtIO driver called `vtedu`. The driver does nothing useful in production, but it exercises enough of the VirtIO surface to be a valuable teaching tool for future readers.
+这个结束案例研究将本章的线索汇集到一个单一的设计演练中。它不提供一个完整的实现。相反，它遍历你如果今天坐下来设计一个名为 `vtedu` 的教学 VirtIO 驱动程序时会做出的决策。该驱动程序在生产中不做有用的事情，但它演练了足够的 VirtIO 表面，成为未来读者有价值的教学工具。
 
-### What vtedu Is For
+### vtedu 的用途
 
-Imagine that `vtedu` is meant to serve as the example driver for a future FreeBSD workshop on paravirtualised devices. Its job is to expose a single virtqueue, accept write requests from user space, pass them through the virtqueue to a backend in `bhyve(8)` (which does something simple like echoing bytes back), and deliver the echoed bytes back to user space. It must be small enough to read in an afternoon and complete enough to demonstrate the full VirtIO lifecycle.
+设想 `vtedu` 是作为未来 FreeBSD 半虚拟化设备研讨会的示例驱动程序。它的任务是暴露一个单一的虚拟队列，接受来自用户空间的写入请求，通过虚拟队列将其传递给 `bhyve(8)` 中的后端（该后端做一些简单的事情，比如回声返回字节），并将回声返回的字节送回用户空间。它必须足够小，可以在一个下午读完，又足够完整，能够演示完整的 VirtIO 生命周期。
 
-The design choices below explain each step. A reader who finishes this section should be able to reason about any similar VirtIO driver in the same terms.
+下面的设计选择解释了每个步骤。完成本节的读者应该能够用相同的术语推理任何类似的 VirtIO 驱动程序。
 
-### Choosing the Device Identifier
+### 选择设备标识符
 
-VirtIO defines a set of well-known device IDs in `/usr/src/sys/dev/virtio/virtio_ids.h`. For a pedagogical driver, a reserved or experimental ID is appropriate. The VirtIO specification reserves some ranges for "vendor-specific" devices, and a workshop driver would pick one of those.
+VirtIO 在 `/usr/src/sys/dev/virtio/virtio_ids.h` 中定义了一组众所周知的设备 ID。对于教学驱动程序，保留或实验性的 ID 是合适的。VirtIO 规范为“厂商特定”设备保留了一些范围，研讨会驱动程序会选择其中之一。
 
-For `vtedu`, we pick a hypothetical `VIRTIO_ID_EDU = 0xfff0` (chosen so it does not collide with real device IDs). The corresponding backend in `bhyve(8)` would register the same ID. A real project would coordinate with the `bhyve(8)` maintainers on the ID assignment.
+对于 `vtedu`，我们选择一个假设的 `VIRTIO_ID_EDU = 0xfff0`（选择它以免与真实设备 ID 冲突）。`bhyve(8)` 中相应的后端将注册相同的 ID。一个真实的项目会与 `bhyve(8)` 维护者协调 ID 分配。
 
-### Defining the Features
+### 定义特性
 
-A teaching driver should negotiate a meaningful feature bit so that the reader sees feature negotiation in action. `vtedu` defines one feature:
+教学驱动程序应该协商一个有意义的特性位，以便读者看到特性协商的实际情况。`vtedu` 定义一个特性：
 
 ```c
 #define VTEDU_F_UPPERCASE	(1ULL << 0)
 ```
 
-When negotiated, the backend returns the input bytes uppercased. When not negotiated, it returns them unchanged. The driver advertises the feature, the backend may or may not support it, and the negotiation produces whichever outcome both sides can support.
+当协商成功时，后端返回大写的输入字节。当未协商时，它原样返回。驱动程序播发该特性，后端可能支持也可能不支持，协商产生双方都能支持的结果。
 
-This kind of trivial feature is a teaching device. In a real driver, features correspond to real capabilities; in `vtedu`, the feature exists just to show how negotiation works.
+这种简单的特性是一种教学手段。在真实驱动程序中，特性对应真实的能力；在 `vtedu` 中，该特性存在只是为了展示协商是如何工作的。
 
-### Softc Layout
+### Softc 布局
 
-The softc is the per-instance state:
+softc 是每个实例的状态：
 
 ```c
 struct vtedu_softc {
@@ -2358,11 +2358,11 @@ struct vtedu_softc {
 };
 ```
 
-The device handle, the virtqueue pointer, the negotiated feature mask, a mutex protecting the driver's serialised access, a `cdev` for the user-space interface, a pre-allocated scatter-gather list, a buffer for the data, and its current length.
+设备句柄、虚拟队列指针、协商后的特性掩码、保护驱动程序串行化访问的互斥锁、用于用户空间接口的 `cdev`、预分配的分散-聚集列表、用于数据的缓冲区及其当前长度。
 
-### Transport Registration
+### 传输层注册
 
-The module uses `VIRTIO_DRIVER_MODULE` as always:
+模块一如既往地使用 `VIRTIO_DRIVER_MODULE`：
 
 ```c
 static device_method_t vtedu_methods[] = {
@@ -2383,11 +2383,11 @@ MODULE_VERSION(vtedu, 1);
 MODULE_DEPEND(vtedu, virtio, 1, 1, 1);
 ```
 
-The PNP info for `vtedu` advertises `VIRTIO_ID_EDU`, so the framework binds the driver to any VirtIO device of that type, under either PCI or MMIO transport.
+`vtedu` 的 PNP 信息播发 `VIRTIO_ID_EDU`，因此框架将驱动程序绑定到该类型的任何 VirtIO 设备，无论是在 PCI 还是 MMIO 传输下。
 
-### Probe and Attach
+### 探测与附加
 
-The probe is a one-liner using `VIRTIO_SIMPLE_PROBE`. The attach sets up the device in the standard order:
+探测函数使用 `VIRTIO_SIMPLE_PROBE` 一行完成。附加函数按标准顺序设置设备：
 
 ```c
 static int
@@ -2432,11 +2432,11 @@ fail:
 }
 ```
 
-This follows the standard rhythm: negotiate, allocate queue, setup interrupts, set up user-space interface. It is structurally identical to `virtio_random`'s attach, with a `cdev` creation added because `vtedu` exposes a character device.
+这遵循标准节奏：协商、分配队列、设置中断、设置用户空间接口。它在结构上与 `virtio_random` 的附加相同，只是添加了 `cdev` 创建，因为 `vtedu` 暴露了字符设备。
 
-### Feature Negotiation
+### 特性协商
 
-Negotiation is straightforward:
+协商很直接：
 
 ```c
 static int
@@ -2449,11 +2449,11 @@ vtedu_negotiate_features(struct vtedu_softc *sc)
 }
 ```
 
-The driver advertises the two features, gets back an intersection, and finalises. The intersection tells the driver whether `VTEDU_F_UPPERCASE` is in play. Subsequent code uses `virtio_with_feature(sc->dev, VTEDU_F_UPPERCASE)` to check.
+驱动程序通告两个特性，获取一个交集，然后终结。交集告诉驱动程序 `VTEDU_F_UPPERCASE` 是否在起作用。后续代码使用 `virtio_with_feature(sc->dev, VTEDU_F_UPPERCASE)` 来检查。
 
-### Queue Allocation
+### 队列分配
 
-A single virtqueue is allocated with an interrupt callback:
+分配一个带有中断回调的单个虚拟队列：
 
 ```c
 static int
@@ -2468,11 +2468,11 @@ vtedu_alloc_virtqueue(struct vtedu_softc *sc)
 }
 ```
 
-The maximum indirect-descriptor size is zero (no indirects), the interrupt callback is `vtedu_vq_intr`, and the virtqueue pointer is stored in `sc->vq`. A single queue is enough for a request-response pattern where the same queue is used for both directions.
+最大间接描述符大小为 0（无间接描述符），中断回调为 `vtedu_vq_intr`，虚拟队列指针存储在 `sc->vq` 中。对于同一队列用于双向的请求-响应模式，单个队列就足够了。
 
-### The Character Device Interface
+### 字符设备接口
 
-User space opens `/dev/vtedu0` and writes bytes to it. The driver accepts them, issues a VirtIO request, waits for the response, and exposes the response back to user space through read.
+用户空间打开 `/dev/vtedu0` 并向其写入字节。驱动程序接受它们，发出 VirtIO 请求，等待响应，并通过 read 将响应暴露回用户空间。
 
 ```c
 static int
@@ -2497,7 +2497,7 @@ vtedu_write(struct cdev *dev, struct uio *uio, int flags __unused)
 }
 ```
 
-The write copies bytes into the softc buffer, sets `buf_len`, and calls `vtedu_submit`, which does the VirtIO enqueue and notify.
+写入函数将字节复制到 softc 缓冲区中，设置 `buf_len`，并调用 `vtedu_submit`，后者执行 VirtIO 入队和通知。
 
 ```c
 static int
@@ -2519,11 +2519,11 @@ vtedu_submit(struct vtedu_softc *sc)
 }
 ```
 
-One readable segment (the driver's write into the buffer) and one writable segment (the device's write of the result). The cookie is `sc` itself; the interrupt handler will receive it back when the completion arrives.
+一个可读段（驱动程序写入缓冲区）和一个可写段（设备写入结果）。cookie 是 `sc` 本身；当完成到达时，中断处理程序将收到它。
 
-### The Interrupt Handler
+### 中断处理程序
 
-Completions are processed in a taskqueue-deferred or immediate fashion. For pedagogical simplicity, `vtedu` processes them immediately in the interrupt callback:
+完成以 taskqueue 延迟或即时方式处理。为了教学简单性，`vtedu` 在中断回调中立即处理它们：
 
 ```c
 static void
@@ -2543,11 +2543,11 @@ vtedu_vq_intr(void *arg)
 }
 ```
 
-The handler drains all completions, updates the softc, and wakes any sleeper waiting on the buffer. For a real driver, this would be richer; for `vtedu`, it is all we need.
+处理程序排空所有完成，更新 softc，并唤醒任何在缓冲区上等待的休眠者。对于真实驱动程序，这将更丰富；对于 `vtedu`，这就是我们所需要的。
 
-### The Read Path
+### 读取路径
 
-User space then reads the result:
+用户空间然后读取结果：
 
 ```c
 static int
@@ -2571,11 +2571,11 @@ vtedu_read(struct cdev *dev, struct uio *uio, int flags __unused)
 }
 ```
 
-If no result is available, the read sleeps on `sc`, which the interrupt handler will wake. This is the standard "block until ready" pattern for character devices with slow underlying I/O.
+如果没有结果可用，读取操作会在 `sc` 上休眠，中断处理程序会将其唤醒。这是底层 I/O 较慢的字符设备的标准"阻塞直到就绪"模式。
 
-### Detach
+### 分离
 
-The detach reverses the attach, cleanly:
+分离干净地逆转附加过程：
 
 ```c
 static int
@@ -2594,85 +2594,82 @@ vtedu_detach(device_t dev)
 }
 ```
 
-`virtio_stop` resets the device status so it no longer generates interrupts. The `cdev` is destroyed, the scatter-gather list freed, and the mutex destroyed.
+`virtio_stop` 重置设备状态使其不再生成中断。`cdev` 被销毁，分散-聚集列表被释放，互斥锁被销毁。
 
-### Putting vtedu Together
+### 整合 vtedu
 
-This walkthrough has touched on every major element of a VirtIO driver:
+本演练涉及了 VirtIO 驱动程序的每个主要元素：
 
 1. Device ID selection and PNP info.
 2. Feature definition and negotiation.
 3. Softc layout and locking.
-4. Virtqueue allocation with interrupt callback.
-5. User-space interface through `cdev`.
-6. Request submission through enqueue + notify.
-7. Completion handling through the interrupt callback.
+4. 带中断回调的虚拟队列分配。
+5. 通过 `cdev` 的用户空间接口。
+6. 通过入队 + 通知的请求提交。
+7. 通过中断回调的完成处理。
 8. Clean detach.
 
-The whole driver, fully implemented, fits in around 300 lines of C. That is less than `virtio_random` once you add in the backend plumbing. Because the user-space interface is richer than `virtio_random`'s (which hides in the `random(4)` framework), the code is slightly larger in total, but the VirtIO-specific part is no bigger.
+完全实现的整个驱动程序大约有 300 行 C 代码。加上后端管道后，这比 `virtio_random` 还要少。由于用户空间接口比 `virtio_random`（它隐藏在 `random(4)` 框架中）更丰富，代码总量略大，但 VirtIO 特定部分并不更大。
 
-### Using vtedu for Teaching
+### 使用 vtedu 进行教学
 
-A `vtedu` driver would be used in a workshop something like this:
+`vtedu` 驱动程序在研讨会中的使用方式大致如下：
 
-1. The instructor starts by demonstrating the driver loading, attaching, and processing a write-then-read round trip.
-2. Students follow along, typing the key sections from a cheat sheet.
-3. The instructor introduces feature negotiation by showing what happens when `VTEDU_F_UPPERCASE` is negotiated (outputs arrive uppercased) versus when it is not.
-4. Students modify the driver to add a second feature: "reverse the bytes". They learn how features compose.
-5. Finally, the instructor shows how to run the driver in a jail (it just works, as long as `vtedu0` is in the devfs ruleset), illustrating the containerisation side of the chapter.
+1. 讲师首先演示驱动程序加载、附加以及处理先写后读的完整往返。
+2. 学生跟着操作，从速查表输入关键部分。
+3. 讲师通过展示协商 `VTEDU_F_UPPERCASE`（输出以大写形式到达）与未协商时的对比，介绍特性协商。
+4. 学生修改驱动程序以添加第二个特性：“反转字节”。他们学习特性如何组合。
+5. 最后，讲师展示如何在 jail 中运行驱动程序（只要 `vtedu0` 在 devfs 规则集中就可正常工作），阐明本章的容器化方面。
 
-This is a pedagogical design, not a production one. Its purpose is to show how the pieces fit. A reader who has followed this case study should be able to write a similar driver of their own, starting from scratch or starting from `virtio_random.c` as a template.
+这是一个教学设计，而非生产设计。其目的是展示各个部分如何配合。跟随此案例研究的读者应该能够编写自己的类似驱动程序，可以从头开始或以 `virtio_random.c` 为模板开始。
 
-### What vtedu Does Not Do
+### vtedu 不做的事情
 
-For honesty: `vtedu` as sketched here omits several things a production driver would include. It does not support multiple in-flight requests (the lock serialises everything). It does not handle queue-full situations gracefully (it assumes one request at a time). It does not support module-wide module-event cleanup (just per-device). It does not demonstrate indirect descriptors (because the feature is irrelevant for 256-byte messages).
+诚实地说：此处勾勒的 `vtedu` 省略了生产驱动程序应包含的几个方面。它不支持多个进行中的请求（锁串行化了所有操作）。它不能优雅地处理队列已满的情况（假设一次一个请求）。它不支持模块级的事件清理（仅逐设备）。它不演示间接描述符（因为该特性对于 256 字节的消息无关紧要）。
 
-Each of these is an exercise the reader could undertake after understanding the base design. The chapter's challenge exercises hint at some of them; a dedicated workshop would develop them further.
+这些都是读者在理解基本设计后可以承担的练习。本章的挑战练习暗示了其中一些；专门的研讨会将进一步发展它们。
 
-### A Teaching Driver Versus a Real Driver
+### 教学驱动程序与真实驱动程序
 
-Before leaving `vtedu`, a note about the difference between a teaching driver and a real one. A teaching driver is designed for readability. Its code makes every concept visible, often at the cost of clever optimisations. A real driver is designed for reliability and performance. It compresses the common-case paths, adds error handling for every edge case, and optimises for the actual workload.
+在离开 `vtedu` 之前，有一个关于教学驱动程序和真实驱动程序之间差异的说明。教学驱动程序是为可读性而设计的。其代码使每个概念可见，通常以牺牲巧妙优化为代价。真实驱动程序是为可靠性和性能而设计的。它压缩常见路径，为每个边缘情况添加错误处理，并针对实际工作负载进行优化。
 
-The temptation when moving from learning to production is to start with the teaching driver and add features. That usually produces worse code than starting with an architectural sketch and filling it in. A teaching driver is a reference; a real driver is a system. The two are not on the same continuum.
+从学习过渡到生产时的诱惑是以教学驱动程序为基础并添加特性。这通常会产生比从架构草图开始并填充它更糟糕的代码。教学驱动程序是一个参考；真实驱动程序是一个系统。两者不在同一个连续体上。
 
-As a driver author, your job is to understand the teaching driver well enough that the real-driver design decisions become clear. This chapter's treatment of VirtIO is meant to get you to that understanding. The next step is yours.
+作为驱动程序作者，你的工作是充分理解教学驱动程序，使真实驱动程序的设计决策变得清晰。本章对 VirtIO 的处理旨在让你达到那种理解。下一步取决于你。
 
-## Appendix: Quick Reference
+## 附录：快速参考
 
-The reference tables below condense the chapter's key facts into a form
-you can return to during driver work. They are not a substitute for the
-explanatory text; think of them as the one-page cheat sheet for the day
-you are actually writing code and need a specific detail.
+下面的参考表将本章的关键事实浓缩成你在驱动程序工作中可以随时查阅的形式。它们不能替代解释性文本；把它们当作你在实际编写代码并需要特定细节那天的单页备忘录。
 
-### VirtIO Core API Functions
+### VirtIO 核心 API 函数
 
-| Function | Purpose |
+| 函数 | 用途 |
 |----------|---------|
-| `virtio_negotiate_features(dev, mask)` | Advertise and negotiate feature bits. |
-| `virtio_finalize_features(dev)` | Seal the feature negotiation. |
-| `virtio_with_feature(dev, feature)` | Test whether a feature is negotiated. |
-| `virtio_alloc_virtqueues(dev, flags, nvqs, info)` | Allocate a set of virtqueues. |
-| `virtio_setup_intr(dev, type)` | Install the negotiated interrupt handlers. |
-| `virtio_read_device_config(dev, offset, dst, size)` | Read device-specific configuration. |
-| `virtio_write_device_config(dev, offset, src, size)` | Write device-specific configuration. |
+| `virtio_negotiate_features(dev, mask)` | 播发并协商特性位。 |
+| `virtio_finalize_features(dev)` | 锁定特性协商。 |
+| `virtio_with_feature(dev, feature)` | 测试特性是否已协商。 |
+| `virtio_alloc_virtqueues(dev, flags, nvqs, info)` | 分配一组虚拟队列。 |
+| `virtio_setup_intr(dev, type)` | 安装已协商的中断处理程序。 |
+| `virtio_read_device_config(dev, offset, dst, size)` | 读取设备特定配置。 |
+| `virtio_write_device_config(dev, offset, src, size)` | 写入设备特定配置。 |
 
-### virtqueue(9) Functions
+### virtqueue(9) 函数
 
-| Function | Purpose |
+| 函数 | 用途 |
 |----------|---------|
-| `virtqueue_enqueue(vq, cookie, sg, readable, writable)` | Push a scatter-gather chain onto the available ring. |
-| `virtqueue_dequeue(vq, &len)` | Pop one completed chain from the used ring. |
-| `virtqueue_notify(vq)` | Tell the host new work is available. |
-| `virtqueue_poll(vq, &len)` | Wait for a completion and return it. |
-| `virtqueue_empty(vq)` | Check whether the queue has any pending work. |
-| `virtqueue_full(vq)` | Check whether the queue has space for another enqueue. |
+| `virtqueue_enqueue(vq, cookie, sg, readable, writable)` | 将分散-聚集链推入可用环。 |
+| `virtqueue_dequeue(vq, &len)` | 从已用环弹出一个完成的链。 |
+| `virtqueue_notify(vq)` | 通知主机有新工作可用。 |
+| `virtqueue_poll(vq, &len)` | 等待完成并返回。 |
+| `virtqueue_empty(vq)` | 检查队列是否有待处理的工作。 |
+| `virtqueue_full(vq)` | 检查队列是否有空间进行另一次入队。 |
 
-### vm_guest Values
+### vm_guest 值
 
-| Constant | String via `kern.vm_guest` | Meaning |
+| 常量 | 通过 `kern.vm_guest` 获取的字符串 | 含义 |
 |----------|---------------------------|---------|
-| `VM_GUEST_NO` | `none` | Bare metal |
-| `VM_GUEST_VM` | `generic` | Unknown hypervisor |
+| `VM_GUEST_NO` | `none` | 裸金属 |
+| `VM_GUEST_VM` | `generic` | 未知虚拟机监控程序 |
 | `VM_GUEST_XEN` | `xen` | Xen |
 | `VM_GUEST_HV` | `hv` | Microsoft Hyper-V |
 | `VM_GUEST_VMWARE` | `vmware` | VMware ESXi / Workstation |
@@ -2682,94 +2679,90 @@ you are actually writing code and need a specific detail.
 | `VM_GUEST_PARALLELS` | `parallels` | Parallels |
 | `VM_GUEST_NVMM` | `nvmm` | NetBSD NVMM |
 
-### Default devfs Rulesets
+### 默认 devfs 规则集
 
-| Number | Name | Purpose |
+| 编号 | 名称 | 用途 |
 |--------|------|---------|
-| 1 | `devfsrules_hide_all` | Start with everything hidden. |
-| 2 | `devfsrules_unhide_basic` | Essential devices (`null`, `zero`, `random`, etc.). |
-| 3 | `devfsrules_unhide_login` | Login-related devices (`pts`, `ttyv*`). |
-| 4 | `devfsrules_jail` | Standard non-VNET jail ruleset. |
-| 5 | `devfsrules_jail_vnet` | Standard VNET jail ruleset. |
+| 1 | `devfsrules_hide_all` | 以隐藏所有内容开始。 |
+| 2 | `devfsrules_unhide_basic` | 基础设备（`null`、`zero`、`random` 等）。 |
+| 3 | `devfsrules_unhide_login` | 登录相关设备（`pts`、`ttyv*`）。 |
+| 4 | `devfsrules_jail` | 标准非 VNET jail 规则集。 |
+| 5 | `devfsrules_jail_vnet` | 标准 VNET jail 规则集。 |
 
-### Common Privilege Constants
+### 常用权限常量
 
-| Constant | Typical jail policy |
+| 常量 | 典型监狱策略 |
 |----------|--------------------|
-| `PRIV_DRIVER` | Denied (driver-private ioctls). |
-| `PRIV_IO` | Denied (raw I/O port access). |
-| `PRIV_KMEM_WRITE` | Denied (kernel memory writes). |
-| `PRIV_KLD_LOAD` | Denied (module loading). |
-| `PRIV_NET_SETLLADDR` | Denied (MAC address changes). |
-| `PRIV_NETINET_RAW` | Denied unless `allow.raw_sockets`. |
-| `PRIV_NET_BPF` | Allowed via `allow.raw_sockets` for BPF-needing tools. |
+| `PRIV_DRIVER` | 拒绝（驱动程序私有的 ioctl）。 |
+| `PRIV_IO` | 拒绝（原始 I/O 端口访问）。 |
+| `PRIV_KMEM_WRITE` | 拒绝（内核内存写入）。 |
+| `PRIV_KLD_LOAD` | 拒绝（模块加载）。 |
+| `PRIV_NET_SETLLADDR` | 拒绝（MAC 地址更改）。 |
+| `PRIV_NETINET_RAW` | 拒绝，除非设置了 `allow.raw_sockets`。 |
+| `PRIV_NET_BPF` | 通过 `allow.raw_sockets` 允许给需要 BPF 的工具。 |
 
-### VNET Macros
+### VNET 宏
 
-| Macro | Purpose |
+| 宏 | 用途 |
 |-------|---------|
-| `VNET_DEFINE(type, name)` | Declare a per-VNET variable. |
-| `VNET(name)` | Access the per-VNET variable for the current VNET. |
-| `V_name` | Conventional shorthand for `VNET(name)`. |
-| `CURVNET_SET(vnet)` | Establish a VNET context on the current thread. |
-| `CURVNET_RESTORE()` | Tear down the context. |
-| `VNET_SYSINIT(name, ...)` | Register a per-VNET init function. |
-| `VNET_SYSUNINIT(name, ...)` | Register a per-VNET uninit function. |
+| `VNET_DEFINE(type, name)` | 声明逐 VNET 变量。 |
+| `VNET(name)` | 访问当前 VNET 的逐 VNET 变量。 |
+| `V_name` | `VNET(name)` 的常规简写。 |
+| `CURVNET_SET(vnet)` | 在当前线程上建立 VNET 上下文。 |
+| `CURVNET_RESTORE()` | 拆除上下文。 |
+| `VNET_SYSINIT(name, ...)` | 注册逐 VNET 初始化函数。 |
+| `VNET_SYSUNINIT(name, ...)` | 注册逐 VNET 反初始化函数。 |
 
-### bhyve and Passthrough Tools
+### bhyve 与直通工具
 
-| Tool | Purpose |
+| 工具 | 用途 |
 |------|---------|
-| `bhyve(8)` | Run a virtual machine. |
-| `bhyvectl(8)` | Query and control running VMs. |
-| `vm(8)` | High-level management (via `vm-bhyve` port). |
-| `pciconf(8)` | Show PCI devices and their driver bindings. |
-| `devctl(8)` | Explicit control of driver attach/detach. |
-| `pptdevs` in `/boot/loader.conf` | Bind devices to the passthrough placeholder. |
+| `bhyve(8)` | 运行虚拟机。 |
+| `bhyvectl(8)` | 查询和控制运行中的虚拟机。 |
+| `vm(8)` | 高级管理（通过 `vm-bhyve` 包）。 |
+| `pciconf(8)` | 显示 PCI 设备及其驱动程序绑定。 |
+| `devctl(8)` | 显式控制驱动程序附加/分离。 |
+| `/boot/loader.conf` 中的 `pptdevs` | 将设备绑定到直通占位符。 |
 
-### Manual Pages Worth Bookmarking
+### 值得收藏的手册页
 
-- `virtio(4)` - VirtIO framework overview.
-- `vtnet(4)`, `virtio_blk(4)` - Specific VirtIO drivers.
-- `bhyve(8)`, `bhyvectl(8)`, `vmm(4)` - Hypervisor user and kernel interfaces.
-- `pci_passthru(4)` - PCI passthrough mechanism.
-- `jail(8)`, `jail.conf(5)`, `jls(8)`, `jexec(8)` - Jail management.
-- `devfs(5)`, `devfs(8)`, `devfs.rules(5)` - devfs and rulesets.
-- `if_epair(4)`, `vlan(4)`, `if_tap(4)` - Pseudo-interfaces useful for jails.
-- `rctl(8)`, `racct(9)` - Resource control.
-- `priv(9)` - Privilege framework.
+- `virtio(4)` - VirtIO 框架概述。
+- `vtnet(4)`、`virtio_blk(4)` - 特定 VirtIO 驱动程序。
+- `bhyve(8)`、`bhyvectl(8)`、`vmm(4)` - 虚拟机监控程序用户和内核接口。
+- `pci_passthru(4)` - PCI 直通机制。
+- `jail(8)`、`jail.conf(5)`、`jls(8)`、`jexec(8)` - Jail 管理。
+- `devfs(5)`、`devfs(8)`、`devfs.rules(5)` - devfs 与规则集。
+- `if_epair(4)`、`vlan(4)`、`if_tap(4)` - 对 jail 有用的伪接口。
+- `rctl(8)`、`racct(9)` - 资源控制。
+- `priv(9)` - 权限框架。
 
-### Top Five Things a Driver Author Should Do
+### 驱动程序作者应做的五件事
 
-If you remember nothing else from this chapter, remember these five habits:
+如果你不记得本章的其他内容，请记住这五个习惯：
 
-1. Use `bus_dma(9)` for every DMA buffer. Never pass physical addresses
-   directly to the hardware. This is the single most important habit for
-   passthrough and IOMMU-protected environments.
-2. Use `priv_check(9)` for privileged operations. Do not hardcode
-   `cred->cr_uid == 0` checks. The framework extends your code to jails
-   for free.
-3. Keep device node names predictable. Administrators who write devfs
-   rulesets need to know what to unhide. Document the name in your driver's
-   manual page.
-4. Handle detach cleanly. Release every resource, cancel every callout,
-   drain every taskqueue, and never assume the softc will be re-used.
-   Passthrough and VNET both exercise detach heavily.
-5. Establish VNET context around callout and taskqueue code that touches
-   per-VNET state. `CURVNET_SET` / `CURVNET_RESTORE` is the boilerplate,
-   and missing it is the most common VNET-related bug.
+1. 对每个 DMA 缓冲区使用 `bus_dma(9)`。切勿将物理地址
+   直接传递给硬件。这是直通和 IOMMU 保护环境中
+   最重要的一项习惯。
+2. 对特权操作使用 `priv_check(9)`。不要硬编码
+   `cred->cr_uid == 0` 检查。框架将您的代码免费扩展到 jail。
+3. 保持设备节点名称可预测。编写 devfs
+   规则集的管理员需要知道要取消隐藏什么。在您的驱动程序手册页中
+   记录该名称。
+4. 干净地处理分离。释放每个资源，取消每个 callout，
+   排空每个 taskqueue，并且永远不要假设 softc 会被重用。
+   直通和 VNET 都会大量调用分离路径。
+5. 在访问逐 VNET 状态的 callout 和 taskqueue 代码周围
+   建立 VNET 上下文。`CURVNET_SET` / `CURVNET_RESTORE` 是样板代码，
+   遗漏它是最常见的 VNET 相关错误。
 
-These five habits between them cover nearly all of the "works under
-virtualisation and containerization" work a driver author needs to do.
-Everything else is refinement.
+这五个习惯几乎涵盖了驱动程序作者需要做的「在虚拟化和容器化下工作」的所有工作。
+其他一切都是优化细节。
 
-## Appendix: Common Code Patterns
+## 附录：常见代码模式
 
-A small catalogue of patterns that appear repeatedly in FreeBSD drivers
-that run in virtualised or containerised environments. Each one is a
-snippet you can adapt to your own code.
+在虚拟化或容器化环境中运行的 FreeBSD 驱动程序中反复出现的模式的小目录。每一个都是你可以适应自己代码的片段。
 
-### Pattern: Environment-aware default
+### 模式：环境感知的默认值
 
 ```c
 static int
@@ -2785,11 +2778,10 @@ mydev_default_interrupt_moderation(void)
 }
 ```
 
-Use this pattern to seed a default that the user can override via sysctl.
-Do not branch on the specific hypervisor brand unless there is a real
-reason.
+使用此模式设置一个用户可以通过 sysctl 覆盖的默认值。
+除非有真正的原因，否则不要针对特定虚拟机监控程序品牌进行分支。
 
-### Pattern: Privilege-gated ioctl
+### 模式：权限门控的 ioctl
 
 ```c
 case MYDEV_IOC_DANGEROUS:
@@ -2800,11 +2792,9 @@ case MYDEV_IOC_DANGEROUS:
 	return (0);
 ```
 
-The default position for driver-specific privileges is to require
-`PRIV_DRIVER`. Consult `priv(9)` if a more specific privilege fits
-better.
+驱动程序特定权限的默认立场是要求 `PRIV_DRIVER`。如果有更合适的特定权限，请查阅 `priv(9)`。
 
-### Pattern: VNET-aware callout
+### 模式：VNET 感知的 callout
 
 ```c
 static void
@@ -2820,11 +2810,9 @@ mydev_callout(void *arg)
 }
 ```
 
-Any callout, taskqueue function, or kernel thread that might access VNET
-state must establish the context. Missing this is the most common source
-of VNET-related bugs.
+任何可能访问 VNET 状态的 callout、taskqueue 函数或内核线程都必须建立上下文。遗漏这一点是 VNET 相关错误的最常见来源。
 
-### Pattern: VirtIO attach skeleton
+### 模式：VirtIO 附加骨架
 
 ```c
 static int
@@ -2857,11 +2845,9 @@ fail:
 }
 ```
 
-The "negotiate, allocate, setup interrupts, start" rhythm is standard for
-every VirtIO driver. Every VirtIO attach in `/usr/src/sys/dev/virtio/` is
-a variation on this skeleton.
+"协商、分配、设置中断、启动"的节奏是每个 VirtIO 驱动程序的标准。`/usr/src/sys/dev/virtio/` 中的每个 VirtIO 附加函数都是这个骨架的变体。
 
-### Pattern: Clean detach
+### 模式：干净的分离
 
 ```c
 static int
@@ -2894,11 +2880,9 @@ mydev_detach(device_t dev)
 }
 ```
 
-Detach must be symmetric with attach: every resource attach allocated must
-be released here, in reverse order. A clean detach is what makes the
-driver safe for passthrough and for unload.
+分离必须与附加对称：附加分配了每个资源都必须在此处按相反顺序释放。干净的分离使驱动程序对直通和卸载都是安全的。
 
-### Pattern: make_dev with sensible defaults
+### 模式：使用合理默认值的 make_dev
 
 ```c
 sc->cdev = make_dev(&mydev_cdevsw, 0, UID_ROOT, GID_WHEEL, 0600, "mydev%d",
@@ -2908,68 +2892,63 @@ if (sc->cdev == NULL)
 sc->cdev->si_drv1 = sc;
 ```
 
-Use `0600` mode for nodes that should only be root-accessible, `0644` for
-read-any / write-root, `0666` for rare read-and-write-any cases. The
-`si_drv1` field is the conventional back-pointer from a `struct cdev` to
-the driver's softc.
+对于仅 root 可访问的节点使用 `0600` 模式，对于任何读取/root 写入使用 `0644`，对于罕见的任何读取和写入情况使用 `0666`。`si_drv1` 字段是从 `struct cdev` 到驱动程序 softc 的常规反向指针。
 
-## Appendix: Glossary
+## 附录：词汇表
 
-A short glossary of the terms this chapter relies on. Refer back when a
-term in a later section has slipped from memory.
+本章所依赖术语的简短词汇表。当后续节次中的某个术语从记忆中消失时，可以回过来查阅。
 
-- **Bare metal**: A system running directly on physical hardware with no
-  hypervisor in between.
-- **bhyve**: FreeBSD's native type-2 hypervisor. Runs as a user-space
-  program backed by the kernel's `vmm(4)` module.
-- **Container**: In FreeBSD, a jail or a user-space framework built on top
-  of jails.
-- **Credential (`struct ucred`)**: The per-process security context that
-  carries uid, gid, jail pointer, and privilege-related state.
-- **devfs**: The special filesystem at `/dev` where devices are exposed.
-- **devfs ruleset**: A named set of rules that controls which devfs nodes
-  are visible in a given devfs mount.
-- **Emulated device**: A hypervisor-provided device that imitates a
-  real-hardware interface.
-- **Guest**: The operating system running inside a virtual machine.
-- **Host**: The physical machine (or container-enclosing system) that
-  hosts guests or jails.
-- **Hypervisor**: Software that creates and manages virtual machines.
-- **IOMMU**: A unit between a device and host memory that remaps DMA
-  addresses. Enables safe passthrough.
-- **Jail**: FreeBSD's lightweight containerisation mechanism.
-- **Paravirtual device**: A device with an interface designed to be easy
-  for a hypervisor to emulate and for a guest to drive. VirtIO is the
-  canonical example.
-- **Passthrough**: Giving a guest direct access to a physical device.
-- **Prison**: The kernel's internal name for a jail. `struct prison` is
-  the data structure.
-- **rctl / racct**: The resource-control and resource-accounting
-  frameworks that enforce per-jail or per-process limits.
+- **Bare metal**（裸金属）：直接在物理硬件上运行的系统，之间没有
+  虚拟机监控程序。
+- **bhyve**：FreeBSD 的原生类型 2 虚拟机监控程序。作为用户空间
+  程序运行，由内核的 `vmm(4)` 模块支持。
+- **Container**（容器）：在 FreeBSD 中，指 jail 或建立在
+  jail 之上的用户空间框架。
+- **Credential（`struct ucred`）**：携带 uid、gid、jail 指针和
+  权限相关状态的每进程安全上下文。
+- **devfs**：位于 `/dev` 的特殊文件系统，设备在此暴露。
+- **devfs ruleset**（devfs 规则集）：一组命名的规则，控制
+  在给定 devfs 挂载中哪些 devfs 节点可见。
+- **Emulated device**（模拟设备）：由虚拟机监控程序提供的模拟
+  真实硬件接口的设备。
+- **Guest**（客户机）：在虚拟机内部运行的操作系统。
+- **Host**（主机）：承载客户机或 jail 的物理机器（或容器封闭系统）。
+- **Hypervisor**（虚拟机监控程序）：创建和管理虚拟机的软件。
+- **IOMMU**：位于设备和主机内存之间重新映射 DMA
+  地址的单元。实现安全直通。
+- **Jail**：FreeBSD 的轻量级容器化机制。
+- **Paravirtual device**（半虚拟化设备）：接口设计为易于
+  虚拟机监控程序模拟和客户机驱动的设备。VirtIO 是
+  典型示例。
+- **Passthrough**（直通）：让客户机直接访问物理设备。
+- **Prison**：内核中 jail 的内部名称。`struct prison` 是
+  数据结构。
+- **rctl / racct**：实施每个 jail 或每进程限制的
+  资源控制和资源核算框架。
 - **Ruleset**: See *devfs ruleset*.
-- **Transport (VirtIO)**: The bus-level mechanism that carries VirtIO
-  messages. Examples: PCI, MMIO.
-- **Virtqueue**: The shared-ring data structure at the heart of VirtIO.
-- **VirtIO**: The paravirtualisation standard used by most modern
-  hypervisors.
+- **Transport（VirtIO，传输层）**：承载 VirtIO
+  消息的总线级机制。示例：PCI、MMIO。
+- **Virtqueue**（虚拟队列）：VirtIO 核心的共享环数据结构。
+- **VirtIO**：大多数现代虚拟机监控程序使用的
+  半虚拟化标准。
 - **VM**: Virtual machine.
-- **VNET**: FreeBSD's virtual network stack framework, providing per-jail
-  independent stacks.
-- **vmm**: FreeBSD's kernel hypervisor core module, used by `bhyve(8)`.
+- **VNET**：FreeBSD 的虚拟网络栈框架，提供每个 jail
+  独立的网络栈。
+- **vmm**：FreeBSD 的内核虚拟机监控程序核心模块，由 `bhyve(8)` 使用。
 
-## Appendix: Observing VirtIO with DTrace
+## 附录：使用 DTrace 观察 VirtIO
 
-DTrace is one of FreeBSD's most capable diagnostic tools, and it is especially useful for understanding how a VirtIO driver behaves at runtime. This appendix collects several concrete DTrace recipes for VirtIO observability. None of them require modifying the driver; they work against the unmodified kernel because the `fbt` (function-boundary-tracing) provider instruments every kernel function.
+DTrace 是 FreeBSD 最强大的诊断工具之一，它对于理解 VirtIO 驱动程序在运行时的行为特别有用。本附录收集了几个具体的 DTrace 配方用于 VirtIO 可观测性。它们都不需要修改驱动程序；它们针对未修改的内核工作，因为 `fbt`（函数边界跟踪）提供者插装了每个内核函数。
 
-### A First Probe: Counting virtqueue Enqueues
+### 第一个探测：统计 virtqueue 入队次数
 
-The simplest useful probe counts how often `virtqueue_enqueue` is called per second.
+最有用的最简单探测是统计每秒调用 `virtqueue_enqueue` 的次数。
 
 ```sh
 sudo dtrace -n 'fbt::virtqueue_enqueue:entry /pid == 0/ { @[probefunc] = count(); } tick-1sec { printa(@); trunc(@); }'
 ```
 
-Running this on a busy VM shows numbers like:
+在繁忙的 VM 上运行会显示如下数字：
 
 ```text
 virtqueue_enqueue 12340
@@ -2977,11 +2956,11 @@ virtqueue_enqueue 15220
 virtqueue_enqueue 11890
 ```
 
-Each number is enqueues per second across all virtqueues. A number in the thousands is normal for an active VM; a number in the millions suggests a pathological driver. The per-VM baseline depends on workload, but getting familiar with the baseline for your environment lets you spot anomalies later.
+每个数字是所有虚拟队列每秒的入队次数。数千的数量级对于活跃 VM 是正常的；数百万的数量级表明驱动程序存在异常。每个 VM 的基线取决于工作负载，但熟悉您环境的基线可以让您以后发现异常。
 
-### Separating Queues by Virtqueue
+### 按虚拟队列分离队列
 
-To see which virtqueue is being used, extend the probe to key on the virtqueue name.
+要查看哪个虚拟队列正在被使用，扩展探测以虚拟队列名称为键。
 
 ```sh
 sudo dtrace -n '
@@ -2998,7 +2977,7 @@ tick-1sec
 '
 ```
 
-Output now looks like:
+输出现在看起来像：
 
 ```text
 vtnet0-rx           482
@@ -3006,13 +2985,13 @@ vtnet0-tx           430
 virtio_blk0         8220
 ```
 
-This instantly reveals which device is doing work. A disk-heavy workload shows `virtio_blk0` dominating; a network-heavy workload shows `vtnet0-tx` and `vtnet0-rx`. This kind of first-level breakdown is usually enough to localise a performance problem.
+这能立即揭示哪个设备正在进行工作。磁盘密集型工作负载显示 `virtio_blk0` 占主导；网络密集型工作负载显示 `vtnet0-tx` 和 `vtnet0-rx`。这种第一级分解通常足以定位性能问题。
 
-Note that the example dereferences an internal struct (`struct virtqueue`). The struct's layout is implementation-detail and can change between FreeBSD releases. Check `/usr/src/sys/dev/virtio/virtqueue.c` if the struct layout has changed and the probe fails.
+注意示例解引用了内部结构体（`struct virtqueue`）。该结构体的布局是实现细节，可能在 FreeBSD 版本之间发生变化。如果结构体布局已更改且探测失败，请检查 `/usr/src/sys/dev/virtio/virtqueue.c`。
 
-### Measuring Time Spent in Enqueue
+### 测量入队耗时
 
-Time-in-function is a standard DTrace recipe.
+函数内耗时是一个标准的 DTrace 配方。
 
 ```sh
 sudo dtrace -n '
@@ -3029,47 +3008,47 @@ fbt::virtqueue_enqueue:return
 '
 ```
 
-The output is a histogram of how long each `virtqueue_enqueue` call took, in nanoseconds. For healthy VirtIO, most calls complete in the low microsecond range. A significant tail suggests lock contention (the function's mutex is held for too long), memory pressure, or expensive scatter-gather computation.
+输出是每个 `virtqueue_enqueue` 调用所需时间的直方图，单位为纳秒。对于健康的 VirtIO，大多数调用在几微秒内完成。显著的尾部表明锁争用（该函数的互斥锁持有时间过长）、内存压力或昂贵的分散-聚集计算。
 
-### Watching for VM Exits
+### 观察 VM 退出
 
-VM exits are the fundamental cost of virtualisation. DTrace's `vmm` probes (if available) let you count them.
+VM 退出是虚拟化的基本成本。DTrace 的 `vmm` 探测（如果可用）让您对它们进行计数。
 
 ```sh
 sudo dtrace -n 'fbt:vmm::*:entry { @[probefunc] = count(); } tick-1sec { printa(@); trunc(@); }'
 ```
 
-On a busy host, this shows dozens of `vmm` functions. The ones to watch are `vm_exit_*`, which handle different exit types (I/O, interrupt, hypercall). Seeing `vm_exit_inout` in the top results suggests the guest is doing a lot of I/O through emulated devices and would benefit from VirtIO.
+在繁忙的主机上，这会显示数十个 `vmm` 函数。需要关注的是 `vm_exit_*`，它们处理不同的退出类型（I/O、中断、超级调用）。在顶部结果中看到 `vm_exit_inout` 表明客户机正在通过模拟设备进行大量 I/O，并将从 VirtIO 中受益。
 
-### Tracing a Specific Driver
+### 追踪特定驱动程序
 
-To focus on a specific driver's functions, narrow the probe to its module name.
+要关注特定驱动程序的函数，将探测范围缩小到其模块名称。
 
 ```sh
 sudo dtrace -n 'fbt:virtio_blk::*:entry { @[probefunc] = count(); } tick-1sec { printa(@); trunc(@); }'
 ```
 
-This counts all `virtio_blk` function entries. On a quiescent VM, the output is empty; on an active VM, you see every function the driver calls, with counts. This is useful for getting a feel for a driver's internal structure.
+这会统计所有 `virtio_blk` 函数入口。在静默的 VM 上，输出为空；在活跃的 VM 上，您会看到驱动程序调用的每个函数及其计数。这对于了解驱动程序内部结构很有用。
 
-### Tracing a Custom Driver
+### 追踪自定义驱动程序
 
-For the `vtedu` driver from the case study, the same technique works as long as the module is loaded and named `virtio_edu`.
+对于案例研究中的 `vtedu` 驱动程序，只要模块已加载且名称为 `virtio_edu`，同样的技术也适用。
 
 ```sh
 sudo dtrace -n 'fbt:virtio_edu::*:entry { @[probefunc] = count(); } tick-1sec { printa(@); trunc(@); }'
 ```
 
-If no backend is attached, the counts will be zero. If a backend is attached and the driver is exercising the virtqueue, you see `vtedu_write`, `vtedu_submit_locked`, `vtedu_vq_intr`, and `vtedu_read` in the counts, in rough proportion to usage.
+如果没有附加后端，计数将为零。如果附加了后端并且驱动程序正在操作虚拟队列，您会在计数中看到 `vtedu_write`、`vtedu_submit_locked`、`vtedu_vq_intr` 和 `vtedu_read`，大致与使用量成比例。
 
-### Observing the Guest-Host Boundary
+### 观察客户机-主机边界
 
-A more ambitious use of DTrace is to correlate guest-side events with host-side events. This is possible when both sides are FreeBSD and DTrace is available on both. Run DTrace on the host to count `vmm` exits and on the guest to count driver calls; the numbers should correlate one-for-one on an unloaded system, diverging as the host batches exits or as posted interrupts kick in.
+DTrace 的一个更雄心勃勃的用法是将客户机侧事件与主机侧事件关联起来。当双方都是 FreeBSD 且 DTrace 在双方都可用时，这是可能的。在主机上运行 DTrace 统计 `vmm` 退出，在客户机上统计驱动程序调用；在未加载的系统中，数字应该一一对应，当主机批量处理退出或发布中断启动时会出现差异。
 
-This is an advanced technique and mostly interesting for performance analysis. For day-to-day debugging, single-side DTrace is usually enough.
+这是一种高级技术，主要用于性能分析。对于日常调试，单侧 DTrace 通常就足够了。
 
-### Saving and Reusing Probes
+### 保存和重用探测脚本
 
-The `dtrace(1)` command-line form is fine for quick investigations. For repeated use, save probes to a file and invoke with `dtrace -s`.
+`dtrace(1)` 命令行形式适合快速调查。对于重复使用，将探测保存到文件并使用 `dtrace -s` 调用。
 
 ```sh
 % cat > virtio_probes.d <<'EOF'
@@ -3091,25 +3070,25 @@ EOF
 % sudo dtrace -s virtio_probes.d
 ```
 
-A curated set of probes in `.d` files is a good investment for anyone who spends significant time debugging VirtIO.
+对于花费大量时间调试 VirtIO 的人来说，将一组精选的探测保存在 `.d` 文件中是一项很好的投资。
 
-### When DTrace Cannot Help
+### 当 DTrace 无法帮忙时
 
-DTrace can observe the kernel and, with `pid` provider, most user-space programs. It cannot directly observe guest kernels from the host, because the guest is a process whose internal structure `dtrace` does not know. You can trace the `bhyve(8)` process itself (as a user-space program) using the `pid` provider, which shows what `bhyve` is doing but not what its guest is doing.
+DTrace 可以观察内核，并通过 `pid` 提供者观察大多数用户空间程序。它不能直接从主机观察客户机内核，因为客户机是一个其内部结构 `dtrace` 不知道的进程。您可以使用 `pid` 提供者跟踪 `bhyve(8)` 进程本身（作为用户空间程序），这显示了 `bhyve` 在做什么，但不能显示其客户机在做什么。
 
-For guest-side tracing, DTrace runs inside the guest. If the guest is FreeBSD 14.3, the full DTrace toolkit is available. If the guest is Linux, use `bpftrace` or `perf` instead; they are different tools with similar capabilities.
+对于客户机侧跟踪，DTrace 在客户机内部运行。如果客户机是 FreeBSD 14.3，则完整的 DTrace 工具包可用。如果客户机是 Linux，请使用 `bpftrace` 或 `perf` 代替；它们是具有类似功能的不同工具。
 
-### A Closing Word
+### 结语
 
-DTrace is one of FreeBSD's competitive advantages. Every driver author should be comfortable with it; the investment pays off repeatedly across years of debugging. This appendix gives you a starting point; the FreeBSD Handbook's DTrace chapter and the original *DTrace: Dynamic Tracing in Oracle Solaris* book (freely available online) are the next steps if you want to go deeper.
+DTrace 是 FreeBSD 的竞争优势之一。每个驱动程序作者都应该熟悉它；这项投资在多年的调试中会反复回报。本附录为您提供了一个起点；FreeBSD 手册的 DTrace 章节和原版 *DTrace: Dynamic Tracing in Oracle Solaris* 书籍（可在线免费获取）是如果您想深入了解的下一步。
 
-## Appendix: A Complete bhyve Configuration Walkthrough
+## 附录：完整的 bhyve 配置指南
 
-Readers who want to run the labs need a working `bhyve(8)` setup. This appendix walks through a complete configuration, from a bare FreeBSD 14.3 host to a guest with VirtIO devices, in enough detail for a beginner to reproduce it. If you have already built `bhyve` environments, skim this; the goal is to provide a reference for readers who have not.
+想要运行实验的读者需要一个可工作的 `bhyve(8)` 设置。本附录从裸 FreeBSD 14.3 主机到带有 VirtIO 设备的客户机，逐步介绍完整的配置，详细到足以让初学者复现。如果你已经构建过 `bhyve` 环境，可以略读此处；目标是为尚未构建过的读者提供参考。
 
-### The Host Side
+### 主机侧
 
-Start with a FreeBSD 14.3 host. Confirm the virtualisation extensions are enabled.
+从一个 FreeBSD 14.3 主机开始。确认虚拟化扩展已启用。
 
 ```sh
 % sysctl hw.vmm
@@ -3120,19 +3099,19 @@ hw.vmm.topology.cpus: 0
 ...
 ```
 
-If `hw.vmm` is absent entirely, the `vmm(4)` module is not loaded. Load it with `kldload vmm`. Add `vmm_load="YES"` to `/boot/loader.conf` to load it at every boot.
+如果 `hw.vmm` 完全不存在，说明 `vmm(4)` 模块未加载。使用 `kldload vmm` 加载它。添加 `vmm_load="YES"` 到 `/boot/loader.conf` 以在每次启动时加载。
 
-If `vmm` is loaded but the VT-x/AMD-V features are absent, enable them in the host firmware. The setting is usually called "VT-x", "VMX", "AMD-V", or "SVM" in the BIOS/UEFI menu. After enabling, reboot.
+如果 `vmm` 已加载但 VT-x/AMD-V 特性缺失，请在主机固件中启用它们。该设置在 BIOS/UEFI 菜单中通常称为"VT-x"、"VMX"、"AMD-V"或"SVM"。启用后，重新启动。
 
-### Install vm-bhyve
+### 安装 vm-bhyve
 
-`vm-bhyve` is a wrapper that makes `bhyve(8)` easier to use. Install it from ports or packages.
+`vm-bhyve` 是一个使 `bhyve(8)` 更易于使用的包装器。从 ports 或软件包安装它。
 
 ```sh
 % sudo pkg install vm-bhyve
 ```
 
-Create the VM directory. Using ZFS is convenient because it supports snapshotting.
+创建 VM 目录。使用 ZFS 很方便，因为它支持快照。
 
 ```sh
 % sudo zfs create -o mountpoint=/vm zroot/vm
@@ -3151,70 +3130,70 @@ vm_enable="YES"
 vm_dir="zfs:zroot/vm"
 ```
 
-For UFS, use `vm_dir="/vm"` instead. Initialise the directory.
+对于 UFS，改用 `vm_dir="/vm"`。初始化目录。
 
 ```sh
 % sudo vm init
 % sudo cp /usr/local/share/examples/vm-bhyve/config_samples/default.conf /vm/.templates/
 ```
 
-Edit `/vm/.templates/default.conf` if you want different defaults (memory size, CPU count).
+如果您想要不同的默认值（内存大小、CPU 数量），请编辑 `/vm/.templates/default.conf`。
 
-### Create and Install a Guest
+### 创建并安装客户机
 
-Download a FreeBSD 14.3 installation image. The file `FreeBSD-14.3-RELEASE-amd64-disc1.iso` is the standard installer; for faster setup, use `FreeBSD-14.3-RELEASE-amd64.qcow2` if you prefer a prebuilt image.
+下载 FreeBSD 14.3 安装镜像。文件 `FreeBSD-14.3-RELEASE-amd64-disc1.iso` 是标准安装程序；为了更快设置，如果您更喜欢预构建镜像，请使用 `FreeBSD-14.3-RELEASE-amd64.qcow2`。
 
 ```sh
 % sudo vm iso https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/14.3/FreeBSD-14.3-RELEASE-amd64-disc1.iso
 ```
 
-Create the guest.
+创建客户机。
 
 ```sh
 % sudo vm create -t default -s 20G guest0
 ```
 
-Start the installer.
+启动安装程序。
 
 ```sh
 % sudo vm install guest0 FreeBSD-14.3-RELEASE-amd64-disc1.iso
 ```
 
-Connect to the console.
+连接到控制台。
 
 ```sh
 % sudo vm console guest0
 ```
 
-The FreeBSD installer runs; follow it through to completion. At the end, reboot the guest.
+FreeBSD 安装程序运行；按照提示完成安装。最后，重新启动客户机。
 
-### Configure Networking
+### 配置网络
 
-`vm-bhyve` supports two network styles: bridged and NAT. For simplicity, bridged is fine.
+`vm-bhyve` 支持两种网络风格：桥接和 NAT。为简单起见，桥接就很好。
 
-Create a bridge.
+创建桥接。
 
 ```sh
 % sudo vm switch create public
 % sudo vm switch add public em0
 ```
 
-Replace `em0` with your host's physical interface. Assign guests to the switch in their configuration.
+将 `em0` 替换为您主机的物理接口。将客户机分配到其配置中的交换机。
 
 ```sh
 % sudo vm configure guest0
 ```
 
-In the editor that opens, ensure `network0_switch="public"` is set.
+在打开的编辑器中，确保设置了 `network0_switch="public"`。
 
-### Start the Guest
+### 启动客户机
 
 ```sh
 % sudo vm start guest0
 % sudo vm console guest0
 ```
 
-Log in, run `pciconf -lvBb`, and confirm the VirtIO devices are present.
+登录，运行 `pciconf -lvBb`，并确认 VirtIO 设备存在。
 
 ```sh
 # pciconf -lvBb
@@ -3228,80 +3207,80 @@ virtio_pci1@pci0:0:3:0: class=0x020000 rev=0x00 vendor=0x1af4 device=0x1041 ...
 ...
 ```
 
-### Troubleshooting the Host Side
+### 主机侧故障排除
 
-If the guest does not start, run `vm start guest0` with the verbose flag (`vm -f start guest0` keeps it in the foreground), look at the error message, and consult the `bhyve(8)` manual. The most common issues are missing resources (disk image path wrong, switch not set up) and permissions (user not in the `vm` group, or directories not readable).
+如果客户机无法启动，使用详细标志运行 `vm start guest0`（`vm -f start guest0` 使其保持在前台），查看错误信息，并查阅 `bhyve(8)` 手册。最常见的问题是资源缺失（磁盘镜像路径错误、交换机未设置）和权限问题（用户不在 `vm` 组中，或目录不可读）。
 
-If networking does not work inside the guest, check the bridge on the host (`ifconfig bridge0`), check the tap device (`ifconfig tapN`), and check that the VM's `network0` setting matches the switch name. `vm-bhyve` generates a tap device per VM and wires it into the specified switch.
+如果客户机内部网络无法工作，请检查主机上的桥接（`ifconfig bridge0`），检查 tap 设备（`ifconfig tapN`），并检查 VM 的 `network0` 设置是否与交换机名称匹配。`vm-bhyve` 为每个 VM 生成一个 tap 设备并将其连接到指定的交换机。
 
-### Using This Setup for the Labs
+### 使用此设置进行实验
 
-With a working host and guest, Lab 1 is essentially done (you have a VirtIO-using guest). Lab 2 and Lab 3 can be performed inside the guest. Lab 4 needs `if_epair` on the host; Lab 5 needs a spare PCI device and IOMMU-enabled firmware. Lab 6 (building vtedu) is done inside the guest. Lab 7 (measuring overhead) uses the guest as the test subject.
+有了可工作的主机和客户机，实验 1 基本完成（您有了一个使用 VirtIO 的客户机）。实验 2 和实验 3 可以在客户机内部执行。实验 4 需要在主机上使用 `if_epair`；实验 5 需要备用 PCI 设备和启用 IOMMU 的固件。实验 6（构建 vtedu）在客户机内部完成。实验 7（测量开销）将客户机用作测试对象。
 
-In short: if your `vm-bhyve` setup is solid, the rest of the chapter's hands-on work is accessible.
+简而言之：如果您的 `vm-bhyve` 设置可靠，本章剩余动手实验内容都是可操作的。
 
-## Appendix: VirtIO Feature Bits Reference
+## 附录：VirtIO 特性位参考
 
-This appendix collects the VirtIO feature bits most likely to matter to a driver author, with a brief description of each. The authoritative source is the VirtIO specification; this is a digest for quick reference.
+本附录汇集了最可能对驱动程序作者重要的 VirtIO 特性位，每个都有简短描述。权威来源是 VirtIO 规范；这是一个供快速参考的摘要。
 
-### Device-Independent Features
+### 设备无关的特性
 
-These apply across all VirtIO device types.
+这些适用于所有 VirtIO 设备类型。
 
-- `VIRTIO_F_NOTIFY_ON_EMPTY` (bit 24): The device should notify the driver when the virtqueue becomes empty, in addition to normal completion notifications. Useful for drivers that want to know when all outstanding requests have been processed.
+- `VIRTIO_F_NOTIFY_ON_EMPTY`（第 24 位）：除了正常的完成通知外，当虚拟队列变空时，设备应通知驱动程序。适用于想知道所有未完成请求何时已处理的驱动程序。
 
-- `VIRTIO_F_ANY_LAYOUT` (bit 27, deprecated in v1): Headers and data can be in any scatter-gather layout. Always negotiated in v1 drivers; not relevant for modern code.
+- `VIRTIO_F_ANY_LAYOUT`（第 27 位，v1 中已弃用）：头部和数据可以在任何分散-聚集布局中。在 v1 驱动程序中总是协商；与现代代码无关。
 
-- `VIRTIO_F_RING_INDIRECT_DESC` (bit 28): Indirect descriptors supported. An entry in the descriptor table can point to another table, allowing longer scatter-gather lists without expanding the main ring. Strongly recommended for drivers that handle large requests.
+- `VIRTIO_F_RING_INDIRECT_DESC`（第 28 位）：支持间接描述符。描述符表中的条目可以指向另一个表，允许更长的分散-聚集列表而无需扩展主环。强烈推荐用于处理大型请求的驱动程序。
 
-- `VIRTIO_F_RING_EVENT_IDX` (bit 29): Event-index interrupt suppression. Lets the driver tell the device "do not interrupt me before descriptor N is available", reducing interrupt rate. Strongly recommended for high-rate drivers.
+- `VIRTIO_F_RING_EVENT_IDX`（第 29 位）：事件索引中断抑制。让驱动程序告诉设备"在描述符 N 可用之前不要中断我"，降低中断率。强烈推荐用于高频率驱动程序。
 
-- `VIRTIO_F_VERSION_1` (bit 32): Modern VirtIO (version 1.0 or later). Without this, the driver is in legacy mode, with different config-space layout and conventions. New drivers should require this.
+- `VIRTIO_F_VERSION_1`（第 32 位）：现代 VirtIO（1.0 或更高版本）。没有此位，驱动程序处于传统模式，具有不同的配置空间布局和约定。新驱动程序应要求此位。
 
-- `VIRTIO_F_ACCESS_PLATFORM` (bit 33): The device uses a platform-specific DMA address translation (for example, an IOMMU). Required for passthrough-capable deployments.
+- `VIRTIO_F_ACCESS_PLATFORM`（第 33 位）：设备使用特定平台的 DMA 地址转换（例如 IOMMU）。对于支持直通的部署是必需的。
 
-- `VIRTIO_F_RING_PACKED` (bit 34): Packed virtqueue layout. A newer, more cache-friendly layout than the classic split layout. Not supported by all backends; negotiate but do not require.
+- `VIRTIO_F_RING_PACKED`（第 34 位）：压缩虚拟队列布局。比经典拆分布局更新的、缓存更友好的布局。并非所有后端都支持；进行协商但不要求。
 
-- `VIRTIO_F_IN_ORDER` (bit 35): Descriptors are used in the same order they were made available. Allows optimisations in the driver (no need to track descriptor indexes); not supported by all backends.
+- `VIRTIO_F_IN_ORDER`（第 35 位）：描述符按可用顺序使用。允许驱动程序中的优化（无需跟踪描述符索引）；并非所有后端都支持。
 
-### Block Device Features (`virtio_blk`)
+### 块设备特性（`virtio_blk`）
 
-- `VIRTIO_BLK_F_SIZE_MAX` (bit 1): The device has a maximum single-request size.
-- `VIRTIO_BLK_F_SEG_MAX` (bit 2): The device has a maximum segment count per request.
-- `VIRTIO_BLK_F_GEOMETRY` (bit 4): The device reports its cylinder/head/sector geometry. Mostly legacy.
-- `VIRTIO_BLK_F_RO` (bit 5): The device is read-only.
-- `VIRTIO_BLK_F_BLK_SIZE` (bit 6): The device reports its block size.
-- `VIRTIO_BLK_F_FLUSH` (bit 9): The device supports flush (fsync) commands.
-- `VIRTIO_BLK_F_TOPOLOGY` (bit 10): The device reports topology information (alignment, etc.).
-- `VIRTIO_BLK_F_CONFIG_WCE` (bit 11): The driver can query and set the write-cache-enabled flag.
-- `VIRTIO_BLK_F_DISCARD` (bit 13): The device supports discard (trim) commands.
-- `VIRTIO_BLK_F_WRITE_ZEROES` (bit 14): The device supports write-zeroes commands.
+- `VIRTIO_BLK_F_SIZE_MAX`（第 1 位）：设备具有最大单次请求大小。
+- `VIRTIO_BLK_F_SEG_MAX`（第 2 位）：设备具有每个请求的最大段数。
+- `VIRTIO_BLK_F_GEOMETRY`（第 4 位）：设备报告其柱面/磁头/扇区几何结构。主要是遗留功能。
+- `VIRTIO_BLK_F_RO`（第 5 位）：设备为只读。
+- `VIRTIO_BLK_F_BLK_SIZE`（第 6 位）：设备报告其块大小。
+- `VIRTIO_BLK_F_FLUSH`（第 9 位）：设备支持 flush（fsync）命令。
+- `VIRTIO_BLK_F_TOPOLOGY`（第 10 位）：设备报告拓扑信息（对齐等）。
+- `VIRTIO_BLK_F_CONFIG_WCE`（第 11 位）：驱动程序可以查询和设置写缓存启用标志。
+- `VIRTIO_BLK_F_DISCARD`（第 13 位）：设备支持 discard（trim）命令。
+- `VIRTIO_BLK_F_WRITE_ZEROES`（第 14 位）：设备支持写零命令。
 
-### Network Device Features (`virtio_net`)
+### 网络设备特性（`virtio_net`）
 
-- `VIRTIO_NET_F_CSUM` (bit 0): The device can offload checksum computation.
-- `VIRTIO_NET_F_GUEST_CSUM` (bit 1): The driver can checksum-offload incoming packets.
-- `VIRTIO_NET_F_MAC` (bit 5): The device provides a MAC address.
+- `VIRTIO_NET_F_CSUM`（第 0 位）：设备可以卸载校验和计算。
+- `VIRTIO_NET_F_GUEST_CSUM`（第 1 位）：驱动程序可以对入站数据包进行校验和卸载。
+- `VIRTIO_NET_F_MAC`（第 5 位）：设备提供 MAC 地址。
 - `VIRTIO_NET_F_GSO` (bit 6): GSO (generic segmentation offload) supported.
-- `VIRTIO_NET_F_GUEST_TSO4` (bit 7): Receive-side TSO over IPv4.
-- `VIRTIO_NET_F_GUEST_TSO6` (bit 8): Receive-side TSO over IPv6.
+- `VIRTIO_NET_F_GUEST_TSO4`（第 7 位）：通过 IPv4 的接收端 TSO。
+- `VIRTIO_NET_F_GUEST_TSO6`（第 8 位）：通过 IPv6 的接收端 TSO。
 - `VIRTIO_NET_F_GUEST_ECN` (bit 9): ECN (explicit congestion notification) supported on receive.
 - `VIRTIO_NET_F_GUEST_UFO` (bit 10): Receive-side UFO (UDP fragmentation offload).
-- `VIRTIO_NET_F_HOST_TSO4` (bit 11): Transmit-side TSO over IPv4.
-- `VIRTIO_NET_F_HOST_TSO6` (bit 12): Transmit-side TSO over IPv6.
+- `VIRTIO_NET_F_HOST_TSO4`（第 11 位）：通过 IPv4 的发送端 TSO。
+- `VIRTIO_NET_F_HOST_TSO6`（第 12 位）：通过 IPv6 的发送端 TSO。
 - `VIRTIO_NET_F_HOST_ECN` (bit 13): ECN on transmit.
 - `VIRTIO_NET_F_HOST_UFO` (bit 14): Transmit-side UFO.
 - `VIRTIO_NET_F_MRG_RXBUF` (bit 15): Merged receive buffers.
-- `VIRTIO_NET_F_STATUS` (bit 16): Configuration status is supported.
+- `VIRTIO_NET_F_STATUS`（第 16 位）：支持配置状态。
 - `VIRTIO_NET_F_CTRL_VQ` (bit 17): Control virtqueue.
 - `VIRTIO_NET_F_CTRL_RX` (bit 18): Control channel for receive mode filtering.
 - `VIRTIO_NET_F_CTRL_VLAN` (bit 19): Control channel for VLAN filtering.
 - `VIRTIO_NET_F_MQ` (bit 22): Multiqueue support.
 - `VIRTIO_NET_F_CTRL_MAC_ADDR` (bit 23): Control channel for MAC-address setting.
 
-### How to Read a Feature Word
+### 如何读取特性字
 
-Features are a 64-bit word, with bits as described. To check whether a feature is negotiated:
+特性是一个 64 位字，位如上所述。要检查特性是否已协商：
 
 ```c
 if ((sc->features & VIRTIO_F_RING_EVENT_IDX) != 0) {
@@ -3309,17 +3288,17 @@ if ((sc->features & VIRTIO_F_RING_EVENT_IDX) != 0) {
 }
 ```
 
-To advertise a feature for negotiation, `|` it into the features mask before calling `virtio_negotiate_features`. The post-negotiation value of `sc->features` is the intersection of what the driver requested and what the backend offers.
+要播发一个特性进行协商，在调用 `virtio_negotiate_features` 之前将其 `|` 到特性掩码中。`sc->features` 协商后的值是驱动程序请求和后端提供的交集。
 
-### Common Pitfalls
+### 常见陷阱
 
-- Hard-coding feature requirements. A driver that requires `VIRTIO_NET_F_MRG_RXBUF` and falls over if it is absent will not work with simpler backends. Prefer to negotiate optimistically and adapt to what you get.
-- Forgetting to check the post-negotiation features. A driver that behaves as if a feature is always present, without checking `sc->features`, will mis-program the device when the feature is absent.
-- Ignoring version 1 requirements. Modern code should require `VIRTIO_F_VERSION_1`; legacy mode has too many quirks to be worth supporting in new drivers.
+- 硬编码特性要求。要求 `VIRTIO_NET_F_MRG_RXBUF` 并且在缺少时崩溃的驱动程序将无法与更简单的后端一起工作。建议乐观地进行协商并适应获得的结果。
+- 忘记检查协商后的特性。在没有检查 `sc->features` 的情况下假设某个特性始终存在的驱动程序，在特性缺失时会错误地编程设备。
+- 忽略版本 1 要求。现代代码应要求 `VIRTIO_F_VERSION_1`；传统模式有太多古怪之处，不值得在新驱动程序中支持。
 
-### A Useful Habit
+### 一个有用的习惯
 
-Log the negotiated feature word at attach time, with each interesting bit named. The `device_printf` below does this succinctly.
+在附加时记录协商后的特性字，命名每个有趣的位。下面的 `device_printf` 简洁地做到了这一点。
 
 ```c
 device_printf(dev, "features: ver1=%d evt_idx=%d indirect=%d mac=%d\n",
@@ -3329,27 +3308,27 @@ device_printf(dev, "features: ver1=%d evt_idx=%d indirect=%d mac=%d\n",
     (sc->features & VIRTIO_NET_F_MAC) != 0);
 ```
 
-This single line in `dmesg` at attach time tells you, for any bug report, what feature set the driver is operating on. It is the VirtIO equivalent of logging a hardware revision; indispensable for support.
+在附加时 `dmesg` 中的这一行告诉你，对于任何错误报告，驱动程序正在操作哪个特性集。这相当于记录硬件修订版的 VirtIO 方式；对于支持工作不可或缺。
 
-## Appendix: Further Reading
+## 附录：延伸阅读
 
-For readers who want to go deeper, here is a short curated list.
+对于想要深入了解的读者，这里是一个精选的简短列表。
 
-### FreeBSD source tree
+### FreeBSD 源代码树
 
-- `/usr/src/sys/dev/virtio/random/virtio_random.c` - The smallest complete
-  VirtIO driver. Read first.
-- `/usr/src/sys/dev/virtio/network/if_vtnet.c` - A larger VirtIO driver.
-- `/usr/src/sys/dev/virtio/block/virtio_blk.c` - A request-response VirtIO
-  driver.
-- `/usr/src/sys/dev/virtio/virtqueue.c` - The ring machinery.
-- `/usr/src/sys/amd64/vmm/` - The bhyve kernel module.
-- `/usr/src/usr.sbin/bhyve/` - The bhyve user-space emulator.
-- `/usr/src/sys/kern/kern_jail.c` - Jail implementation.
-- `/usr/src/sys/net/vnet.h`, `/usr/src/sys/net/vnet.c` - VNET framework.
-- `/usr/src/sys/net/if_tuntap.c` - A VNET-aware cloning pseudo-driver.
+- `/usr/src/sys/dev/virtio/random/virtio_random.c` - 最小的完整
+  VirtIO 驱动程序。首先阅读。
+- `/usr/src/sys/dev/virtio/network/if_vtnet.c` - 一个较大的 VirtIO 驱动程序。
+- `/usr/src/sys/dev/virtio/block/virtio_blk.c` - 一个请求-响应类型的 VirtIO
+  驱动程序。
+- `/usr/src/sys/dev/virtio/virtqueue.c` - 环机制。
+- `/usr/src/sys/amd64/vmm/` - bhyve 内核模块。
+- `/usr/src/usr.sbin/bhyve/` - bhyve 用户空间模拟器。
+- `/usr/src/sys/kern/kern_jail.c` - Jail 实现。
+- `/usr/src/sys/net/vnet.h`、`/usr/src/sys/net/vnet.c` - VNET 框架。
+- `/usr/src/sys/net/if_tuntap.c` - 一个 VNET 感知的克隆伪驱动程序。
 
-### Manual pages
+### 手册页
 
 - `virtio(4)`, `vtnet(4)`, `virtio_blk(4)`
 - `bhyve(8)`, `bhyvectl(8)`, `vmm(4)`, `vmm_dev(4)`
@@ -3360,114 +3339,110 @@ For readers who want to go deeper, here is a short curated list.
 - `priv(9)`, `ucred(9)`
 - `if_epair(4)`, `vlan(4)`, `tun(4)`, `tap(4)`
 
-### External standards
+### 外部标准
 
-- The VirtIO 1.2 specification (OASIS) is the authoritative reference for
-  the protocol. Available from the OASIS VirtIO Technical Committee site.
-- The PCI-SIG specifications for PCI Express, MSI-X, and ACS are relevant
-  for passthrough.
+- VirtIO 1.2 规范（OASIS）是该协议的权威参考。
+  可从 OASIS VirtIO 技术委员会网站获取。
+- PCI-SIG 的 PCI Express、MSI-X 和 ACS 规范与
+  直通相关。
 
-### FreeBSD Handbook
+### FreeBSD 手册
 
-- Chapter on jails, which complements this chapter with an administrative
-  perspective.
-- Chapter on virtualisation, which covers `bhyve(8)` management in more
-  depth than this driver-focused chapter.
+- 关于 jail 的章节，从管理角度补充本章内容。
+- 关于虚拟化的章节，比本章以驱动程序为重点的内容更深入地覆盖了 `bhyve(8)` 管理。
 
-These resources together form a reading programme that will carry a
-motivated reader from this chapter's introduction to a practical fluency
-in FreeBSD virtualisation and containerisation. You do not need to read
-them all; pick the ones that fit your current project and build from
-there.
+这些资源共同构成了一个阅读计划，将把有动力的读者从本章的介绍带到
+FreeBSD 虚拟化和容器化的实际熟练程度。您不需要全部阅读；
+选择适合您当前项目的内容，并在此基础上构建。
 
-## Appendix: Anti-Patterns in Virtualised Drivers
+## 附录：虚拟化驱动程序中的反模式
 
-A good way to learn a craft is to study its common mistakes. This appendix collects the anti-patterns we have seen throughout the chapter, in a single place, with the fix for each. When reviewing a driver (your own or someone else's), scan for these patterns; each is a reliable sign of trouble.
+学习一门手艺的好方法是研究其常见错误。本附录将我们在本章中看到的所有反模式收集在一个地方，并附有每个的修复方法。在审查驱动程序（自己的或他人的）时，扫描这些模式；每个都是问题的可靠迹象。
 
-### Busy-Waiting on a Status Register
+### 在状态寄存器上忙等待
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 while ((bus_read_4(sc->res, STATUS) & READY) == 0)
 	;
 ```
 
-Under virtualisation, each bus read is a VM exit. A tight loop consumes enormous CPU time and may never terminate if the guest is scheduled out. Use `DELAY(9)` inside the loop and a bounded iteration count, or use an interrupt-driven design that does not poll at all.
+在虚拟化环境下，每次总线读取都是一次 VM 退出。紧密循环会消耗大量 CPU 时间，如果客户机被调度出去甚至可能永远不会终止。在循环中使用 `DELAY(9)` 和有界的迭代次数，或使用根本不轮询的中断驱动设计。
 
-### Caching Physical Addresses
+### 缓存物理地址
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 uint64_t phys_addr = vtophys(buffer);
 bus_write_8(sc->res, DMA_ADDR, phys_addr);
 /* ...later... */
 bus_write_8(sc->res, DMA_ADDR, phys_addr);  /* still valid? */
 ```
 
-A physical address is a temporary view. Under memory compaction, live migration, or memory hotplug, the address may no longer refer to the same physical memory. Use `bus_dma(9)` and hold a DMA map; the map tracks the bus address correctly across kernel memory operations.
+物理地址是临时视图。在内存压缩、实时迁移或内存热插拔下，该地址可能不再指向同一物理内存。使用 `bus_dma(9)` 并持有 DMA 映射；该映射在内核内存操作中正确跟踪总线地址。
 
-### Ignoring `si_drv1`
+### 忽略 `si_drv1`
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 static int
 mydrv_read(struct cdev *dev, struct uio *uio, int flags)
 {
 	struct mydrv_softc *sc = devclass_get_softc(mydrv_devclass, 0);
-	/* what if there are multiple units? */
+	/* 如果有多个单元怎么办？ */
 }
 ```
 
-The `dev->si_drv1` slot is there to connect the cdev back to its softc. Setting it in attach and using it in read/write/ioctl is the idiomatic pattern. Using `devclass_get_softc` with a hardcoded unit number is a minefield as soon as more than one instance attaches.
+`dev->si_drv1` 槽用于将 cdev 连接回其 softc。在附加中设置它并在 read/write/ioctl 中使用它是惯用模式。使用带有硬编码单元号的 `devclass_get_softc` 一旦有多个实例附加就成了雷区。
 
-### Assuming INTx
+### 假设使用 INTx
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 sc->irq_rid = 0;
 sc->irq_res = bus_alloc_resource_any(dev, SYS_RES_IRQ, &sc->irq_rid,
     RF_SHAREABLE | RF_ACTIVE);
 ```
 
-INTx is slower under virtualisation and does not scale to many-queue devices. Use `pci_alloc_msix` first, fall back to `pci_alloc_msi`, and only fall back to INTx for hardware that does not support message-signalled interrupts.
+INTx 在虚拟化下速度较慢，并且不能扩展到多队列设备。首先使用 `pci_alloc_msix`，回退到 `pci_alloc_msi`，最后只对不支持消息信号中断的硬件回退到 INTx。
 
-### Hard-Coding Feature Bits
+### 硬编码特性位
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 if ((sc->features & VIRTIO_F_RING_INDIRECT_DESC) == 0)
 	panic("device does not support indirect descriptors");
 ```
 
-A driver that panics when a feature is missing is impossible to use with a backend that does not advertise the feature. Negotiate optimistically, check the post-negotiation result, and fall back gracefully to a less efficient path if the feature is missing.
+在特性缺失时崩溃的驱动程序无法与不播发该特性的后端一起使用。乐观地进行协商，检查协商后的结果，并在特性缺失时优雅地回退到较低效率的路径。
 
-### Sleep-With-Spin-Lock Held
+### 持有自旋锁时睡眠
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 mtx_lock(&sc->lock);
 tsleep(sc, PWAIT, "wait", hz);
 mtx_unlock(&sc->lock);
 ```
 
-`tsleep` with an `mtx(9)` spin-lock held causes a panic on FreeBSD. Use `mtx_sleep` (which drops the mutex around the sleep) or use a blocking lock (`sx(9)`) when you need to sleep.
+在持有 `mtx(9)` 自旋锁时调用 `tsleep` 会在 FreeBSD 上导致崩溃。使用 `mtx_sleep`（它在睡眠期间释放互斥锁）或在需要睡眠时使用阻塞锁（`sx(9)`）。
 
-### Returning ENOTTY for Unsupported Operations
+### 对不支持的操作返回 ENOTTY
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 case MYDRV_PRIV_IOCTL:
 	if (cred->cr_prison != &prison0)
-		return (ENOTTY);  /* hide from jails */
+		return (ENOTTY);  /* 对 jail 隐藏 */
 	...
 ```
 
-`ENOTTY` means "this ioctl does not exist". It hides the operation from jailed callers, but it also breaks tooling that introspects available ioctls. Prefer `EPERM` for "this ioctl exists but you cannot use it", leaving introspection correct.
+`ENOTTY` 意味着"此 ioctl 不存在"。它会向被限制的调用者隐藏操作，但也会破坏内省可用 ioctl 的工具。对于"此 ioctl 存在但你不能使用它"，建议使用 `EPERM`，保持内省的正确性。
 
-### Forgetting the Detach Path
+### 忘记分离路径
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 static int
 mydrv_detach(device_t dev)
 {
@@ -3478,12 +3453,12 @@ mydrv_detach(device_t dev)
 }
 ```
 
-Missing callout drains, missing taskqueue drains, missing cdev destruction, missing mutex destruction, missing DMA map unload, missing interrupt teardown. Each becomes a leak or a crash at kldunload. The attach path is usually clean; the detach path is where bugs hide.
+缺少 callout 排空、缺少 taskqueue 排空、缺少 cdev 销毁、缺少互斥锁销毁、缺少 DMA 映射卸载、缺少中断拆除。每个都在 kldunload 时成为泄漏或崩溃。附加路径通常是干净的；分离路径是错误隐藏的地方。
 
-### Assuming `device_printf` Works Without a Device
+### 假设 `device_printf` 在没有设备时也能工作
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 static int
 mydrv_modevent(module_t mod, int event, void *arg)
 {
@@ -3491,40 +3466,40 @@ mydrv_modevent(module_t mod, int event, void *arg)
 }
 ```
 
-`device_printf` with a NULL `device_t` dereferences a null pointer. Inside module event handlers, before a device has been attached, use `printf` (with a "mydrv:" prefix to identify the source). `device_printf` is for per-device events after attach.
+使用 NULL `device_t` 调用 `device_printf` 会解引用空指针。在模块事件处理程序内部，在设备还未附加之前，使用 `printf`（带有"mydrv:"前缀标识来源）。`device_printf` 用于附加后的每个设备事件。
 
-### Not Cleaning Up VNET State
+### 未清理 VNET 状态
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 static int
 mydrv_mod_event(module_t mod, int event, void *arg)
 {
 	if (event == MOD_UNLOAD)
-		free(mydrv_state, M_DEVBUF);  /* in which VNET? */
+		free(mydrv_state, M_DEVBUF);  /* 在哪个 VNET 中？ */
 }
 ```
 
-Per-VNET state is allocated in a specific VNET context. Freeing it without setting that context accesses the wrong VNET's data. Use `VNET_FOREACH` and `CURVNET_SET` to walk every VNET and clean up each one's state.
+逐 VNET 状态在特定的 VNET 上下文中分配。在没有设置该上下文的情况下释放它会访问错误的 VNET 数据。使用 `VNET_FOREACH` 和 `CURVNET_SET` 遍历每个 VNET 并清理每个状态。
 
-### Using `getnanouptime` for Timing
+### 使用 `getnanouptime` 进行计时
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 struct timespec ts;
 getnanouptime(&ts);
 /* ...do work... */
 struct timespec ts2;
 getnanouptime(&ts2);
-/* difference is arbitrary inside a VM */
+/* VM 内部的差异是任意的 */
 ```
 
-`getnanouptime` returns a low-resolution reading that the kernel caches. For precise short-duration timing, use `binuptime(9)` or `sbinuptime(9)`, which read the high-resolution time source. Under virtualisation, the precise readings are as correct as the time source allows; the cached readings have been stale for up to a tick.
+`getnanouptime` 返回内核缓存的低分辨率读数。对于精确的短持续时间计时，使用 `binuptime(9)` 或 `sbinuptime(9)`，它们读取高分辨率时间源。在虚拟化下，精确读数在时间源允许的范围内是正确的；缓存的读数可能已经过时长达一个 tick。
 
-### Probing Hardware in the Probe Method
+### 在探测方法中探测硬件
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 static int
 mydrv_probe(device_t dev)
 {
@@ -3533,133 +3508,133 @@ mydrv_probe(device_t dev)
 }
 ```
 
-The probe method should be purely identity-based: inspect the PNP information, return a priority, and do nothing that requires the hardware to be present and functional. Hardware interaction belongs in attach. Under virtualisation, a probe that pokes hardware before feature negotiation can mis-identify the device.
+探测方法应纯粹基于身份：检查 PNP 信息，返回优先级，不做任何需要硬件存在和功能的事情。硬件交互属于附加函数。在虚拟化下，在特性协商前探测硬件的探测方法可能错误识别设备。
 
-### Storing Kernel Pointers Through `ioctl`
+### 通过 `ioctl` 存储内核指针
 
 ```c
-/* Anti-pattern */
+/* 反模式 */
 case MYDRV_GET_PTR:
 	*(void **)data = sc->internal_state;
 	return (0);
 ```
 
-Passing kernel pointers to user space is a security bug. Under virtualisation it can even leak hypervisor-relevant information. Always copy the data the caller asks for, never the pointer.
+将内核指针传递给用户空间是一个安全错误。在虚拟化下它甚至可能泄漏与虚拟机监控程序相关的信息。始终复制调用者请求的数据，从不传递指针。
 
-### Summary
+### 总结
 
-These anti-patterns cover most of the ways that FreeBSD drivers go wrong under virtualisation. They are not unique to VMs, but they are *amplified* under virtualisation: the same bug that corrupts memory once a day on bare metal might corrupt it hundreds of times per second under a VM whose timing is different. Fixing these patterns is not "fixing the VM case"; it is fixing the driver to meet the kernel's baseline expectations.
+这些反模式涵盖了 FreeBSD 驱动程序在虚拟化下出错的大部分方式。它们并非 VM 独有，但在虚拟化下会被*放大*：在裸金属上每天只损坏一次内存的同一个错误，在时序不同的 VM 下可能每秒损坏数百次。修复这些模式不是"修复 VM 的情况"；而是修复驱动程序以满足内核的基线期望。
 
-## Appendix: A Checklist for a Virtualisation-Ready Driver
+## 附录：虚拟化就绪驱动程序检查清单
 
-A concrete checklist you can apply to your own driver before declaring it virtualisation-ready. Go through each item; any "no" answer is a task.
+一个具体的检查清单，您可以在宣布驱动程序虚拟化就绪之前应用于自己的驱动程序。逐项检查；任何"否"的答案都是一个待办任务。
 
-### Device Binding and Probe
+### 设备绑定与探测
 
-- Does the driver use `VIRTIO_SIMPLE_PNPINFO` or `VIRTIO_DRIVER_MODULE` rather than hand-rolling PNP entries?
-- Does the probe method avoid hardware access and only use PNP identity?
-- Does the attach method call `virtio_negotiate_features` and log the result?
-- Does attach fail cleanly (releasing every resource it has allocated) if any step after virtqueue allocation fails?
+- 驱动程序是否使用 `VIRTIO_SIMPLE_PNPINFO` 或 `VIRTIO_DRIVER_MODULE` 而不是手动编写 PNP 条目？
+- 探测方法是否避免硬件访问而仅使用 PNP 标识？
+- 附加方法是否调用 `virtio_negotiate_features` 并记录结果？
+- 如果 virtqueue 分配后的任何步骤失败，附加是否干净地失败（释放其已分配的每个资源）？
 
-### Resources
+### 资源
 
-- Does the driver use `bus_alloc_resource_any` with a dynamic RID rather than hard-coding resource IDs?
-- Does the driver use `pci_alloc_msix` (or `pci_alloc_msi`) in preference to INTx?
-- Are all `bus_alloc_resource` calls matched by `bus_release_resource` in detach?
+- 驱动程序是否使用带有动态 RID 的 `bus_alloc_resource_any` 而不是硬编码资源 ID？
+- 驱动程序是否优先使用 `pci_alloc_msix`（或 `pci_alloc_msi`）而不是 INTx？
+- 分离中的所有 `bus_alloc_resource` 调用是否都有对应的 `bus_release_resource`？
 
 ### DMA
 
-- Does every address programmed into hardware come from `bus_dma_load` (or similar) rather than `vtophys`?
-- Does the driver hold DMA tags and maps with appropriate lifetimes, not re-creating them per operation when avoidable?
-- Does the driver handle `bus_dma_load_mbuf_sg` correctly for scatter-gather?
-- Is the driver's `bus_dma_tag` created with the correct alignment, boundary, and maximum-segment constraints?
+- 写入硬件的每个地址是否来自 `bus_dma_load`（或类似函数）而不是 `vtophys`？
+- 驱动程序是否在适当的生命周期内持有 DMA 标签和映射，而不是在可避免的情况下每次操作都重新创建它们？
+- 驱动程序是否正确处理用于分散-聚集的 `bus_dma_load_mbuf_sg`？
+- 驱动程序的 `bus_dma_tag` 是否使用正确的对齐、边界和最大段约束创建？
 
-### Interrupts
+### 中断
 
-- Is the interrupt handler MP-safe (declared with `INTR_MPSAFE`)?
-- Does the handler handle the "no work" case gracefully (in case of spurious wake-up)?
-- Does the handler disable and re-enable virtqueue interrupts correctly, using the `virtqueue_disable_intr` / `virtqueue_enable_intr` pattern?
-- Is the interrupt path free of blocking operations (no `malloc(M_WAITOK)`, no `mtx_sleep`)?
+- 中断处理程序是否是 MP 安全的（使用 `INTR_MPSAFE` 声明）？
+- 处理程序是否优雅地处理"无工作"情况（以防虚假唤醒）？
+- 处理程序是否使用 `virtqueue_disable_intr` / `virtqueue_enable_intr` 模式正确地禁用和重新启用 virtqueue 中断？
+- 中断路径是否没有阻塞操作（没有 `malloc(M_WAITOK)`，没有 `mtx_sleep`）？
 
-### Character Device Interface
+### 字符设备接口
 
-- Does attach set `cdev->si_drv1 = sc`?
-- Does detach call `destroy_dev` before freeing the softc?
-- Do read and write handle short I/O correctly (less than the full buffer size)?
-- Does the driver check the result of `uiomove` for errors?
-- Does ioctl use `priv_check` for operations that require elevated privilege?
+- 附加是否设置了 `cdev->si_drv1 = sc`？
+- 分离是否在释放 softc 之前调用 `destroy_dev`？
+- 读取和写入是否正确处理了短 I/O（小于完整缓冲区大小）？
+- 驱动程序是否检查 `uiomove` 的结果是否有错误？
+- ioctl 是否对需要提升权限的操作使用 `priv_check`？
 
-### Locking
+### 锁定
 
-- Is every softc access covered by the softc's mutex?
-- Is the detach path drain-then-free, not free-then-drain?
-- Are sleeping waits done with `mtx_sleep` or `sx(9)` rather than `tsleep` with a mutex held?
-- Is there a discernible ordering of acquisitions (to avoid deadlock)?
+- 每个 softc 访问是否都被 softc 的互斥锁保护？
+- 分离路径是否是先排空再释放，而不是先释放再排空？
+- 等待睡眠是否使用 `mtx_sleep` 或 `sx(9)` 而不是在持有互斥锁时使用 `tsleep`？
+- 是否有可辨识的获取顺序（以避免死锁）？
 
-### Timing
+### 时序
 
-- Does the driver use `DELAY(9)`, `pause(9)`, or `callout(9)` rather than busy loops?
-- Does the driver avoid reading the TSC directly?
-- Does every wait have a bounded timeout, with a sensible error on exceed?
+- 驱动程序是否使用 `DELAY(9)`、`pause(9)` 或 `callout(9)` 而不是忙等待循环？
+- 驱动程序是否避免直接读取 TSC？
+- 每个等待是否有有界超时，并在超时时返回合理的错误？
 
-### Privilege
+### 权限
 
-- Does the driver call `priv_check` for all operations that should not be available to unprivileged users?
-- Does the driver use the correct privilege (`PRIV_DRIVER`, `PRIV_IO`, not `PRIV_ROOT`)?
-- Does the driver consider jailed callers, using `priv_check` which also calls `prison_priv_check`?
+- 驱动程序是否对所有不应提供给非特权用户的操作调用 `priv_check`？
+- 驱动程序是否使用了正确的权限（`PRIV_DRIVER`、`PRIV_IO`，而不是 `PRIV_ROOT`）？
+- 驱动程序是否考虑了被限制的调用者，使用也会调用 `prison_priv_check` 的 `priv_check`？
 
-### Detach and Unload
+### 分离 and Unload
 
-- Does detach drain all callouts (`callout_drain`)?
-- Does detach drain all taskqueues (`taskqueue_drain_all`)?
-- Does detach stop any kernel threads the driver has created (via condition variables or similar)?
-- Does detach release every resource attach allocated?
-- Can the module be unloaded at any time (no hangs on `kldunload`)?
+- 分离是否排空了所有 callout（`callout_drain`）？
+- 分离是否排空了所有 taskqueue（`taskqueue_drain_all`）？
+- 分离是否停止了驱动程序创建的任何内核线程（通过条件变量或类似方式）？
+- 分离是否释放了附加分配的每个资源？
+- 模块是否可以随时卸载（`kldunload` 不会挂起）？
 
-### VNET (if applicable)
+### VNET（如适用）
 
-- Does the driver register VNET sysinit/sysuninit for per-VNET state?
-- Does the driver use `V_` prefix macros for per-VNET variables?
-- Does the VNET move path allocate state on entry and free on exit?
-- Does the driver use `CURVNET_SET` / `CURVNET_RESTORE` when accessing a VNET other than the current one?
+- 驱动程序是否为逐 VNET 状态注册了 VNET sysinit/sysuninit？
+- 驱动程序是否为逐 VNET 变量使用 `V_` 前缀宏？
+- VNET 迁移路径是否在进入时分配状态并在退出时释放？
+- 在访问当前 VNET 以外的 VNET 时，驱动程序是否使用 `CURVNET_SET` / `CURVNET_RESTORE`？
 
-### Testing
+### 测试
 
-- Does the driver have a `make test` target (even if it just builds and loads)?
-- Has the driver been run through the attach-detach cycle at least 100 times?
-- Has the driver been loaded under both VirtIO and passthrough (if applicable)?
-- Has the driver been loaded inside at least one jail and one VNET jail?
-- Has the driver been built on at least amd64; ideally also on arm64?
+- 驱动程序是否有 `make test` 目标（即使它只是构建和加载）？
+- 驱动程序是否已经通过附加-分离循环至少 100 次？
+- 驱动程序是否在 VirtIO 和直通（如果适用）下都已加载？
+- 驱动程序是否已在至少一个 jail 和一个 VNET jail 内加载？
+- 驱动程序是否至少在 amd64 上构建过；理想情况下也在 arm64 上？
 
-### Documentation
+### 文档
 
-- Is there a README explaining what the driver does and how to build it?
-- Is there a manual page describing the driver's user-visible interface?
-- Is the PNP table complete enough that `kldxref` finds the driver for auto-loading?
+- 是否有 README 解释驱动程序的作用以及如何构建它？
+- 是否有描述驱动程序用户可见接口的手册页？
+- PNP 表是否足够完整，使得 `kldxref` 能够找到驱动程序进行自动加载？
 
-A driver that passes this checklist is well on its way to being virtualisation-ready. A driver that fails several items needs attention before it will behave well under the diverse environments of modern deployment. Run through the list for every driver you write; it is faster than debugging each issue individually when the driver hits a customer.
+通过此检查清单的驱动程序已经在虚拟化就绪的道路上走得很好。在多个项目上失败的驱动程序在能够在现代部署的多样化环境中良好运行之前需要注意。为您编写的每个驱动程序检查清单；当驱动程序交付给客户时，这比逐个调试每个问题更快。
 
-## Appendix: Sketching a bhyve Backend for vtedu
+## 附录：为 vtedu 草拟 bhyve 后端
 
-Challenge 5 asks the reader to write a `bhyve(8)` backend for the `vtedu` driver. This appendix sketches the architecture of such a backend at a level of detail useful for planning. It is not a complete implementation; writing one is the challenge. The goal here is to demystify the backend side of the VirtIO story so the challenge becomes tractable.
+挑战 5 要求读者为 `vtedu` 驱动程序编写一个 `bhyve(8)` 后端。本附录在有助于规划的详细程度上勾勒了这样一个后端的架构。这不是一个完整的实现；编写一个是挑战本身。这里的目标是揭开 VirtIO 后端侧的神秘面纱，使挑战变得易于处理。
 
-### Where the Code Lives
+### 代码位置
 
-The `bhyve(8)` user-space emulator lives under `/usr/src/usr.sbin/bhyve/`. Its source files are a mixture of CPU and chipset emulation, per-device emulators for different VirtIO types, and glue code that connects `bhyve(8)` to the `vmm(4)` kernel module. The relevant per-device files for VirtIO are:
+`bhyve(8)` 用户空间模拟器位于 `/usr/src/usr.sbin/bhyve/` 下。其源文件混合了 CPU 和芯片组模拟、不同 VirtIO 类型的每个设备模拟器，以及将 `bhyve(8)` 连接到 `vmm(4)` 内核模块的胶水代码。VirtIO 相关的每个设备文件有：
 
-- `/usr/src/usr.sbin/bhyve/pci_virtio_rnd.c`: virtio-rnd (random number generator). The simplest VirtIO backend. Read first.
+- `/usr/src/usr.sbin/bhyve/pci_virtio_rnd.c`：virtio-rnd（随机数生成器）。最简单的 VirtIO 后端。首先阅读。
 - `/usr/src/usr.sbin/bhyve/pci_virtio_block.c`: virtio-blk (block device).
 - `/usr/src/usr.sbin/bhyve/pci_virtio_net.c`: virtio-net (network).
 - `/usr/src/usr.sbin/bhyve/pci_virtio_9p.c`: virtio-9p (filesystem share).
 - `/usr/src/usr.sbin/bhyve/pci_virtio_console.c`: virtio-console (serial).
 
-Each of these is a few hundred to a couple of thousand lines of code. They share a common backend framework in `/usr/src/usr.sbin/bhyve/virtio.h` and `/usr/src/usr.sbin/bhyve/virtio.c`. The `pci_virtio_*.c` files above are per-device consumers of that framework; each one registers a `struct virtio_consts`, a set of virtqueue callbacks, and the device-specific config-space layout.
+每个都有几百到几千行代码。它们在 `/usr/src/usr.sbin/bhyve/virtio.h` 和 `/usr/src/usr.sbin/bhyve/virtio.c` 中共享一个公共后端框架。上述的 `pci_virtio_*.c` 文件是该框架的每个设备消费者；每个注册一个 `struct virtio_consts`、一组 virtqueue 回调和设备特定的配置空间布局。
 
-### The Framework Handles the Protocol
+### 框架处理协议
 
-The good news for a backend author is that `bhyve(8)` already implements the VirtIO protocol. Feature negotiation, descriptor-ring management, notification delivery, interrupt injection, all of it lives in the `virtio.c` framework. A new backend implements only the device-specific behaviour: what happens when a buffer arrives on the virtqueue, what config-space fields the device exposes, and how device-level events are generated.
+对于后端作者来说，好消息是 `bhyve(8)` 已经实现了 VirtIO 协议。特性协商、描述符环管理、通知传递、中断注入，所有这些都存在于 `virtio.c` 框架中。新的后端只实现设备特定行为：当缓冲区到达虚拟队列时会发生什么、设备暴露哪些配置空间字段、以及设备级事件如何生成。
 
-The framework-facing interface is a small set of callbacks, encapsulated in a `struct virtio_consts`.
+框架面向的接口是一小组回调，封装在 `struct virtio_consts` 中。
 
 ```c
 /* Sketch, not actual bhyve code. */
@@ -3676,11 +3651,11 @@ struct virtio_consts {
 };
 ```
 
-A new backend fills in this struct and registers it with the framework. The framework calls into the backend when the guest-side driver does interesting things (resets the device, notifies the virtqueue, reads or writes config space).
+新的后端填充此结构体并将其注册到框架。当客户机侧驱动程序执行有趣的操作（重置设备、通知虚拟队列、读取或写入配置空间）时，框架会调用后端。
 
-### Sketching the vtedu Backend
+### 草拟 vtedu 后端
 
-For `vtedu`, the backend is simple. It has one virtqueue, no config-space fields beyond the generic ones, and one feature bit (`VTEDU_F_UPPERCASE`). Its state is:
+对于 `vtedu`，后端很简单。它有一个虚拟队列，没有超出通用字段的配置空间字段，和一个特性位（`VTEDU_F_UPPERCASE`）。其状态如下：
 
 ```c
 struct pci_vtedu_softc {
@@ -3691,7 +3666,7 @@ struct pci_vtedu_softc {
 };
 ```
 
-The callbacks are small.
+回调函数很小。
 
 ```c
 static void
@@ -3716,7 +3691,7 @@ pci_vtedu_apply_features(void *vsc, uint64_t features)
 }
 ```
 
-The interesting callback is `vc_qnotify`, called when the guest notifies the virtqueue.
+有趣的回调是 `vc_qnotify`，当客户机通知虚拟队列时调用。
 
 ```c
 static void
@@ -3750,38 +3725,38 @@ pci_vtedu_qnotify(void *vsc, struct vqueue_info *vq)
 }
 ```
 
-That is the core of it. The `vq_has_descs`, `vq_getchain`, `vq_relchain`, and `vq_endchains` calls are framework helpers that unpack the virtqueue descriptors into `iovec` structures and repackage the results.
+这就是核心。`vq_has_descs`、`vq_getchain`、`vq_relchain` 和 `vq_endchains` 调用是将虚拟队列描述符解包到 `iovec` 结构并重新打包结果的框架辅助函数。
 
-### Connecting to the Device Table
+### 连接到设备表
 
-`bhyve(8)` maintains a table of device emulators; each backend registers itself at build time. The registration uses a `PCI_EMUL_TYPE(...)` macro (or similar) that adds the backend's vtable to a linker-set. Once registered, the `bhyve(8)` command line can reference the backend by name:
+`bhyve(8)` 维护一个设备模拟器表；每个后端在构建时注册自己。注册使用 `PCI_EMUL_TYPE(...)` 宏（或类似）将后端的虚函数表添加到链接器集中。一旦注册，`bhyve(8)` 命令行可以按名称引用后端：
 
 ```sh
 bhyve ... -s 7,virtio-edu guest0
 ```
 
-The `-s 7,virtio-edu` adds the `virtio-edu` device at PCI slot 7. When the guest boots, the FreeBSD kernel enumerates the PCI bus, finds the device with VirtIO vendor ID and the right device ID, and attaches `vtedu` to it.
+`-s 7,virtio-edu` 在 PCI 插槽 7 上添加 `virtio-edu` 设备。当客户机启动时，FreeBSD 内核枚举 PCI 总线，找到具有 VirtIO 供应商 ID 和正确设备 ID 的设备，并将 `vtedu` 附加到它。
 
-### What the Backend Must Verify
+### 后端必须验证的内容
 
-To make the backend correct, the author must verify:
+要使后端正确，作者必须验证：
 
-- The VirtIO device ID matches the driver's expectation (`VIRTIO_ID_EDU = 0xfff0`).
-- The feature-negotiation response matches what the driver expects (advertise `VTEDU_F_UPPERCASE` and `VIRTIO_F_VERSION_1`).
-- The virtqueue sizes are large enough for the driver's workload (256 is a reasonable default).
-- The config-space size matches what the driver reads (zero for `vtedu`).
+- VirtIO 设备 ID 与驱动程序的期望匹配（`VIRTIO_ID_EDU = 0xfff0`）。
+- 特性协商响应与驱动程序的期望匹配（播发 `VTEDU_F_UPPERCASE` 和 `VIRTIO_F_VERSION_1`）。
+- 虚拟队列的大小足够容纳驱动程序的工作负载（256 是合理的默认值）。
+- 配置空间大小与驱动程序的读取匹配（`vtedu` 为零）。
 
-### Testing the End-to-End Loop
+### 测试 the End-to-End Loop
 
-With both sides in place, the end-to-end test looks like this.
+双方都就位后，端到端测试如下所示。
 
-On the host, after building the backend and installing the modified `bhyve(8)`:
+在主机上，构建后端并安装修改后的 `bhyve(8)` 后：
 
 ```sh
 sudo bhyve ... -s 7,virtio-edu guest0
 ```
 
-Inside the guest, after copying and building `vtedu.c`:
+在客户机内部，复制并构建 `vtedu.c` 后：
 
 ```sh
 sudo kldload ./virtio_edu.ko
@@ -3790,61 +3765,61 @@ echo "hello world" > /dev/vtedu0
 cat /dev/vtedu0
 ```
 
-The expected output of `cat` is `HELLO WORLD` (uppercased by the backend).
+`cat` 的预期输出是 `HELLO WORLD`（由后端转换为大写）。
 
-If the output is `hello world` (not uppercased), the backend did not negotiate `VTEDU_F_UPPERCASE`. If the `echo` hangs, the virtqueue notification is not reaching the backend. If the `cat` hangs, the backend's interrupt injection is not reaching the guest. Each of these is a specific failure that the debugging techniques from the chapter can localise.
+如果输出是 `hello world`（未大写），则后端未协商 `VTEDU_F_UPPERCASE`。如果 `echo` 挂起，则虚拟队列通知未到达后端。如果 `cat` 挂起，则后端的注入中断未到达客户机。这些每个都是本章调试技术可以定位的特定故障。
 
-### Why This Exercise Is Worth the Effort
+### 为什么这个练习值得投入
 
-Writing a backend and a driver teaches both sides of the VirtIO story. The driver side is what most authors eventually write, but the backend side tells you *why* the VirtIO protocol is shaped the way it is. Feature bits make sense when you have to decide which to advertise. Virtqueue descriptors make sense when you have to unpack them. Interrupt delivery makes sense when you have to inject one.
+编写后端和驱动程序教会了 VirtIO 故事的两个方面。驱动程序侧是大多数作者最终会编写的，但后端侧告诉您*为什么* VirtIO 协议被塑造成这样。当您必须决定播发哪些特性位时，特性位就变得有意义了。当您必须解包它们时，虚拟队列描述符就变得有意义了。当您必须注入一个中断时，中断投递就变得有意义了。
 
-Completing Challenge 5 promotes you from "VirtIO user" to "VirtIO author", which is a different level of understanding. If the challenge feels large, tackle it in stages: first get the device to appear in the guest (verify with `pciconf -lv`), then get feature negotiation to work, then handle a single virtqueue message, then polish the full pipeline. Each stage is a separate commit and a separate satisfying milestone.
+完成挑战 5 将您从"VirtIO 用户"提升为"VirtIO 作者"，这是不同层次的理解。如果挑战感觉很大，请分阶段处理：首先让设备出现在客户机中（使用 `pciconf -lv` 验证），然后使特性协商工作，然后处理单个虚拟队列消息，最后完善整个流水线。每个阶段都是一个独立的提交和一个独立的令人满意的里程碑。
 
-This is the end of the chapter's technical material. The remaining prose ties together what you have learned and points forward to Chapter 31.
+这是本章技术内容的结束。剩下的文字将您所学的内容联系起来，并指向第 31 章。
 
-## Appendix: Running the Chapter's Techniques in CI
+## 附录：在 CI 中运行本章的技术
 
-Continuous integration is now a standard part of most driver projects. This short appendix describes how the chapter's techniques fit into a CI pipeline. The goal is to show that virtualisation and containerisation are not just runtime concerns; they are also practical tools for keeping a driver honest across changes.
+持续集成现在是大多数驱动程序项目的标准部分。这个简短的附录描述了本章的技术如何融入 CI 流水线。目标是展示虚拟化和容器化不仅仅是运行时关注点；它们也是确保驱动程序在变更中保持可靠性的实用工具。
 
-### Why CI Benefits from Virtualisation
+### 为什么 CI 受益于虚拟化
 
-A CI system is, among other things, a place where you need reproducible test environments. Running tests on bare metal is possible but fragile: the test machine accumulates state, different machines have different hardware, and failures are hard to separate from hardware quirks. Running tests inside a VM removes most of these problems. The VM is a clean slate at the start of each run, its "hardware" is uniform across test runs, and its failures are the driver's failures, not the host's.
+CI 系统是一个需要可重现测试环境的地方。在裸金属上运行测试是可能的但很脆弱：测试机器会累积状态，不同的机器有不同的硬件，故障很难与硬件问题分开。在 VM 内部运行测试消除了大多数这些问题。VM 在每次运行开始时是一个干净的状态，其"硬件"在测试运行间是一致的，其故障是驱动程序的故障，而不是主机的故障。
 
-For FreeBSD driver CI, the standard approach is to run a FreeBSD guest under `bhyve(8)` (if the CI host is FreeBSD) or under KVM/QEMU (if the CI host is Linux). The guest boots a FreeBSD image, loads the driver, runs the test harness, and exits. The whole cycle takes under a minute for a small driver, which means hundreds of tests per day against every commit.
+对于 FreeBSD 驱动程序 CI，标准方法是在 `bhyve(8)`（如果 CI 主机是 FreeBSD）或 KVM/QEMU（如果 CI 主机是 Linux）下运行 FreeBSD 客户机。客户机启动 FreeBSD 镜像，加载驱动程序，运行测试框架，然后退出。对于小型驱动程序，整个周期需要不到一分钟，这意味着每天对每个提交进行数百次测试。
 
-### A Minimal CI Flow for a VirtIO Driver
+### VirtIO 驱动程序的最小 CI 流程
 
-A reasonable flow for a VirtIO driver's CI is:
+VirtIO 驱动程序的 CI 的合理流程是：
 
-1. Check out the driver source.
-2. Build the driver against the target FreeBSD kernel (often using a cross-compile on the CI host).
-3. Start a FreeBSD VM with appropriate VirtIO devices.
-4. Copy the built module into the VM.
-5. SSH into the VM and load the module.
-6. Run the test harness.
-7. Capture the output.
-8. Shut down the VM.
-9. Report pass/fail.
+1. 检出驱动程序源代码。
+2. 针对目标 FreeBSD 内核构建驱动程序（通常在 CI 主机上使用交叉编译）。
+3. 启动具有适当 VirtIO 设备的 FreeBSD VM。
+4. 将构建好的模块复制到 VM 中。
+5. 通过 SSH 进入 VM 并加载模块。
+6. 运行测试框架。
+7. 捕获输出。
+8. 关闭 VM。
+9. 报告通过/失败。
 
-Steps 1 and 2 are unchanged from a non-VM workflow. Steps 3 through 9 are what virtualisation adds.
+步骤 1 和 2 与非 VM 工作流程相同。步骤 3 到 9 是虚拟化新增的内容。
 
-### Practical Tools
+### 实用工具
 
-For step 3, `vm-bhyve` is convenient on FreeBSD hosts. For Linux CI hosts, `virt-install` from libvirt is a standard tool. Both produce a running VM in a few seconds with a pre-built image.
+对于步骤 3，`vm-bhyve` 在 FreeBSD 主机上很方便。对于 Linux CI 主机，libvirt 的 `virt-install` 是标准工具。两者都使用预构建镜像在几秒内生成一个运行中的 VM。
 
-For step 4, a shared volume or a small SSH copy is usual. `virtfs` (9P) or `virtiofs` pass host directories into the guest; `scp` over a tap interface works as well.
+对于步骤 4，通常使用共享卷或小型 SSH 复制。`virtfs`（9P）或 `virtiofs` 将主机目录传递给客户机；通过 tap 接口的 `scp` 也可以工作。
 
-For step 5, pre-installed SSH keys and a static IP address (or a DHCP reservation) make the connection painless.
+对于步骤 5，预安装的 SSH 密钥和静态 IP 地址（或 DHCP 保留）使连接变得轻松。
 
-For steps 6 and 7, the test harness is whatever the driver author writes: a shell script, a C program, a Python harness. Whatever it is, it runs inside the VM.
+对于步骤 6 和 7，测试框架是驱动程序作者编写的任何内容：shell 脚本、C 程序、Python 框架。无论是什么，它都在 VM 内部运行。
 
-For step 8, `vm stop guest0 --force` (or equivalent) shuts the VM down rapidly. The image is discarded; the next run starts fresh.
+对于步骤 8，`vm stop guest0 --force`（或等效命令）快速关闭 VM。镜像被丢弃；下次运行从头开始。
 
-For step 9, the exit code of the test harness determines pass/fail. CI systems expect zero for success and nonzero for failure; be consistent.
+对于步骤 9，测试框架的退出代码决定通过/失败。CI 系统期望零表示成功，非零表示失败；请保持一致。
 
-### A Minimal Test Harness
+### 最小测试框架
 
-A simple pass/fail harness for a VirtIO driver might look like this.
+一个 VirtIO 驱动程序的简单通过/失败测试框架可能如下所示。
 
 ```sh
 #!/bin/sh
@@ -3882,34 +3857,34 @@ echo "PASS"
 exit 0
 ```
 
-Short, readable, and reports a clear result. CI scales with tests like this: add one per feature, run them all on every commit.
+简短、可读性强，并报告清晰的结果。CI 通过这样的测试进行扩展：每个特性添加一个测试，每次提交运行所有测试。
 
-### Scaling to Multiple Configurations
+### 扩展到多种配置
 
-A CI pipeline can run the same driver under multiple configurations by spinning up multiple VMs. Useful axes include:
+CI 流水线可以通过启动多个 VM 在多种配置下运行相同的驱动程序。有用的维度包括：
 
-- Kernel version (FreeBSD 14.3, 14.2, 13.5, -CURRENT).
-- Architecture (amd64, arm64 with an arm64 guest).
-- VirtIO feature set (force-disable certain features on the backend to exercise fallback paths).
-- Hypervisor (bhyve, QEMU/KVM, VMware) where support varies.
+- 内核版本（FreeBSD 14.3、14.2、13.5、-CURRENT）。
+- 架构（amd64、带 arm64 客户机的 arm64）。
+- VirtIO 特性集（在后端强制禁用某些特性以练习回退路径）。
+- 虚拟机监控程序（bhyve、QEMU/KVM、VMware），支持情况各不相同。
 
-Each configuration is an independent job that the CI system parallelises. The aggregate of "driver passes on every configuration" is a strong signal that the driver is robust.
+每个配置都是一个独立的任务，由 CI 系统并行处理。"驱动程序在每个配置上都通过"的汇总结果是一个强有力的信号，表明驱动程序是稳健的。
 
-### A Note on Hardware-in-the-Loop CI
+### 关于硬件在环 CI 的说明
 
-For drivers that talk to real hardware, CI needs a bare-metal or passthrough setup. This is more expensive and less common, but some projects maintain a small fleet of test machines for this purpose. The techniques from the chapter apply: a hardware test rig uses `ppt(4)` passthrough to give a guest access to a specific device, and the CI system drives the guest the same way it would drive a pure-VirtIO guest.
+对于与真实硬件通信的驱动程序，CI 需要裸金属或直通设置。这更昂贵且不太常见，但一些项目为此目的维护了一小批测试机器。本章的技术适用：硬件测试平台使用 `ppt(4)` 直通让客户机访问特定设备，CI 系统以驱动纯 VirtIO 客户机的相同方式驱动客户机。
 
-Hardware CI is slower to set up and more expensive to run. For most projects, pure-VirtIO CI is enough for the bulk of tests, with a small suite of hardware tests run at a slower cadence.
+硬件 CI 设置较慢且运行成本更高。对于大多数项目，纯 VirtIO CI 足以满足大部分测试，只有一小套硬件测试以较慢的频率运行。
 
-### The Payoff
+### 回报
 
-CI that exercises a driver under realistic conditions catches regressions quickly, while the fix is still fresh in the author's mind. A regression caught at commit-time takes minutes to fix; a regression caught weeks later during a release candidate takes hours. Virtualisation makes the former affordable, and that is one of the strongest arguments for taking the techniques in this chapter seriously.
+在现实条件下运行驱动程序的 CI 能快速捕获回归问题，此时修复方法在作者脑海中仍然新鲜。在提交时捕获的回归只需几分钟修复；在数周后的候选发布期间捕获的回归需要数小时。虚拟化使前者变得可行，这是认真对待本章技术的最有力论据之一。
 
-## Appendix: Commands Cheat Sheet
+## 附录：命令速查表
 
-A compact list of the commands a driver author uses most often when working with virtualisation and containerisation on FreeBSD. Keep this page open while working through the labs.
+驱动程序作者在 FreeBSD 上进行虚拟化和容器化工作时最常用命令的紧凑列表。在做实验时保持此页打开。
 
-### Host-Side Virtualisation
+### 主机侧虚拟化
 
 ```sh
 # Check hypervisor extensions
@@ -3933,7 +3908,7 @@ bhyvectl --vm=guest0 --destroy
 bhyvectl --vm=guest0 --suspend=normal
 ```
 
-### Guest-Side Inspection
+### 客户机侧检查
 
 ```sh
 # Is this a guest?
@@ -3950,7 +3925,7 @@ sysctl dev.virtio_pci
 sysctl dev.virtqueue
 ```
 
-### PCI Passthrough
+### PCI 直通
 
 ```sh
 # Mark a device as passthrough-capable (in /boot/loader.conf)
@@ -3962,7 +3937,7 @@ dmesg | grep -i dmar      # Intel
 dmesg | grep -i amdvi     # AMD
 ```
 
-### Jails
+### 监狱
 
 ```sh
 # Create and manage jails
@@ -3991,7 +3966,7 @@ jail -c name=vnet-test vnet vnet.interface=epair0b path=/jails/vnet-test persist
 ifconfig -j vnet-test epair0b
 ```
 
-### Resource Limits
+### 资源限制
 
 ```sh
 # rctl
@@ -4001,7 +3976,7 @@ rctl -h jail:test
 rctl -l jail:test
 ```
 
-### Observability
+### 可观测性
 
 ```sh
 # Interrupt rate
@@ -4018,7 +3993,7 @@ ktrace -i -p $(pgrep bhyve)
 kdump -p $(pgrep bhyve)
 ```
 
-### Module Lifecycle
+### 模块生命周期
 
 ```sh
 # Build, load, test, unload
@@ -4029,6 +4004,6 @@ kldstat -v | grep mydriver
 sudo kldunload mydriver
 ```
 
-These are the day-to-day commands. A quick-reference card like this, pinned to a wall or kept in a terminal tab, saves hours over the course of a project.
+这些是日常命令。像这样的快速参考卡，钉在墙上或保持在终端标签页中，可以在一个项目过程中节省数小时。
 
-With that, the chapter is complete.
+至此，本章完成。

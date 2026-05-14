@@ -106,7 +106,7 @@ estimatedReadTime: 210
 在开始本章之前，确认：
 
 - 你的驱动源码匹配 `examples/part-02/ch09-reading-and-writing/stage3-echo/` 下第9章阶段 3 的示例。如果不匹配，在这里停下并先将其调整到该形状。第10章假设它已经如此。
-- 你的实验机器运行带有匹配 `/usr/src` 的 FreeBSD 14.3。 The APIs and file layouts you will see in this chapter align with that release.
+- 你的实验机器运行带有匹配 `/usr/src` 的 FreeBSD 14.3。本章中的 API 和文件布局与该版本对齐。
 - 你仔细阅读了第9章，包括附录 E（一页速查表）。那里的读写"三行骨架"正是我们即将扩展的内容。
 - 你能够熟练加载和卸载自己的模块、观察 `dmesg`、读取 `sysctl dev.myfirst.0.stats`，以及在测试让你惊讶时读取 `truss(1)` 或 `ktrace(1)` 的输出。
 
@@ -227,7 +227,7 @@ estimatedReadTime: 210
 
 顺序很重要。每一节都假设前一节的更改已到位。如果你跳过，你会进入不编译或以令人惊讶的方式行为的代码。像往常一样，慢路径就是快路径。
 
-### Wrapping Up Section 1
+### 第1节总结
 
 我们命名了非缓冲和缓冲 I/O 之间的区别，并命名了各自的成本和收益。我们选择了一个可以不断回顾的类比（桶与管道）。我们讨论了缓冲在驱动代码中的回报、常见的反压策略，以及我们为本章其余部分承诺的策略。我们为驱动整个数据结构搭好了舞台：循环缓冲区。
 
@@ -237,7 +237,7 @@ estimatedReadTime: 210
 
 循环缓冲区是那种比我们现在使用的操作系统更古老的数据结构之一。它出现在串口芯片、音频采样队列、网络接收路径、键盘事件队列、追踪缓冲区、`dmesg(8)`、`printf(3)` 库以及几乎所有一段代码想要留下字节供另一段代码稍后提取的地方。结构简单。实现简短。初学者在其中犯的 bug 是可预测的。我们将用一次、在用户态、小心地构建它，然后在第3节中将验证过的版本带入驱动。
 
-### What a Circular Buffer Is
+### 什么是循环缓冲区
 
 线性缓冲区是可能工作的最简单的东西：一块内存加上一个"下一个空闲字节"索引。你从头开始写入，到达末尾时停止。一旦填满，你要么增长它、复制它，要么停止接受新数据。
 
@@ -379,7 +379,7 @@ size_t cbuf_read(struct cbuf *cb, void *dst, size_t n);
 
 两个函数中恰好有一个步骤会环绕。要么目标环绕（写入中），要么源环绕（读取中），但绝不会两者同时。这是使实现可管理的关键属性：缓冲区的环绕是内部数据的属性，不是调用者数据的属性，所以调用者的源和目标总是被视为普通的连续内存。
 
-### Avoiding Overwrites and Data Loss
+### 避免覆盖和数据丢失
 
 初学者常犯的一个错误是在缓冲区填满时让 `cbuf_write` 覆盖旧数据，理论是"更新的数据更重要"。这有时是正确的策略，正如我们在第1节中指出的，但它必须是*刻意的*设计选择，且对调用者可见，而不是状态的静默变更。传统的默认值是 `cbuf_write` 返回它实际写入的字节数，调用者应该查看返回值。
 
@@ -387,7 +387,7 @@ size_t cbuf_read(struct cbuf *cb, void *dst, size_t n);
 
 如果你想要一个具有覆盖语义的循环缓冲区（例如 `dmesg` 风格的日志），最干净的方法是写一个单独的 `cbuf_overwrite` 函数并保持 `cbuf_write` 严格。两个不同的名字意味着两个不同的意图，未来的代码读者不必猜测哪种行为生效。
 
-### Implementing It in Userland
+### 在用户态实现
 
 学习这个结构的正确方式是在用户态输入一次并通过一些小测试运行它，然后才让内核信任它。相同的源码可以几乎不变地移入内核模块，除了分配和释放调用。
 
@@ -1485,9 +1485,9 @@ $ dd if=/dev/myfirst of=/dev/null bs=512 2>/tmp/dd-r
 
 ## 第5节：实现非阻塞 I/O
 
-到目前为止，当调用者请求无法立即满足的传输时，驱动一直做两件事之一. 它返回零（在读取时，模仿文件结束）或在中途停止且没有传输字节（在写入时，告诉用户"接受了零字节"）. 这两种行为都不是真正的字符设备应该做的. 本节用两种正确行为替换两者: a blocking wait for the default case, and a clean `EAGAIN` for callers that opened the descriptor non-blocking.
+到目前为止，当调用者请求无法立即满足的传输时，驱动一直做两件事之一. 它返回零（在读取时，模仿文件结束）或在中途停止且没有传输字节（在写入时，告诉用户"接受了零字节"）. 这两种行为都不是真正的字符设备应该做的. 本节用两种正确行为替换两者：默认情况下的阻塞等待，以及为非阻塞描述符调用者提供的干净 `EAGAIN`。
 
-在触及驱动之前，让我们确保理解"非阻塞"在信任边界两侧意味着什么 from each side of the trust boundary. That vocabulary is what ties the implementation together.
+在触及驱动之前，让我们确保从信任边界的每一侧理解"非阻塞"的含义。该词汇表是将实现联系在一起的基础。
 
 ### 什么是非阻塞 I/O
 
@@ -1503,7 +1503,7 @@ $ dd if=/dev/myfirst of=/dev/null bs=512 2>/tmp/dd-r
 - 当描述符有 `O_DIRECT` 时设置 `IO_DIRECT`.
 - 当描述符有 `O_FSYNC` 时在 `d_write` 上设置 `IO_SYNC`.
 
-转换比看起来更简单. /usr/src/sys/fs/devfs/devfs_vnops.c 中的 `CTASSERT` 声明 `O_NONBLOCK == IO_NDELAY`. 位值的选择使两个名称可互换, 你可以根据哪个约定更清晰写 `(ioflag & IO_NDELAY)` 或 `(ioflag & O_NONBLOCK)`. 两者都有效. FreeBSD 源码树更常使用 `IO_NDELAY`，所以我们遵循它.
+转换比看起来更简单。`/usr/src/sys/fs/devfs/devfs_vnops.c` 中的 `CTASSERT` 声明 `O_NONBLOCK == IO_NDELAY`。位值的选择使两个名称可互换，你可以根据哪个约定更清晰写 `(ioflag & IO_NDELAY)` 或 `(ioflag & O_NONBLOCK)`。两者都有效。FreeBSD 源码树更常使用 `IO_NDELAY`，所以我们遵循它。
 
 ### 非阻塞行为何时有用
 
@@ -1515,7 +1515,7 @@ $ dd if=/dev/myfirst of=/dev/null bs=512 2>/tmp/dd-r
 
 ### IO_NDELAY 标志：它如何流向驱动
 
-追踪一次流程，这样你知道标志从哪里来. 用户在设置了 `O_NONBLOCK` 的描述符上调用 `read(fd, buf, n)`. Inside the kernel:
+追踪一次流程，这样你知道标志从哪里来。用户在设置了 `O_NONBLOCK` 的描述符上调用 `read(fd, buf, n)`。在内核内部：
 
 1. `sys_read` 查找文件描述符并找到 `fp->f_flag` 包含 `O_NONBLOCK` 的 `struct file`.
 2. `vn_read` 或（对于字符设备）`devfs_read_f` 通过屏蔽 `fp->f_flag` 中驱动关心的位来组装 `ioflag`. 具体来说，它计算 `ioflag = fp->f_flag & (O_NONBLOCK | O_DIRECT);`.
@@ -1580,7 +1580,7 @@ while (cbuf_used(&sc->cb) == 0) {
 
 第四个是 **拆离检查**. `mtx_sleep` 返回后，可能 `myfirst_detach` 已开始且 `sc->is_attached` 现在为零. 我们检查并在如果是时返回 `ENXIO`. 这防止读取针对部分拆除的驱动继续进行. 拆离代码路径必须在拆除互斥锁之前调用 `wakeup(&sc->cb)` 来释放任何睡眠者；我们将在下面添加该调用.
 
-### The Writer Side
+### 写入侧
 
 写入路径是镜像:
 
@@ -1744,7 +1744,7 @@ myfirst_write(struct cdev *dev, struct uio *uio, int ioflag)
 
 ### 在拆离时唤醒睡眠者
 
-我们还需要教会 `myfirst_detach` 释放任何睡眠者. The pattern is:
+我们还需要教会 `myfirst_detach` 释放任何睡眠者。模式如下：
 
 ```c
 static int
@@ -2045,7 +2045,7 @@ main(int argc, char *argv[])
 }
 ```
 
-有了这个工具，你可以用现实大小驱动驱动. For example:
+有了这个工具，你可以用现实大小驱动驱动。例如：
 
 ```sh
 $ ./rw_myfirst_v2 fill 4096
@@ -2497,15 +2497,15 @@ clean:
 
 **`sc->bytes_read`, `sc->bytes_written`。** 由两个 I/O 处理程序在 `sc->mtx` 下更新. 由 sysctl 通过 `SYSCTL_ADD_U64` 直接读取（没有处理程序插入）. sysctl 读取在大多数架构上是单个 64 位加载，这在某些 32 位平台上是撕裂读取风险，但在 amd64 和 arm64 上是原子的. *大部分安全；见下面的撕裂读取说明。*
 
-**`sc->open_count`, `sc->active_fhs`.** Updated under `sc->mtx`. Read by sysctl directly. Same torn-read consideration.
+**`sc->open_count`、`sc->active_fhs`。** 在 `sc->mtx` 下更新。由 sysctl 直接读取。相同的撕裂读取考虑。
 
 **`sc->is_attached`.** Read by every handler at entry, set by attach (without lock, before `make_dev`), cleared by detach (under lock). The unlocked write at attach time is safe because no one else can see the device yet. The locked clear at detach time is correctly ordered with the wakeup. *看起来安全。*
 
-**`sc->cdev`, `sc->cdev_alias`.** Set by attach, cleared by detach. Once attach is done, these are stable for the lifetime of the device. The handlers reach the softc through `dev->si_drv1` (set during attach) and never dereference these directly during I/O. *Safe by construction.*
+**`sc->cdev`、`sc->cdev_alias`。** 由 attach 设置，由 detach 清除。一旦 attach 完成，它们在设备生命周期内稳定。处理程序通过 `dev->si_drv1`（在 attach 期间设置）到达 softc，在 I/O 期间从不直接解引用这些。*构造上安全。*
 
-**`sc->rsel`, `sc->wsel`.** The `selinfo` machinery is internally locked (it uses the kernel's `selspinlock` and per-mutex `knlist` if you initialise one). For pure `select(2)`/`poll(2)` use, the `selrecord` and `selwakeup` calls handle their own concurrency. *Safe.*
+**`sc->rsel`、`sc->wsel`。** `selinfo` 机制内部加锁（它使用内核的 `selspinlock` 和每互斥锁 `knlist`，如果你初始化了一个）。对于纯 `select(2)`/`poll(2)` 使用，`selrecord` 和 `selwakeup` 调用处理自己的并发。*安全。*
 
-**`sc->open_count` and friends, again.** The torn-read note above is worth being explicit about. On 32-bit platforms (i386, armv7), a 64-bit field can be split across two memory operations, and a concurrent write can yield a read that contains the high half of one value and the low half of another (a "torn read"). The chapter is targeting amd64 where this is not an issue, but it is the kind of thing a real driver should think about. The fix, if needed, is to add a sysctl handler (like the `cb_used` one) that takes the mutex around the load.
+**`sc->open_count` 和朋友们，再议。** 上面的撕裂读取注释值得明确说明。在 32 位平台（i386、armv7）上，64 位字段可以跨两次内存操作分割，并发写入可能产生包含一个值的高半部分和另一个值的低半部分的读取（"撕裂读取"）。本章针对 amd64，这不是问题，但这是真正的驱动应该考虑的事情。修复方法（如果需要）是添加一个 sysctl 处理程序（像 `cb_used` 那样），在加载周围持有互斥锁。
 
 上面的审计给出了健康证明. 更大的重构机会不是竞态条件而是*代码形状*：缓冲区逻辑与 I/O 逻辑混合的地方、辅助函数可以澄清意图的地方、以及第11章可以在不触及 I/O 处理程序的情况下引入新锁类别的地方.
 
@@ -2707,11 +2707,11 @@ myfirst_write(struct cdev *dev, struct uio *uio, int ioflag)
  */
 ```
 
-That comment is enough for Chapter 11 to either follow the same convention or to deliberately change it. A driver that explains its own rules makes future maintenance easier; a driver that does not explain its rules leaves every future reader to infer them from the source, which is slow and error-prone.
+这个注释足以让第11章要么遵循相同的约定，要么刻意改变它。解释自己规则的驱动使未来维护更容易；不解释规则的驱动让每个未来的读者从源码推断规则，这是缓慢且容易出错的。
 
-### Splitting `cbuf` Out of `myfirst.c`
+### 将 `cbuf` 从 `myfirst.c` 中拆分出来
 
-In Stage 2 and Stage 3, the `cbuf` source lived alongside `myfirst.c` in the same module directory but in its own `.c` file. The Makefile is updated to compile both:
+在阶段 2 和阶段 3 中，`cbuf` 源码与 `myfirst.c` 并列存放在同一模块目录中，但有自己的 `.c` 文件。Makefile 被更新为编译两者：
 
 ```make
 KMOD=    myfirst
@@ -2723,19 +2723,19 @@ SRCS+=   device_if.h bus_if.h
 
 两个小细节值得注意。
 
-The first is that `cbuf.c` declares its own `MALLOC_DEFINE`. Each `MALLOC_DEFINE` for the same tag in the same module would be a duplicate definition; we therefore put the declaration in exactly one source file (`cbuf.c`) and an `extern` declaration in `cbuf.h` if needed. In our setup, the tag is local to `cbuf.c` and no external use is needed.
+第一点是 `cbuf.c` 声明了自己的 `MALLOC_DEFINE`。同一模块中相同标签的每个 `MALLOC_DEFINE` 都将是重复定义；因此我们将声明恰好放在一个源文件（`cbuf.c`）中，并在需要时在 `cbuf.h` 中放一个 `extern` 声明。在我们的设置中，标签是 `cbuf.c` 的局部标签，不需要外部使用。
 
-The second is that `cbuf.c` does not need any of the `myfirst` headers. It is a self-contained library that the driver happens to use. If you ever wanted to share `cbuf` with a second driver, you could pull it out into its own KLD or into `/usr/src/sys/sys/cbuf.h` and `/usr/src/sys/kern/subr_cbuf.c` (a hypothetical placement). The discipline of keeping `cbuf` self-contained makes that possible.
+第二点是 `cbuf.c` 不需要任何 `myfirst` 头文件。它是一个自包含的库，驱动碰巧使用它。如果你曾想与第二个驱动共享 `cbuf`，你可以将其拉出到自己的 KLD 中，或放到 `/usr/src/sys/sys/cbuf.h` 和 `/usr/src/sys/kern/subr_cbuf.c`（假设的放置位置）。保持 `cbuf` 自包含的纪律使这成为可能。
 
-### Naming Conventions
+### 命名约定
 
-A small but useful pattern: name your buffer-related fields and functions consistently. We have used `sc->cb` for the buffer, `cbuf_*` for buffer functions, `myfirst_buf_*` for the driver's wrappers. The pattern lets a reader scan the code and instantly know whether a function is touching the raw buffer (`cbuf_*`) or going through the locked driver wrappers (`myfirst_buf_*`).
+一个小但有用的模式：一致地命名缓冲区相关的字段和函数。我们使用 `sc->cb` 表示缓冲区，`cbuf_*` 表示缓冲区函数，`myfirst_buf_*` 表示驱动的封装。该模式让读者扫描代码时立即知道函数是触及原始缓冲区（`cbuf_*`）还是通过带锁的驱动封装（`myfirst_buf_*`）。
 
-Avoid mixing styles. Calling the buffer `sc->ring` in some places and `sc->cb` in others, or `cbuf_get` and `cbuf_read`, makes the code harder to skim. Pick one set of names and use them throughout.
+避免混合风格。在某些地方调用缓冲区 `sc->ring` 而在其他地方调用 `sc->cb`，或者 `cbuf_get` 和 `cbuf_read`，会使代码更难浏览。选择一组名称并始终如一地使用。
 
-### Defending Against Buffer-Size Surprises
+### 防御缓冲区大小意外
 
-The `MYFIRST_BUFSIZE` macro determines the capacity of the ring. Right now it is hard-coded to 4096. There is nothing wrong with that, but a `sysctl` knob (read-only) that exposes the value, plus a `module_param`-style override at module load time, would make the driver more usable in tests without needing to recompile.
+`MYFIRST_BUFSIZE` 宏决定了环形缓冲区的容量。目前它被硬编码为 4096。这没有问题，但一个暴露该值的 `sysctl` 旋钮（只读），加上模块加载时的 `module_param` 风格覆盖，将使驱动在测试中更可用，而无需重新编译。
 
 这是使用 `TUNABLE_INT` 的加载时覆盖模式：
 
@@ -2746,49 +2746,49 @@ SYSCTL_INT(_hw_myfirst, OID_AUTO, bufsize, CTLFLAG_RDTUN,
     &myfirst_bufsize, 0, "Default buffer size for new myfirst attaches");
 ```
 
-`TUNABLE_INT` reads the value from the kernel environment at boot or `kldload` time. A user can set it from the loader prompt (`set hw.myfirst.bufsize=8192`) or by running `kenv hw.myfirst.bufsize=8192` before `kldload`. The `CTLFLAG_RDTUN` flag indicates "read-only at runtime, but tunable at load time." After load, `sysctl hw.myfirst.bufsize` shows the chosen value.
+`TUNABLE_INT` 在启动或 `kldload` 时从内核环境读取该值。用户可以从 loader 提示符设置（`set hw.myfirst.bufsize=8192`）或在 `kldload` 之前运行 `kenv hw.myfirst.bufsize=8192`。`CTLFLAG_RDTUN` 标志表示"运行时只读，但加载时可调"。加载后，`sysctl hw.myfirst.bufsize` 显示所选值。
 
-然后在 `myfirst_attach` 中，在 `cbuf_init` 调用中使用 `myfirst_bufsize` 而不是 `MYFIRST_BUFSIZE`。 The change is small but useful: now you can experiment with different buffer sizes without rebuilding the module.
+然后在 `myfirst_attach` 中，在 `cbuf_init` 调用中使用 `myfirst_bufsize` 而不是 `MYFIRST_BUFSIZE`。更改很小但有用：现在你可以试验不同的缓冲区大小而无需重新构建模块。
 
-### Goals for the Next Milestone
+### 下一个里程碑的目标
 
 第11章带驱动去的地方：
 
-- The single mutex you have today protects everything. Chapter 11 will discuss whether a single lock is the right design under heavy contention, whether sleepable locks (`sx_*`) would be more appropriate, and how to reason about lock ordering when multiple subsystems get involved.
-- The blocking path uses `mtx_sleep`, which is the right primitive for this kind of work. Chapter 11 will introduce `cv_wait(9)` (condition variables) as a more structured alternative for some patterns, and discuss when each is preferable.
-- The wake-up strategy uses `wakeup(9)` (wake everyone). Chapter 11 will discuss `wakeup_one(9)` and the thundering-herd problem, and when each is appropriate.
-- The cbuf is intentionally not thread-safe by itself. Chapter 11 will revisit this decision and discuss the tradeoffs of building locking *into* the data structure versus leaving it to the caller.
-- The detach path's "wait for descriptors to close" rule is conservative. Chapter 11 will discuss alternative strategies (forced revocation, reference counting at the cdev level, the `destroy_dev_drain(9)` mechanism) for drivers that need to detach despite open descriptors.
+- 你今天拥有的单个互斥锁保护一切。第11章将讨论在重度竞争下单个锁是否是正确的设计、可睡眠锁（`sx_*`）是否更合适、以及当多个子系统参与时如何推理锁排序。
+- 阻塞路径使用 `mtx_sleep`，这是此类工作的正确原语。第11章将引入 `cv_wait(9)`（条件变量）作为某些模式的更结构化替代方案，并讨论何时各有优劣。
+- 唤醒策略使用 `wakeup(9)`（唤醒所有人）。第11章将讨论 `wakeup_one(9)` 和惊群问题，以及何时各有适用。
+- cbuf 有意设计为自身非线程安全。第11章将重新审视这个决策，并讨论将锁定构建*到*数据结构中与留给调用者的权衡。
+- 拆离路径的"等待描述符关闭"规则是保守的。第11章将讨论替代策略（强制撤销、cdev 级别的引用计数、`destroy_dev_drain(9)` 机制），适用于需要在描述符打开时拆离的驱动。
 
-You do not need to know any of this material yet. The point is that the current code's *shape* is what makes those topics approachable in Chapter 11. You can swap the mutex for an `sx` lock without touching the helpers' signatures. You can swap `wakeup` for `wakeup_one` with one-line changes. You can introduce a per-reader sleep channel without restructuring the I/O handlers. The refactor pays off as soon as you start asking the next chapter's questions.
+你还不需要知道这些材料中的任何一个。要点是当前代码的*形状*使这些主题在第11章中变得可接近。你可以在不触及辅助函数签名的情况下将互斥锁交换为 `sx` 锁。你可以用一行更改将 `wakeup` 交换为 `wakeup_one`。你可以引入每读取者睡眠通道而无需重构 I/O 处理程序。重构在你开始问下一章的问题时立即产生回报。
 
-### A Reading Order for the Next Chapter
+### 下一章的阅读顺序
 
-When you start Chapter 11, three files in `/usr/src/sys` will repay careful reading.
+当你开始第11章时，`/usr/src/sys` 中的三个文件值得仔细阅读。
 
-`/usr/src/sys/kern/subr_sleepqueue.c` is where `mtx_sleep`, `tsleep`, and `wakeup` are implemented. Read it once for context. The implementation is more elaborate than the man pages suggest, but the core of it (chan-keyed sleep queues, atomic dequeue on wake) is straightforward.
+`/usr/src/sys/kern/subr_sleepqueue.c` 是 `mtx_sleep`、`tsleep` 和 `wakeup` 实现的地方。阅读一次以获取上下文。实现比手册页暗示的更复杂，但其核心（通道键控的睡眠队列、唤醒时的原子出队）是直接的。
 
-`/usr/src/sys/sys/sx.h` and `/usr/src/sys/kern/kern_sx.c` together explain the sleepable-shared-exclusive lock. We mentioned `sx` above as an alternative to `mtx`; reading the actual implementation is the best way to understand the tradeoffs.
+`/usr/src/sys/sys/sx.h` 和 `/usr/src/sys/kern/kern_sx.c` 一起解释了可睡眠共享排他锁。我们在上面提到 `sx` 作为 `mtx` 的替代方案；阅读实际实现是理解权衡的最佳方式。
 
-`/usr/src/sys/sys/condvar.h` and `/usr/src/sys/kern/kern_condvar.c` document the `cv_wait` family of condition-variable primitives. Like `mtx_sleep`, they build on the kernel's sleep-queue machinery in `subr_sleepqueue.c`, but they expose a distinct structured API where each wait point has its own named `struct cv` instead of an arbitrary address as the channel. Chapter 11 will explain when to prefer each, and why a dedicated `struct cv` is often the cleaner choice for a well-defined wait condition.
+`/usr/src/sys/sys/condvar.h` 和 `/usr/src/sys/kern/kern_condvar.c` 记录了 `cv_wait` 系列条件变量原语。像 `mtx_sleep` 一样，它们构建在 `subr_sleepqueue.c` 中内核的睡眠队列机制之上，但它们暴露了一个不同的结构化 API，其中每个等待点都有自己的命名 `struct cv`，而不是任意地址作为通道。第11章将解释何时优先选择每种方式，以及为什么专用的 `struct cv` 通常是明确定义的等待条件的更清晰选择。
 
-These are not required reading; they are the next step on a long path you are clearly already on.
+这些不是必读材料；它们是你显然已经踏上的漫长道路上的下一步。
 
 ### 第7节总结
 
-The driver is now in the shape Chapter 11 wants. The buffer abstraction is in its own file, exercised in userland, and called from the driver through a small set of locked wrappers. The locking strategy is documented in a comment that names exactly what the mutex protects and what the rules are. The blocking path is correct, the non-blocking path is correct, the poll path is correct, and the detach path correctly waits for and wakes any sleepers.
+驱动现在处于第11章想要的形状。缓冲区抽象在自己的文件中，在用户态经过测试，并通过一小组带锁封装从驱动调用。锁定策略记录在注释中，精确命名了互斥锁保护什么以及规则是什么。阻塞路径正确，非阻塞路径正确，poll 路径正确，拆离路径正确等待并唤醒任何睡眠者。
 
-Most of what you do in Chapter 11 will be additive to this base, not a rewrite of it. The patterns we have built (lock around state changes, sleep with the mutex as interlock, wake on every transition) are the same patterns the rest of the kernel uses. The vocabulary is the same, the primitives are the same, the discipline is the same. You are close to being able to read most character-device drivers in the tree without help.
+你在第11章做的大部分工作将是对此基础的增量添加，而不是重写。我们构建的模式（围绕状态变化锁定、以互斥锁作为互锁睡眠、每次转换时唤醒）与内核其余部分使用的模式相同。词汇相同，原语相同，纪律相同。你已接近能够在没有帮助的情况下阅读树中大多数字符设备驱动。
 
-Before we move on to the chapter's supplementary topics and the labs, take a moment to look at your own source. The Stage 4 driver should be roughly 500 lines of code (`myfirst.c`) plus about 110 lines of `cbuf.c` and 20 lines of `cbuf.h`. The total is small, the layering is clean, and almost every line is doing something specific. That density is what well-shaped driver code looks like.
+在我们进入本章的补充主题和实验之前，花点时间看看你自己的源码。阶段 4 驱动应该大约 500 行代码（`myfirst.c`）加上大约 110 行 `cbuf.c` 和 20 行 `cbuf.h`。总量很小，分层清晰，几乎每一行都在做特定的事情。这种密度就是形状良好的驱动代码的样子。
 
-## Section 8: Three Supplementary Topics
+## 第8节：三个补充主题
 
-This section covers three topics that often appear alongside buffered I/O in the real world. Each one is large enough to fill an entire chapter on its own; we are not going to do that. Instead we are going to introduce each at the level a reader of this book needs in order to recognise the pattern, talk about it sensibly, and know where to look when the time comes to use it. The deeper treatments come later, in the chapters where each topic is the main subject.
+本节涵盖现实中经常与缓冲 I/O 一起出现的三个主题。每个主题都足够大，可以独自填满一整章；我们不打算那样做。相反，我们将以本书读者识别模式、明智地讨论它、并在需要使用时知道去哪找所需的水平来介绍每个主题。更深入的处理在后面的章节中进行，那里每个主题都是主要主题。
 
-The three topics are: `d_mmap(9)` for letting user space map a kernel buffer; zero-copy considerations and what they really mean; and the readahead and write-coalescing patterns used by high-throughput drivers.
+三个主题是：让用户空间映射内核缓冲区的 `d_mmap(9)`；零拷贝考虑及其真正含义；以及高吞吐量驱动使用的预读和写合并模式。
 
-### Topic 1: `d_mmap(9)` and Mapping a Kernel Buffer
+### 主题 1：`d_mmap(9)` 和映射内核缓冲区
 
 `d_mmap(9)` is the character-device callback that the kernel invokes when a user-space program calls `mmap(2)` on `/dev/myfirst`. The handler's job is to translate a *file offset* into a *physical address* the VM system can map into the user's process. The signature is:
 
@@ -2903,7 +2903,7 @@ first 64 bytes:
 - 用户空间想要查看或处理大缓冲区中的特定位置而不复制整个内容.
 - 驱动代表硬件，其寄存器或 DMA 区域可作为内存寻址（例如，GPU 的命令 FIFO）.
 
-对于我们的伪设备，`d_mmap` 主要是一个学习练习. Building it teaches you the call signature, the relationship to the VM system, and the `vtophys`/`contigmalloc` distinction. 真正的生产用途在你编写需要吞吐量的驱动时出现.
+对于我们的伪设备，`d_mmap` 主要是一个学习练习。构建它教你调用签名、与 VM 系统的关系以及 `vtophys`/`contigmalloc` 的区别。真正的生产用途在你编写需要吞吐量的驱动时出现。
 
 ### 主题 2：零拷贝考虑
 
@@ -2999,22 +2999,22 @@ first 64 bytes:
 
 **步骤：**
 
-1. Create `examples/part-02/ch10-handling-io-efficiently/stage2-circular/`.
-2. Copy `cbuf.h` from your userland directory into the new directory.
-3. Type the kernel-side `cbuf.c` from Section 3 (this is the `MALLOC_DEFINE`-using version).
-4. Copy `myfirst.c` from `examples/part-02/ch09-reading-and-writing/stage3-echo/` into the new directory.
-5. Modify `myfirst.c` to use the cbuf abstraction. The changes are:
-   - Add `#include "cbuf.h"` near the top.
-   - Replace `char *buf; size_t buflen, bufhead, bufused;` with `struct cbuf cb;` in the softc.
-   - Update `myfirst_attach` to call `cbuf_init(&sc->cb, MYFIRST_BUFSIZE)`. Update the failure path to call `cbuf_destroy`.
-   - Update `myfirst_detach` to call `cbuf_destroy(&sc->cb)`.
-   - Replace `myfirst_read` and `myfirst_write` with the loop-and-bounce versions from Section 3.
-   - Update the sysctl handlers as in Section 3 (use the `myfirst_sysctl_cb_used` and `myfirst_sysctl_cb_free` helpers).
-6. Update the `Makefile` to build both source files: `SRCS= myfirst.c cbuf.c device_if.h bus_if.h`.
-7. Build with `make`. Fix any compilation errors.
-8. Load with `kldload ./myfirst.ko` and verify with `dmesg | tail`.
+1. 创建 `examples/part-02/ch10-handling-io-efficiently/stage2-circular/`。
+2. 从你的用户态目录复制 `cbuf.h` 到新目录。
+3. 按第3节所示输入内核侧 `cbuf.c`（这是使用 `MALLOC_DEFINE` 的版本）。
+4. 从 `examples/part-02/ch09-reading-and-writing/stage3-echo/` 复制 `myfirst.c` 到新目录。
+5. 修改 `myfirst.c` 以使用 cbuf 抽象。更改如下：
+   - 在顶部附近添加 `#include "cbuf.h"`。
+   - 在 softc 中将 `char *buf; size_t buflen, bufhead, bufused;` 替换为 `struct cbuf cb;`。
+   - 更新 `myfirst_attach` 以调用 `cbuf_init(&sc->cb, MYFIRST_BUFSIZE)`。更新失败路径以调用 `cbuf_destroy`。
+   - 更新 `myfirst_detach` 以调用 `cbuf_destroy(&sc->cb)`。
+   - 将 `myfirst_read` 和 `myfirst_write` 替换为第3节的循环和弹跳版本。
+   - 按第3节更新 sysctl 处理程序（使用 `myfirst_sysctl_cb_used` 和 `myfirst_sysctl_cb_free` 辅助函数）。
+6. 更新 `Makefile` 以编译两个源文件：`SRCS= myfirst.c cbuf.c device_if.h bus_if.h`。
+7. 用 `make` 构建。修复任何编译错误。
+8. 用 `kldload ./myfirst.ko` 加载并用 `dmesg | tail` 验证。
 
-**Verification:**
+**验证：**
 
 ```sh
 $ printf 'helloworld' > /dev/myfirst
@@ -3026,23 +3026,23 @@ $ sysctl dev.myfirst.0.stats.cb_used
 dev.myfirst.0.stats.cb_used: 0
 ```
 
-**Stretch goal 1:** write enough bytes to wrap the buffer (write 3000 bytes, read 2000, write 2000 again). Verify that `cb_head` is non-zero in `sysctl` and that the data still comes back correctly.
+**延伸目标 1：** 写入足够多的字节使缓冲区环绕（写入 3000 字节，读取 2000，再写入 2000）。验证 `sysctl` 中 `cb_head` 非零且数据仍然正确返回。
 
-**Stretch goal 2:** add a sysctl-controlled debug flag (`myfirst_debug`) and a `MYFIRST_DBG` macro (Section 3 shows the pattern). Use it to log every successful `cbuf_read` and `cbuf_write` in the I/O handlers. Set the flag with `sysctl dev.myfirst.debug=1` and watch `dmesg`.
+**延伸目标 2：** 添加一个 sysctl 控制的调试标志（`myfirst_debug`）和一个 `MYFIRST_DBG` 宏（第3节展示了模式）。用它记录 I/O 处理程序中每次成功的 `cbuf_read` 和 `cbuf_write`。用 `sysctl dev.myfirst.debug=1` 设置标志并观察 `dmesg`。
 
-### Lab 3: The Stage 3 Driver (Blocking and Non-Blocking)
+### 实验 3：阶段 3 驱动（阻塞和非阻塞）
 
-**Goal:** Add blocking-on-empty, blocking-on-full, and `EAGAIN` for non-blocking callers.
+**目标：** 添加空时阻塞、满时阻塞，以及非阻塞调用者的 `EAGAIN`。
 
 **步骤：**
 
-1. Create `examples/part-02/ch10-handling-io-efficiently/stage3-blocking/` and copy your Stage 2 source into it.
-2. Modify `myfirst_read` to add the inner sleep loop (Section 5). The new shape includes the `nbefore = uio->uio_resid` snapshot, the `mtx_sleep` call, and the `wakeup(&sc->cb)` after a successful read.
-3. Modify `myfirst_write` to add the symmetric sleep loop and the matching `wakeup(&sc->cb)`.
-4. Update `myfirst_detach` to set `sc->is_attached = 0` *before* calling `wakeup(&sc->cb)`, all under the mutex.
-5. Build, load, and verify.
+1. 创建 `examples/part-02/ch10-handling-io-efficiently/stage3-blocking/` 并将你的阶段 2 源码复制到其中。
+2. 修改 `myfirst_read` 以添加内部睡眠循环（第5节）。新形状包括 `nbefore = uio->uio_resid` 快照、`mtx_sleep` 调用，以及成功读取后的 `wakeup(&sc->cb)`。
+3. 修改 `myfirst_write` 以添加对称的睡眠循环和匹配的 `wakeup(&sc->cb)`。
+4. 更新 `myfirst_detach` 以在调用 `wakeup(&sc->cb)` *之前*设置 `sc->is_attached = 0`，全部在互斥锁下完成。
+5. 构建、加载并验证。
 
-**Verification:**
+**验证：**
 
 ```sh
 $ cat /dev/myfirst &
@@ -3056,7 +3056,7 @@ $ kill -INT %1
 [1]    Interrupt: 2
 ```
 
-**Verification of `EAGAIN`:**
+**`EAGAIN` 的验证：**
 
 ```sh
 $ ./rw_myfirst_nb       # from the userland directory
@@ -3065,29 +3065,29 @@ step 2: poll(POLLIN, 0) = 0 revents=0x0
 ...
 ```
 
-If step 1 still says `read returned 0`, your `IO_NDELAY` check in `myfirst_read` is missing or wrong.
+如果第1步仍然显示 `read returned 0`，你的 `myfirst_read` 中的 `IO_NDELAY` 检查缺失或错误。
 
-**Stretch goal 1:** open two `cat` processes against `/dev/myfirst` simultaneously. Write 100 bytes from a third terminal. Both `cat`s should wake up; one will get the bytes (whichever wins the race for the lock), the other will block again. You can verify the assignment by tagging each `cat` with a different output stream: `cat /dev/myfirst > /tmp/a &` and `cat /dev/myfirst > /tmp/b &`, then `cmp /tmp/a /tmp/b` (one will be empty).
+**延伸目标 1：** 同时打开两个 `cat` 进程对 `/dev/myfirst`。从第三个终端写入 100 字节。两个 `cat` 都应该醒来；一个将获得字节（谁赢得锁的竞争），另一个将再次阻塞。你可以通过给每个 `cat` 标记不同的输出流来验证分配：`cat /dev/myfirst > /tmp/a &` 和 `cat /dev/myfirst > /tmp/b &`，然后 `cmp /tmp/a /tmp/b`（一个将为空）。
 
-**Stretch goal 2:** time how long `cat /dev/myfirst` takes to wake up after a write, using `time(1)`. The wake-up latency should be in the low microseconds; if it is in milliseconds, something is buffering between the write and the wake (or your machine is heavily loaded).
+**延伸目标 2：** 使用 `time(1)` 测量 `cat /dev/myfirst` 在写入后醒来需要多长时间。唤醒延迟应在低微秒范围；如果在毫秒范围，说明写入和唤醒之间有缓冲（或你的机器负载很重）。
 
-### Lab 4: The Stage 4 Driver (Poll Support and Refactor)
+### 实验 4：阶段 4 驱动（Poll 支持和重构）
 
-**Goal:** Add `d_poll`, refactor buffer access into helpers, and document the locking strategy.
+**目标：** 添加 `d_poll`，将缓冲区访问重构为辅助函数，并文档化锁定策略。
 
 **步骤：**
 
-1. Create `examples/part-02/ch10-handling-io-efficiently/stage4-poll-refactor/` and copy your Stage 3 source.
-2. Add `struct selinfo rsel; struct selinfo wsel;` to the softc.
-3. Implement `myfirst_poll` as in Section 5.
-4. Add `selwakeup(&sc->wsel)` after the read's successful `cbuf_read`, and `selwakeup(&sc->rsel)` after the write's successful `cbuf_write`.
-5. Add `seldrain(&sc->rsel); seldrain(&sc->wsel);` to detach.
-6. Add `.d_poll = myfirst_poll,` to the `cdevsw`.
-7. Refactor the I/O handlers to use the four helpers from Section 7 (`myfirst_buf_read`, `myfirst_buf_write`, `myfirst_wait_data`, `myfirst_wait_room`).
-8. Add the locking-strategy comment from Section 7.
-9. Build, load, and verify.
+1. 创建 `examples/part-02/ch10-handling-io-efficiently/stage4-poll-refactor/` 并复制你的阶段 3 源码。
+2. 向 softc 添加 `struct selinfo rsel; struct selinfo wsel;`。
+3. 按第5节实现 `myfirst_poll`。
+4. 在读取成功 `cbuf_read` 后添加 `selwakeup(&sc->wsel)`，在写入成功 `cbuf_write` 后添加 `selwakeup(&sc->rsel)`。
+5. 在拆离时添加 `seldrain(&sc->rsel); seldrain(&sc->wsel);`。
+6. 向 `cdevsw` 添加 `.d_poll = myfirst_poll,`。
+7. 将 I/O 处理程序重构为使用第7节的四个辅助函数（`myfirst_buf_read`、`myfirst_buf_write`、`myfirst_wait_data`、`myfirst_wait_room`）。
+8. 添加第7节的锁定策略注释。
+9. 构建、加载并验证。
 
-**Verification:**
+**验证：**
 
 ```sh
 $ ./rw_myfirst_nb
@@ -3098,24 +3098,24 @@ step 4: poll(POLLIN, 0) = 1 revents=0x41
 step 5: read 12 bytes: hello world
 ```
 
-The key change from Lab 3 is that step 4 should now return `1` (not `0`), with `revents=0x41` (POLLIN | POLLRDNORM). If it still returns 0, your `selwakeup` call is missing from the write path or the `myfirst_poll` handler is wrong.
+与实验 3 的关键区别是第4步现在应该返回 `1`（不是 `0`），且 `revents=0x41`（POLLIN | POLLRDNORM）。如果仍返回 0，你的写入路径中缺少 `selwakeup` 调用或 `myfirst_poll` 处理程序有误。
 
-**Stretch goal 1:** run `producer_consumer` with `TOTAL_BYTES = 8 * 1024 * 1024` (8 MB) and verify that the test completes with no mismatches. The producer is generating bytes faster than the consumer is reading them, so the buffer should fill up and trigger the blocking path repeatedly. Watch `sysctl dev.myfirst.0.stats.cb_used` in another terminal; it should oscillate.
+**延伸目标 1：** 以 `TOTAL_BYTES = 8 * 1024 * 1024`（8 MB）运行 `producer_consumer` 并验证测试完成时无不匹配。生产者生成字节的速度快于消费者读取的速度，因此缓冲区应该填满并反复触发阻塞路径。在另一个终端观察 `sysctl dev.myfirst.0.stats.cb_used`；它应该振荡。
 
-**Stretch goal 2:** run two `producer_consumer`s in parallel against the same device. The two writers will compete for buffer space; the two readers will compete for bytes. Each pair should still see consistent checksums, but the *interleaving* of bytes will be unpredictable. This shows that the driver is single-stream per device, not per descriptor; if you need per-descriptor streams, that is a different driver design.
+**延伸目标 2：** 针对同一设备并行运行两个 `producer_consumer`。两个写入者将竞争缓冲区空间；两个读取者将竞争字节。每对仍应看到一致的校验和，但字节的*交错*将是不可预测的。这表明驱动是每个设备单流，而不是每个描述符；如果你需要每描述符流，那是不同的驱动设计。
 
-### Lab 5: Memory Mapping
+### 实验 5：内存映射
 
-**Goal:** Add `d_mmap` so user space can map the cbuf read-only.
+**目标：** 添加 `d_mmap`，使户空间可以只读映射 cbuf。
 
 **步骤：**
 
-1. Create `examples/part-02/ch10-handling-io-efficiently/stage5-mmap/` and copy your Stage 4 source.
-2. Add `myfirst_mmap` from Section 8 to the source.
-3. 将 `.d_mmap = myfirst_mmap,` 添加到 `cdevsw`.
-4. Build, load, and verify.
+1. 创建 `examples/part-02/ch10-handling-io-efficiently/stage5-mmap/` 并复制你的阶段 4 源码。
+2. 将第8节的 `myfirst_mmap` 添加到源码。
+3. 将 `.d_mmap = myfirst_mmap,` 添加到 `cdevsw`。
+4. 构建、加载并验证。
 
-**Verification:**
+**验证：**
 
 ```sh
 $ printf 'ABCDEFGHIJKL' > /dev/myfirst
@@ -3124,366 +3124,366 @@ first 64 bytes:
  41 42 43 44 45 46 47 48 49 4a 4b 4c 00 00 00 ...
 ```
 
-The first twelve bytes are the bytes you wrote.
+前十二字节是你写入的字节。
 
-**Stretch goal 1:** write a small program that maps the buffer and reads bytes from `offset = sc->cb_size - 32` (i.e. the last 32 bytes). Verify that the program does not crash. Then write enough bytes to push the buffer head into the wrap region and read from the same offset. The contents will be different, because the *raw* bytes in memory are not the same as the *live* bytes from the cbuf's perspective.
+**延伸目标 1：** 编写一个小程序映射缓冲区并从 `offset = sc->cb_size - 32`（即最后 32 字节）读取。验证程序不会崩溃。然后写入足够多的字节将缓冲区头部推入环绕区域并从相同偏移读取。内容将不同，因为内存中的*原始*字节与 cbuf 视角的*活跃*字节不同。
 
-**Stretch goal 2:** try to map the buffer with `PROT_WRITE`. Your program should see `mmap` fail with `EACCES`, because the driver refuses writable mappings.
+**延伸目标 2：** 尝试用 `PROT_WRITE` 映射缓冲区。你的程序应该看到 `mmap` 因 `EACCES` 失败，因为驱动拒绝可写映射。
 
-### Lab 6: Stress and Long-Running Tests
+### 实验 6：压力和长时间运行测试
 
-**Goal:** Run the driver under sustained load for at least an hour without errors.
+**目标：** 在持续负载下运行驱动至少一小时而不出错。
 
 **步骤：**
 
-1. Set up four parallel test processes:
+1. 设置四个并行测试进程：
    - `dd if=/dev/zero of=/dev/myfirst bs=4k 2>/dev/null &`
    - `dd if=/dev/myfirst of=/dev/null bs=4k 2>/dev/null &`
    - `./producer_consumer`
-   - A loop that polls `sysctl dev.myfirst.0.stats` every 5 seconds.
-2. Let the test run for at least an hour.
-3. Check `dmesg` for any kernel warnings, panics, or `WITNESS` complaints. Check `vmstat -m | grep cbuf` to confirm no leak. Verify that `producer_consumer` reports zero mismatches.
+   - 一个每 5 秒轮询 `sysctl dev.myfirst.0.stats` 的循环。
+2. 让测试运行至少一小时。
+3. 检查 `dmesg` 中是否有任何内核警告、恐慌或 `WITNESS` 投诉。检查 `vmstat -m | grep cbuf` 确认没有泄漏。验证 `producer_consumer` 报告零不匹配。
 
-**Verification:** No kernel warnings. No memory growth in `vmstat`. `producer_consumer` returns 0.
+**验证：** 无内核警告。`vmstat` 中无内存增长。`producer_consumer` 返回 0。
 
-**Stretch goal:** run the same test under a `WITNESS`-enabled debug kernel. The kernel will be slower but will catch any locking-discipline violations. If your driver is correct, no warnings should appear.
+**延伸目标：** 在启用 `WITNESS` 的调试内核下运行相同的测试。内核会更慢但会捕获任何锁定纪律违规。如果你的驱动正确，不应出现任何警告。
 
-### Lab 7: Deliberate Failures
+### 实验 7：故意制造故障
 
-**Goal:** Break the driver in three specific ways and observe what happens. This lab teaches you to recognise the failure modes you most want to avoid.
+**目标：** 以三种特定方式破坏驱动并观察发生什么。本实验教你识别你最想避免的故障模式。
 
-**Steps for failure 1: hold the lock across `uiomove`.**
+**故障 1 的步骤：跨 `uiomove` 持有锁。**
 
-1. Edit your Stage 4 driver. In `myfirst_read`, comment out the `mtx_unlock(&sc->mtx)` that comes before `uiomove(bounce, got, uio)`.
-2. Add a matching `mtx_unlock` after the `uiomove` so the code still compiles.
-3. Build and load on a `WITNESS`-enabled kernel.
-4. Run a single `cat /dev/myfirst` and write some bytes from another terminal.
+1. 编辑你的阶段 4 驱动。在 `myfirst_read` 中，注释掉 `uiomove(bounce, got, uio)` 之前的 `mtx_unlock(&sc->mtx)`。
+2. 在 `uiomove` 之后添加匹配的 `mtx_unlock`，使代码仍能编译。
+3. 在启用 `WITNESS` 的内核上构建并加载。
+4. 运行一个 `cat /dev/myfirst` 并从另一个终端写入一些字节。
 
-**What you should observe:** A `WITNESS` warning in `dmesg` complaining about "sleeping with mutex held". The system may continue running but the warning is the bug.
+**你应该观察到的：** `dmesg` 中一条关于"sleeping with mutex held"的 `WITNESS` 警告。系统可能继续运行但警告就是 bug。
 
-**Cleanup:** restore the original code.
+**清理：** 恢复原始代码。
 
-**Steps for failure 2: forget the `wakeup` after a write.**
+**故障 2 的步骤：忘记写入后的 `wakeup`。**
 
-1. In `myfirst_write`, comment out `wakeup(&sc->cb)`.
-2. Build and load.
-3. Run `cat /dev/myfirst &` and `echo hi > /dev/myfirst`.
+1. 在 `myfirst_write` 中，注释掉 `wakeup(&sc->cb)`。
+2. 构建并加载。
+3. 运行 `cat /dev/myfirst &` 和 `echo hi > /dev/myfirst`。
 
-**What you should observe:** The `cat` does not wake up. It will sit in `myfrd` state forever (or until you interrupt it with Ctrl-C).
+**你应该观察到的：** `cat` 不会醒来。它将永远停留在 `myfrd` 状态（直到你用 Ctrl-C 中断它）。
 
-**Cleanup:** restore the wakeup. Verify that `cat` now wakes up immediately.
+**清理：** 恢复 wakeup。验证 `cat` 现在立即醒来。
 
-**Steps for failure 3: missing `PCATCH`.**
+**故障 3 的步骤：缺少 `PCATCH`。**
 
-1. In `myfirst_wait_data`, change `PCATCH` to `0` in the `mtx_sleep` call.
-2. Build and load.
-3. Run `cat /dev/myfirst &` and try `kill -INT %1`.
+1. 在 `myfirst_wait_data` 中，将 `mtx_sleep` 调用中的 `PCATCH` 改为 `0`。
+2. 构建并加载。
+3. 运行 `cat /dev/myfirst &` 并尝试 `kill -INT %1`。
 
-**What you should observe:** The `cat` does not respond to Ctrl-C until you write some bytes to wake it. With `PCATCH`, the signal would interrupt the sleep immediately.
+**你应该观察到的：** `cat` 不响应 Ctrl-C，直到你写入一些字节唤醒它。有了 `PCATCH`，信号会立即中断睡眠。
 
-**Cleanup:** restore `PCATCH`. Verify that `kill -INT` works as expected.
+**清理：** 恢复 `PCATCH`。验证 `kill -INT` 按预期工作。
 
-These three failures are the most common driver bugs in this chapter's territory. Doing them deliberately, once, is the best way to recognise them when they happen accidentally.
+这三种故障是本章领域中最常见的驱动 bug。故意做一次，是在它们意外发生时识别它们的最佳方式。
 
-### Lab 8: Reading Real FreeBSD Drivers
+### 实验 8：阅读真实的 FreeBSD 驱动
 
-**Goal:** Read three character-device drivers in `/usr/src/sys/dev/` and identify how each implements its buffer, sleep, and poll patterns.
+**目标：** 阅读 `/usr/src/sys/dev/` 中的三个字符设备驱动并识别每个如何实现其缓冲区、睡眠和 poll 模式。
 
 **步骤：**
 
-1. Read `/usr/src/sys/dev/evdev/cdev.c`. Identify:
-   - Where the per-client ring buffer is allocated.
-   - Where the read handler blocks (look for `mtx_sleep`).
-   - How `EVDEV_CLIENT_EMPTYQ` is implemented.
-   - How `kqueue` is set up alongside `select/poll` (we have not done `kqueue` yet; just notice the calls to `knlist_*`).
-2. Read `/usr/src/sys/dev/random/randomdev.c`. Identify:
-   - Where `randomdev_poll` is defined.
-   - How it handles a not-yet-seeded random device.
-3. Read `/usr/src/sys/dev/null/null.c`. Identify:
-   - How `zero_read` loops over `uio_resid`.
-   - Why there is no buffer, no sleep, and no poll handler.
+1. 阅读 `/usr/src/sys/dev/evdev/cdev.c`。识别：
+   - 每客户端环形缓冲区在哪里分配。
+   - 读取处理程序在哪里阻塞（寻找 `mtx_sleep`）。
+   - `EVDEV_CLIENT_EMPTYQ` 如何实现。
+   - `kqueue` 如何与 `select/poll` 一起设置（我们还没有做 `kqueue`；只需注意 `knlist_*` 调用）。
+2. 阅读 `/usr/src/sys/dev/random/randomdev.c`。识别：
+   - `randomdev_poll` 在哪里定义。
+   - 它如何处理尚未种子的随机设备。
+3. 阅读 `/usr/src/sys/dev/null/null.c`。识别：
+   - `zero_read` 如何循环 `uio_resid`。
+   - 为什么没有缓冲区、没有睡眠、没有 poll 处理程序。
 
 **检查点问题：**
 
-- Why does `evdev`'s read handler use `mtx_sleep` while `null`'s does not?
-- What would `randomdev`'s poll handler return if called while the device is unseeded?
-- How does `evdev` detect that a client has been disconnected (revoked)?
+- 为什么 `evdev` 的读取处理程序使用 `mtx_sleep` 而 `null` 的不使用？
+- 如果在设备未种子时调用 `randomdev` 的 poll 处理程序会返回什么？
+- `evdev` 如何检测客户端已断开连接（撤销）？
 
-The point of this lab is not to memorise these drivers. It is to confirm that the patterns you have built in `myfirst` are the same patterns the kernel uses elsewhere. By the end of the lab you should feel that the rest of `dev/` is largely *legible* now, where it might have looked impenetrable two chapters ago.
+本实验的重点不是记住这些驱动。而是确认你在 `myfirst` 中构建的模式与内核其他地方使用的模式相同。到实验结束时，你应该感到 `dev/` 的其余部分现在基本上是*可读的*，而两章前它可能看起来不可渗透。
 
 ## 挑战练习
 
-The labs above ensure you have a working driver and a working test kit. The challenges below are stretch exercises. Each one extends the chapter's material in a useful direction, and each one rewards careful work. Take your time; some of them are more involved than they look.
+上面的实验确保你有一个工作的驱动和测试套件。下面的挑战是延伸练习。每个都沿着有用的方向扩展本章材料，每个都奖励仔细的工作。慢慢来；有些比看起来更复杂。
 
-### Challenge 1: Add a Tunable Buffer Size
+### 挑战 1：添加可调缓冲区大小
 
-The `MYFIRST_BUFSIZE` macro hard-codes the buffer at 4 KB. Make it configurable.
+`MYFIRST_BUFSIZE` 宏将缓冲区硬编码为 4 KB。让它可配置。
 
-- Add a `TUNABLE_INT("hw.myfirst.bufsize", &myfirst_bufsize)` and a matching `SYSCTL_INT(_hw_myfirst, OID_AUTO, bufsize, ...)` so the user can set the buffer size at module load time.
-- Use the value in `myfirst_attach` to size the cbuf.
-- Validate the value (reject zero, reject sizes larger than 1 MB, fall back to a sensible default if the input is bad).
-- Verify with `kenv hw.myfirst.bufsize=8192; kldload ./myfirst.ko; sysctl dev.myfirst.0.stats.cb_size`.
+- 添加一个 `TUNABLE_INT("hw.myfirst.bufsize", &myfirst_bufsize)` 和匹配的 `SYSCTL_INT(_hw_myfirst, OID_AUTO, bufsize, ...)`，这样用户可以在模块加载时设置缓冲区大小。
+- 在 `myfirst_attach` 中使用该值来调整 cbuf 大小。
+- 验证该值（拒绝零、拒绝大于 1 MB 的大小、如果输入不好则回退到合理默认值）。
+- 用 `kenv hw.myfirst.bufsize=8192; kldload ./myfirst.ko; sysctl dev.myfirst.0.stats.cb_size` 验证。
 
-**Stretch:** make the buffer size *runtime-tunable* via `sysctl`. This is harder than the load-time tunable because it requires safely reallocating the cbuf while the device may be in use; you will need to drain or copy existing bytes, take and release the lock at the right moments, and decide what to do with sleeping callers. (Hint: it may be easier to require that all descriptors be closed before allowing a runtime resize.)
+**延伸：** 通过 `sysctl` 使缓冲区大小*运行时可调*。这比加载时可调更难，因为它需要在设备可能正在使用时安全地重新分配 cbuf；你需要排空或复制现有字节、在正确时刻获取和释放锁、并决定如何处理睡眠中的调用者。（提示：可能更容易要求所有描述符在允许运行时调整大小之前关闭。）
 
-### Challenge 2: Implement Overwrite Semantics as an Optional Mode
+### 挑战 2：实现覆盖语义作为可选模式
 
-Add an `ioctl(2)` (or, simpler for now, a `sysctl`) that switches the buffer between "block on full" mode (the default) and "overwrite oldest on full" mode. In overwrite mode, `myfirst_write` always succeeds: when `cbuf_free` is zero, the driver advances `cb_head` to make room and then writes the new bytes.
+添加一个 `ioctl(2)`（或者，现在更简单的，一个 `sysctl`），在"满时阻塞"模式（默认）和"满时覆盖最旧"模式之间切换缓冲区。在覆盖模式下，`myfirst_write` 总是成功：当 `cbuf_free` 为零时，驱动推进 `cb_head` 腾出空间然后写入新字节。
 
-- Add a `cbuf_overwrite` function alongside `cbuf_write` that implements the overwrite semantics. Do not modify `cbuf_write`; the two should be siblings.
-- Add a sysctl `dev.myfirst.0.overwrite_mode` (read-write integer, 0 or 1).
-- In `myfirst_write`, dispatch to `cbuf_overwrite` if the flag is set.
-- Test with a small writer that produces bytes faster than the reader consumes; in overwrite mode, the reader should see the most recent bytes only, while in normal mode the writer blocks.
+- 在 `cbuf_write` 旁边添加一个 `cbuf_overwrite` 函数来实现覆盖语义。不要修改 `cbuf_write`；两者应该是兄弟关系。
+- 添加一个 sysctl `dev.myfirst.0.overwrite_mode`（读写整数，0 或 1）。
+- 在 `myfirst_write` 中，如果标志被设置则分派到 `cbuf_overwrite`。
+- 用一个比读取者产生字节更快的写入者测试；在覆盖模式下，读取者应该只看到最近的字节，而在正常模式下写入者阻塞。
 
-**Stretch:** add a counter for the number of bytes overwritten (lost). Expose it as a sysctl so the user can see how much data has been dropped.
+**延伸：** 为被覆盖（丢失）的字节数添加一个计数器。将其暴露为 sysctl，以便用户可以看到丢失了多少数据。
 
-### Challenge 3: Per-Reader Position
+### 挑战 3：每读取者位置
 
-The current driver has one shared read position (`cb_head`). When two readers consume bytes, each `read(2)` call drains some bytes from the buffer; the two readers split the stream between them. Some drivers want the opposite: each reader should see *every* byte, so two readers each get the full stream independently.
+当前驱动有一个共享的读取位置（`cb_head`）。当两个读取者消耗字节时，每次 `read(2)` 调用从缓冲区排空一些字节；两个读取者之间分割流。一些驱动想要相反：每个读取者应该看到*每个*字节，这样两个读取者各自独立获得完整流。
 
-This is a substantial refactor:
+这是一个实质性的重构：
 
-- Maintain a per-descriptor read position in `myfirst_fh`.
-- Track the global "earliest live byte" across all descriptors. The cbuf's effective `head` becomes `min(per_fh_head)`.
-- `myfirst_read` advances only the per-descriptor position; `cbuf_read` is replaced by a per-fh equivalent.
-- A new descriptor opened mid-stream sees only bytes written after its open.
-- When the buffer is "full" depends on the slowest descriptor; you need backpressure logic that accounts for laggards.
+- 在 `myfirst_fh` 中维护每描述符的读取位置。
+- 跟踪所有描述符的全局"最早活跃字节"。cbuf 的有效 `head` 变为 `min(per_fh_head)`。
+- `myfirst_read` 只推进每描述符位置；`cbuf_read` 被每 fh 的等价物替换。
+- 在流中途打开的新描述符只看到打开后写入的字节。
+- 缓冲区何时"满"取决于最慢的描述符；你需要考虑落后者的反压逻辑。
 
-This challenge is harder than it sounds; it is essentially building a multicast pipe. Try it only if you have time to think through the locking carefully.
+这个挑战比听起来更难；它本质上是构建一个多播管道。只有在你有时间仔细思考锁定时才尝试。
 
-### Challenge 4: Implement `d_kqfilter`
+### 挑战 4：实现 `d_kqfilter`
 
-Add `kqueue(2)` support alongside the `d_poll` you already have.
+在你已有的 `d_poll` 旁边添加 `kqueue(2)` 支持。
 
-- Implement a `myfirst_kqfilter` function dispatched from `cdevsw->d_kqfilter`.
-- For `EVFILT_READ`, register a filter that becomes ready when `cbuf_used > 0`.
-- For `EVFILT_WRITE`, register a filter that becomes ready when `cbuf_free > 0`.
-- Use `knlist_add(9)` and `knlist_remove(9)` to manage the per-filter list.
-- Trigger `KNOTE_LOCKED(...)` from the I/O handlers when the buffer transitions.
-- Test with a small `kqueue(2)` user program that opens the device, registers `EVFILT_READ`, calls `kevent(2)`, and reports when the descriptor becomes readable.
+- 实现一个从 `cdevsw->d_kqfilter` 分派的 `myfirst_kqfilter` 函数。
+- 对于 `EVFILT_READ`，注册一个在 `cbuf_used > 0` 时变为就绪的过滤器。
+- 对于 `EVFILT_WRITE`，注册一个在 `cbuf_free > 0` 时变为就绪的过滤器。
+- 使用 `knlist_add(9)` 和 `knlist_remove(9)` 管理每过滤器列表。
+- 当缓冲区转换时从 I/O 处理程序触发 `KNOTE_LOCKED(...)`。
+- 用一个小型 `kqueue(2)` 用户程序测试，该程序打开设备、注册 `EVFILT_READ`、调用 `kevent(2)`、并报告描述符何时变为可读。
 
-This challenge is the natural extension of Stage 4. It also previews the `kqueue` material that Chapter 11 will discuss in more depth alongside concurrency.
+这个挑战是阶段 4 的自然延伸。它也预览了第11章将与并发一起更深入讨论的 `kqueue` 材料。
 
-### Challenge 5: Per-CPU Counters
+### 挑战 5：每 CPU 计数器
 
-The `bytes_read` and `bytes_written` counters are updated under the mutex. Under heavy multi-CPU load, this can become a contention point. FreeBSD's `counter(9)` API provides per-CPU counters that can be incremented without a lock and summed for read access.
+`bytes_read` 和 `bytes_written` 计数器在互斥锁下更新。在重度多 CPU 负载下，这可能成为竞争点。FreeBSD 的 `counter(9)` API 提供每 CPU 计数器，可以无锁递增并求和用于读取访问。
 
-- Replace `sc->bytes_read` and `sc->bytes_written` with `counter_u64_t` instances.
-- Allocate them with `counter_u64_alloc(M_WAITOK)` in attach; free them with `counter_u64_free` in detach.
-- Use `counter_u64_add(counter, n)` to increment.
-- Use `counter_u64_fetch(counter)` (with a sysctl handler) to read.
+- 将 `sc->bytes_read` 和 `sc->bytes_written` 替换为 `counter_u64_t` 实例。
+- 在 attach 中用 `counter_u64_alloc(M_WAITOK)` 分配；在 detach 中用 `counter_u64_free` 释放。
+- 使用 `counter_u64_add(counter, n)` 递增。
+- 使用 `counter_u64_fetch(counter)`（通过 sysctl 处理程序）读取。
 
-**Stretch:** measure the difference. Run `producer_consumer` against the old and new versions and compare wall-clock time. With a small test the difference will be invisible; with a heavily threaded test (multiple producers and consumers) the per-CPU version should be measurably faster.
+**延伸：** 测量差异。对旧版本和新版本运行 `producer_consumer` 并比较挂钟时间。小型测试的差异将不可见；重度线程测试（多个生产者和消费者）下每 CPU 版本应该明显更快。
 
-### Challenge 6: A Hardware-Style Interrupt Simulator
+### 挑战 6：硬件风格中断模拟器
 
-Real driver buffers are usually filled by an interrupt handler, not by a `write(2)` syscall. Simulate this:
+真正的驱动缓冲区通常由中断处理程序填充，而不是由 `write(2)` 系统调用。模拟这一点：
 
-- Use `callout(9)` (Chapter 13 covers it; you can read ahead) to run a callback every 100 ms.
-- The callback writes a small piece of data into the cbuf (for example, the current time as a string).
-- The user reads from `/dev/myfirst` and sees a stream of timestamped lines.
+- 使用 `callout(9)`（第13章涵盖它；你可以提前阅读）每 100 毫秒运行一个回调。
+- 回调向 cbuf 写入一小段数据（例如，当前时间作为字符串）。
+- 用户从 `/dev/myfirst` 读取并看到带时间戳的行流。
 
-This challenge previews Chapter 13's deferred-execution material and shows how the same buffer abstraction supports either a syscall-driven producer or a kernel-thread-driven producer.
+这个挑战预览了第13章的延迟执行材料，并展示相同的缓冲区抽象如何支持系统调用驱动的生产者或内核线程驱动的生产者。
 
-### Challenge 7: A Logging Buffer with `dmesg`-Style Behaviour
+### 挑战 7：具有 `dmesg` 风格行为的日志缓冲区
 
-Build a second character device, `/dev/myfirst_log`, that uses an overwrite-mode cbuf to keep a circular log of recent driver events. Every `MYFIRST_DBG` macro call would write into this log instead of (or in addition to) calling `device_printf`.
+构建第二个字符设备 `/dev/myfirst_log`，使用覆盖模式的 cbuf 保持最近驱动事件的循环日志。每个 `MYFIRST_DBG` 宏调用将写入此日志而不是（或附加于）调用 `device_printf`。
 
-- Use a separate `struct cbuf` in the softc.
-- Provide a way for the kernel side to push lines into the log (`myfirst_log_printf(sc, fmt, ...)`).
-- The user can `cat /dev/myfirst_log` to see the recent N lines.
-- A new line that overflows the buffer evicts the oldest line, not just the oldest byte (this requires line-aware eviction logic).
+- 在 softc 中使用单独的 `struct cbuf`。
+- 为内核侧提供向日志推入行的方式（`myfirst_log_printf(sc, fmt, ...)`）。
+- 用户可以 `cat /dev/myfirst_log` 查看最近的 N 行。
+- 溢出缓冲区的新行驱逐最旧的行，而不是最旧的字节（这需要行感知的驱逐逻辑）。
 
-This challenge introduces a fairly common driver pattern (a private debug log) and gives you practice with a second, independently designed buffer use case in the same module.
+这个挑战引入了一个相当常见的驱动模式（私有调试日志），并让你在同一模块中练习第二个独立设计的缓冲区用例。
 
-### Challenge 8: Performance Measurement
+### 挑战 8：性能测量
 
-Build a measurement harness that times the throughput of the driver across the four stages.
+构建一个测量工具，对四个阶段的驱动吞吐量进行计时。
 
-- Write a small C program that opens the device, writes 100 MB of data, and times the operation.
-- Mirror it with a reader that drains 100 MB and times itself.
-- Run the pair against Stage 2, Stage 3, and Stage 4 of the chapter, and produce a small table of throughput numbers.
-- Identify which stage is slowest and explain why.
+- 编写一个小型 C 程序，打开设备、写入 100 MB 数据，并对操作计时。
+- 用一个排空 100 MB 并为自己计时的读取者镜像它。
+- 针对阶段 2、阶段 3 和阶段 4 运行这对程序，并生成一个小的吞吐量数字表。
+- 识别哪个阶段最慢并解释原因。
 
-The expected answer is "Stage 3 is slower than Stage 2 because of the extra `wakeup` and `selwakeup` calls per iteration; Stage 4 is similar to Stage 3 within measurement noise". But the actual numbers are interesting and may surprise you, depending on your CPU, memory bandwidth, and system load.
+预期答案是"阶段 3 比阶段 2 慢，因为每次迭代有额外的 `wakeup` 和 `selwakeup` 调用；阶段 4 在测量噪声内与阶段 3 相似"。但实际数字很有趣，可能令你惊讶，取决于你的 CPU、内存带宽和系统负载。
 
-**Stretch:** profile the driver under load with `pmcstat(8)` and identify the top three functions by CPU time. If `uiomove` is in the top three, you have validated the discussion in Section 8 about zero-copy. If `mtx_lock` is in the top three, you have a contention problem that Chapter 11's locking material will address.
+**延伸：** 用 `pmcstat(8)` 在负载下分析驱动并识别按 CPU 时间排前三的函数。如果 `uiomove` 在前三，你验证了第8节关于零拷贝的讨论。如果 `mtx_lock` 在前三，你有一个第11章锁定材料将解决的竞争问题。
 
-### Challenge 9: Cross-Reading Real Drivers
+### 挑战 9：交叉阅读真实驱动
 
-Pick three drivers in `/usr/src/sys/dev/` that you have not read before. For each one, identify:
+在 `/usr/src/sys/dev/` 中选择三个你之前没有读过的驱动。对每一个，识别：
 
-- Where the buffer is allocated and freed.
-- Whether it is a circular buffer, a queue, or a different shape.
-- What protects it (mutex, sx, lock-free, none).
-- How `read` and `write` handlers consume from or produce into it.
-- How `select`/`poll`/`kqueue` integrate with the buffer state changes.
+- 缓冲区在哪里分配和释放。
+- 它是循环缓冲区、队列还是其他形状。
+- 什么保护它（互斥锁、sx、无锁、无）。
+- `read` 和 `write` 处理程序如何从中消费或向其生产。
+- `select`/`poll`/`kqueue` 如何与缓冲区状态变化集成。
 
-Suggested starting points: `/usr/src/sys/dev/iicbus/iiconf.c` (different category but uses some of the same primitives) and `/usr/src/sys/fs/cuse/cuse.c` (a driver that exposes its buffer to user space). You will see variations on the same themes you have just built.
+建议的起点：`/usr/src/sys/dev/iicbus/iiconf.c`（不同类别但使用一些相同的原语）和 `/usr/src/sys/fs/cuse/cuse.c`（一个向用户空间暴露缓冲区的驱动）。你将看到你刚刚构建的相同主题的变体。
 
-### Challenge 10: Document Your Driver
+### 挑战 10：文档化你的驱动
 
-Write a one-page README in your `examples/part-02/ch10-handling-io-efficiently/stage4-poll-refactor/` directory. The README should cover:
+在你的 `examples/part-02/ch10-handling-io-efficiently/stage4-poll-refactor/` 目录中编写一页 README。README 应涵盖：
 
-- What the driver does.
-- How to build it (`make`).
-- How to load and unload (`kldload`, `kldunload`).
-- The user-space interface: device path, mode, reader/writer expectations, blocking behaviour.
-- What the sysctls expose.
-- How to enable debug logging.
-- A reference to the chapter that produced it.
+- 驱动做什么。
+- 如何构建（`make`）。
+- 如何加载和卸载（`kldload`、`kldunload`）。
+- 用户空间接口：设备路径、模式、读取者/写入者期望、阻塞行为。
+- sysctl 暴露什么。
+- 如何启用调试日志。
+- 对产生它的章节的引用。
 
-Documentation is the part of driver work most often skipped. A driver that only its author understands is a maintenance liability. Even a one-page README that explains the basics makes the difference between code that survives a hand-off and code that does not.
+文档化是驱动工作中最常被跳过的部分。只有作者理解的驱动是维护负担。即使一页解释基础的 README 也决定了代码是否能在交接中存活。
 
-## Troubleshooting and Common Mistakes
+## 故障排除和常见错误
 
-Most of the bugs that appear in this chapter's territory cluster into a small number of categories. The list below catalogues the categories, the symptoms each one produces, and the fix. Read it once before you work through the labs; come back to it when something goes wrong.
+本章领域中出现的大多数 bug 聚集在少数几个类别中。下面的列表分类了这些类别、每个产生的症状以及修复方法。在做实验之前读一遍；出问题时再回来查看。
 
-### Symptom: `cat /dev/myfirst` blocks forever, even after `echo` writes data
+### 症状：`cat /dev/myfirst` 永远阻塞，即使 `echo` 写入了数据
 
-**Cause.** The write handler is not calling `wakeup(&sc->cb)` after a successful `cbuf_write`. The reader is asleep on the channel `&sc->cb`; without a matching `wakeup`, it will never return.
+**原因。** 写入处理程序在成功 `cbuf_write` 后没有调用 `wakeup(&sc->cb)`。读取者在通道 `&sc->cb` 上睡眠；没有匹配的 `wakeup`，它永远不会返回。
 
-**Fix.** Add `wakeup(&sc->cb)` after every state-changing operation that might unblock a waiter. In `myfirst_write`, that means after the `cbuf_write` call. In `myfirst_read`, that means after the `cbuf_read` call (which may unblock a waiting writer).
+**修复。** 在每个可能解除等待者阻塞的状态改变操作后添加 `wakeup(&sc->cb)`。在 `myfirst_write` 中，这意味着在 `cbuf_write` 调用之后。在 `myfirst_read` 中，这意味着在 `cbuf_read` 调用之后（可能解除等待写入者的阻塞）。
 
-**How to verify.** Run `ps -AxH -o pid,wchan,command | grep cat`. If the `wchan` column shows `myfrd` (or whatever wmesg you used), the reader is sleeping. The channel address you slept on must match the channel address you wake.
+**如何验证。** 运行 `ps -AxH -o pid,wchan,command | grep cat`。如果 `wchan` 列显示 `myfrd`（或你使用的任何 wmesg），读取者正在睡眠。你睡眠的通道地址必须与你唤醒的通道地址匹配。
 
-### Symptom: Data corruption under heavy load
+### 症状：重负载下数据损坏
 
-**Cause.** Almost always a wrap-around bug or a missing lock around the cbuf access. Either the cbuf's internal arithmetic is wrong, or two threads are touching it concurrently without synchronization.
+**原因。** 几乎总是环绕 bug 或 cbuf 访问周围缺少锁。要么 cbuf 的内部算术有误，要么两个线程在没有同步的情况下同时触及它。
 
-**Fix.** Re-read the cbuf source carefully. Run the userland `cb_test` against your current `cbuf.c` (compile it directly with `cc`). If the userland tests pass, the problem is in the driver's locking, not in the cbuf. Check that every `cbuf_*` call is bracketed by `mtx_lock` and `mtx_unlock`. Use `INVARIANTS` and `WITNESS` in your kernel config to catch violations.
+**修复。** 仔细重读 cbuf 源码。用你当前的 `cbuf.c` 运行用户态 `cb_test`（直接用 `cc` 编译）。如果用户态测试通过，问题在驱动的锁定中，不在 cbuf 中。检查每个 `cbuf_*` 调用是否由 `mtx_lock` 和 `mtx_unlock` 包围。在内核配置中使用 `INVARIANTS` 和 `WITNESS` 捕获违规。
 
-**How to verify.** Run `producer_consumer` with a known checksum. If the checksums match but mismatches are reported, the data is being reordered (a wrap-around bug). If the checksums differ, bytes are being lost or duplicated (a locking bug).
+**如何验证。** 用已知校验和运行 `producer_consumer`。如果校验和匹配但报告了不匹配，数据正在被重新排序（环绕 bug）。如果校验和不同，字节正在丢失或重复（锁定 bug）。
 
-### Symptom: Kernel panic with "sleeping with mutex held"
+### 症状：内核恐慌 "sleeping with mutex held"
 
-**Cause.** You called `uiomove(9)`, `copyin(9)`, `copyout(9)`, or another sleeping function while holding `sc->mtx`. The sleeping function tried to fault on user memory, and the page-fault handler tried to sleep, but holding a non-sleepable mutex during a sleep is forbidden.
+**原因。** 你在持有 `sc->mtx` 时调用了 `uiomove(9)`、`copyin(9)`、`copyout(9)` 或其他睡眠函数。睡眠函数尝试对用户内存进行页面故障处理，页面故障处理程序尝试睡眠，但在睡眠期间持有不可睡眠互斥锁是被禁止的。
 
-**Fix.** Release the mutex before any call that might sleep. The Stage 4 handlers do this carefully: lock to access the cbuf, unlock to call `uiomove`, lock again to update state.
+**修复。** 在任何可能睡眠的调用之前释放互斥锁。阶段 4 处理程序仔细地做到了这一点：锁定访问 cbuf、解锁调用 `uiomove`、再次锁定更新状态。
 
-**How to verify.** A `WITNESS`-enabled kernel will print a warning before panicking. The warning identifies the mutex and the sleeping function. The first time this happens, copy the message into a debug log so you can find the call site.
+**如何验证。** 启用 `WITNESS` 的内核会在恐慌之前打印警告。警告标识互斥锁和睡眠函数。第一次发生时，将消息复制到调试日志中以便找到调用位置。
 
-### Symptom: `EAGAIN` is returned even when data is available
+### 症状：即使有可用数据也返回 `EAGAIN`
 
-**Cause.** The handler is checking the wrong flag, or it is checking the flag in the wrong place in the loop. Two common variants: checking `ioflag & O_RDONLY` instead of `ioflag & IO_NDELAY`, or returning `EAGAIN` after some bytes have already been transferred (which is the rule from Section 4 you must not break).
+**原因。** 处理程序检查了错误的标志，或者在循环中错误的位置检查标志。两种常见变体：检查 `ioflag & O_RDONLY` 而不是 `ioflag & IO_NDELAY`，或者已经传输了一些字节后返回 `EAGAIN`（这是第4节的规则，你不能违反）。
 
-**Fix.** Re-read Section 5's handler code carefully. The `EAGAIN` path is inside the inner `while (cbuf_used(&sc->cb) == 0)` loop, after the `nbefore` check, only when `ioflag & IO_NDELAY` is non-zero.
+**修复。** 仔细重读第5节的处理程序代码。`EAGAIN` 路径在内部 `while (cbuf_used(&sc->cb) == 0)` 循环中，在 `nbefore` 检查之后，只有当 `ioflag & IO_NDELAY` 非零时。
 
-**How to verify.** Run `rw_myfirst_nb`. Step 5 should successfully read the bytes. If it shows `EAGAIN`, the bug is at one of the two locations above.
+**如何验证。** 运行 `rw_myfirst_nb`。第5步应该成功读取字节。如果显示 `EAGAIN`，bug 在上述两个位置之一。
 
-### Symptom: A write succeeds but a subsequent read gets fewer bytes
+### 症状：写入成功但后续读取获得更少字节
 
-**Cause.** The byte counter is being updated incorrectly, or the cbuf is being modified outside the handlers. A specific failure mode: counting `want` bytes as written when `cbuf_write` only stored `put` bytes (a race in Stage 2 between the cbuf_free check and the cbuf_write call, even though it is not exercised in single-writer use).
+**原因。** 字节计数器更新不正确，或 cbuf 在处理程序之外被修改。特定失败模式：当 `cbuf_write` 只存储了 `put` 字节时，将 `want` 字节计为已写入（阶段 2 中 cbuf_free 检查和 cbuf_write 调用之间的竞争，虽然在单写入者使用中不会被触发）。
 
-**Fix.** Look at the `bytes_written += put` line in `myfirst_write`; it must use the actual return value of `cbuf_write`, not the requested size. Compare `sc->bytes_written` and `sc->bytes_read` over time; they should differ by at most `cbuf_size`.
+**修复。** 查看 `myfirst_write` 中的 `bytes_written += put` 行；它必须使用 `cbuf_write` 的实际返回值，而不是请求的大小。比较 `sc->bytes_written` 和 `sc->bytes_read` 随时间的变化；它们最多应该相差 `cbuf_size`。
 
-**How to verify.** Add a log line: `device_printf(dev, "wrote %zu of %zu\n", put, want);`. If `put != want` ever appears in `dmesg`, you have found the discrepancy.
+**如何验证。** 添加日志行：`device_printf(dev, "wrote %zu of %zu\n", put, want);`。如果 `put != want` 出现在 `dmesg` 中，你找到了差异。
 
-### Symptom: `kldunload` returns `EBUSY`
+### 症状：`kldunload` 返回 `EBUSY`
 
-**Cause.** Some descriptor is still open against the device. The detach refuses to proceed when `active_fhs > 0`.
+**原因。** 某个描述符仍然对设备打开。拆离在 `active_fhs > 0` 时拒绝继续。
 
-**Fix.** Find the process that holds the descriptor open and close it. `fstat | grep myfirst` lists the offending processes. `kill` them if necessary.
+**修复。** 找到持有描述符打开的进程并关闭它。`fstat | grep myfirst` 列出有问题的进程。必要时 `kill` 它们。
 
-**How to verify.** After closing all descriptors (or killing the offending processes), `sysctl dev.myfirst.0.stats.active_fhs` should drop to zero. `kldunload myfirst` should then succeed.
+**如何验证。** 关闭所有描述符（或终止有问题的进程）后，`sysctl dev.myfirst.0.stats.active_fhs` 应该降至零。`kldunload myfirst` 应该随后成功。
 
-### Symptom: Memory growth in `vmstat -m | grep cbuf`
+### 症状：`vmstat -m | grep cbuf` 中内存增长
 
-**Cause.** The driver is allocating without freeing. Either the attach failure path forgot to call `cbuf_destroy`, or the detach path forgot, or there is more than one cbuf being allocated per attach.
+**原因。** 驱动在分配后没有释放。要么 attach 失败路径忘记调用 `cbuf_destroy`，要么 detach 路径忘记了，或者每次 attach 分配了多个 cbuf。
 
-**Fix.** Audit every code path that calls `cbuf_init`. Each call must be matched by exactly one `cbuf_destroy` call before the surrounding context goes away. The standard idiom is to put `cbuf_init` near the top of `attach` and `cbuf_destroy` near the bottom of `detach`, with the failure-path `goto fail_*` chain calling `cbuf_destroy` if attach fails after `cbuf_init`.
+**修复。** 审计每个调用 `cbuf_init` 的代码路径。每个调用必须在周围上下文消失之前恰好被一个 `cbuf_destroy` 调用匹配。标准习惯是将 `cbuf_init` 放在 `attach` 顶部附近，`cbuf_destroy` 放在 `detach` 底部附近，失败路径的 `goto fail_*` 链在 attach 在 `cbuf_init` 之后失败时调用 `cbuf_destroy`。
 
-**How to verify.** `kldload` and `kldunload` the module several times. `vmstat -m | grep cbuf` should show `0` after each `kldunload`.
+**如何验证。** `kldload` 和 `kldunload` 模块几次。`vmstat -m | grep cbuf` 应该在每次 `kldunload` 后显示 `0`。
 
-### Symptom: `select(2)` or `poll(2)` does not wake up
+### 症状：`select(2)` 或 `poll(2)` 不唤醒
 
-**Cause.** The driver is missing a `selwakeup` call when state changes. Either the read path forgot to call `selwakeup(&sc->wsel)` after draining bytes, or the write path forgot to call `selwakeup(&sc->rsel)` after adding bytes.
+**原因。** 驱动在状态改变时缺少 `selwakeup` 调用。要么读取路径在排空字节后忘记调用 `selwakeup(&sc->wsel)`，要么写入路径在添加字节后忘记调用 `selwakeup(&sc->rsel)`。
 
-**Fix.** The pattern: every state change that might make a previously-not-ready condition into a ready condition must be paired with a `selwakeup` call. Drain bytes -> `selwakeup(&sc->wsel)`. Add bytes -> `selwakeup(&sc->rsel)`.
+**修复。** 模式：每个可能将先前不就绪条件变为就绪条件的状态改变必须配对一个 `selwakeup` 调用。排空字节 -> `selwakeup(&sc->wsel)`。添加字节 -> `selwakeup(&sc->rsel)`。
 
-**How to verify.** Run `rw_myfirst_nb`. Step 4 should show `revents=0x41`. If it shows `revents=0x0`, your `selwakeup` is missing or the `myfirst_poll` handler is not setting `revents` correctly.
+**如何验证。** 运行 `rw_myfirst_nb`。第4步应该显示 `revents=0x41`。如果显示 `revents=0x0`，你的 `selwakeup` 缺失或 `myfirst_poll` 处理程序没有正确设置 `revents`。
 
-### Symptom: `truss` shows `EINVAL` for zero-byte reads
+### 症状：`truss` 显示零字节读取的 `EINVAL`
 
-**Cause.** Your handler is rejecting zero-byte reads with `EINVAL`. As discussed in Section 4, zero-byte reads and writes are legal and the handler must not error on them.
+**原因。** 你的处理程序用 `EINVAL` 拒绝零字节读取。如第4节讨论的，零字节读写是合法的，处理程序不能对它们报错。
 
-**Fix.** Remove any `if (uio->uio_resid == 0) return (EINVAL);` early return at the top of `myfirst_read` or `myfirst_write`.
+**修复。** 移除 `myfirst_read` 或 `myfirst_write` 顶部任何 `if (uio->uio_resid == 0) return (EINVAL);` 的早期返回。
 
-**How to verify.** A program that calls `read(fd, NULL, 0)` should see the call return `0`, not `-1` with `EINVAL`.
+**如何验证。** 调用 `read(fd, NULL, 0)` 的程序应该看到调用返回 `0`，而不是 `-1` 和 `EINVAL`。
 
-### Symptom: `ps` shows the reader stuck in a sleep state called something different
+### 症状：`ps` 显示读取者卡在一个不同名称的睡眠状态
 
-**Cause.** Your `mtx_sleep` is being called with a different `wmesg` than you expected. Two common variants: typo (`mfyrd` instead of `myfrd`), or the same handler is being called from a code path where the wait reason is actually different.
+**原因。** 你的 `mtx_sleep` 被调用时使用了与预期不同的 `wmesg`。两种常见变体：拼写错误（`mfyrd` 而不是 `myfrd`），或者同一处理程序从等待原因实际不同的代码路径被调用。
 
-**Fix.** Standardise the `wmesg` strings. `myfrd` for "myfirst read", `myfwr` for "myfirst write". A unique short string per wait point makes `ps -AxH` immediately informative.
+**修复。** 标准化 `wmesg` 字符串。`myfrd` 表示"myfirst read"，`myfwr` 表示"myfirst write"。每个等待点唯一的短字符串使 `ps -AxH` 立即提供信息。
 
-**How to verify.** `ps -AxH` should show `myfrd` for sleeping readers and `myfwr` for sleeping writers.
+**如何验证。** `ps -AxH` 应该为睡眠中的读取者显示 `myfrd`，为睡眠中的写入者显示 `myfwr`。
 
-### Symptom: A signal does not interrupt a blocked read
+### 症状：信号不中断阻塞的读取
 
-**Cause.** The `mtx_sleep` is being called without `PCATCH`. Without `PCATCH`, signals are deferred until the sleep ends for some other reason.
+**原因。** `mtx_sleep` 被调用时没有 `PCATCH`。没有 `PCATCH`，信号被推迟直到睡眠因其他原因结束。
 
-**Fix.** Always pass `PCATCH` for user-driven sleeps. The exception is sleeps that should be uninterruptible (kernel internal logic that must not be cancelled by a signal). For `myfirst_read` and `myfirst_write`, both are user-driven and both should pass `PCATCH`.
+**修复。** 对于用户驱动的睡眠始终传递 `PCATCH`。例外是不应被中断的睡眠（不能被信号取消的内核内部逻辑）。对于 `myfirst_read` 和 `myfirst_write`，两者都是用户驱动的，两者都应该传递 `PCATCH`。
 
-**How to verify.** `cat /dev/myfirst &` followed by `kill -INT %1` should cause `cat` to exit. If `cat` does not exit until you also write to the device (or send `kill -9`), `PCATCH` is missing.
+**如何验证。** `cat /dev/myfirst &` 后跟 `kill -INT %1` 应该导致 `cat` 退出。如果 `cat` 在你也向设备写入（或发送 `kill -9`）之前不退出，`PCATCH` 缺失。
 
-### Symptom: Compiler warns about a missing prototype for `cbuf_read`
+### 症状：编译器警告 `cbuf_read` 缺少原型
 
-**Cause.** The driver source uses `cbuf_read` but does not include `cbuf.h`.
+**原因。** 驱动源码使用 `cbuf_read` 但没有包含 `cbuf.h`。
 
-**Fix.** Add `#include "cbuf.h"` near the top of `myfirst.c`. The file path is relative to the source directory, so as long as both files are in the same directory the include will resolve.
+**修复。** 在 `myfirst.c` 顶部附近添加 `#include "cbuf.h"`。文件路径相对于源码目录，所以只要两个文件在同一目录中，include 就会解析。
 
-**How to verify.** A clean build with no warnings.
+**如何验证。** 干净构建无警告。
 
-### Symptom: `make` complains about missing `bus_if.h` or `device_if.h`
+### 症状：`make` 抱怨缺少 `bus_if.h` 或 `device_if.h`
 
-**Cause.** The Makefile is missing the standard `SRCS+= device_if.h bus_if.h` line that pulls in the auto-generated kobj headers for Newbus.
+**原因。** Makefile 缺少标准的 `SRCS+= device_if.h bus_if.h` 行，该行拉入 Newbus 的自动生成 kobj 头文件。
 
-**Fix.** Use the Makefile from Section 3.
+**修复。** 使用第3节的 Makefile。
 
-**How to verify.** `make clean && make` should succeed without missing-header errors.
+**如何验证。** `make clean && make` 应该成功，不出现缺少头文件的错误。
 
-### Symptom: `kldload` fails with `Exec format error`
+### 症状：`kldload` 失败并显示 "Exec format error"
 
-**Cause.** The .ko was built against a different kernel than the one currently running. This typically happens when you reboot into a different kernel without rebuilding, or when you copy a .ko from one machine to another with different kernel sources.
+**原因。** .ko 是针对与当前运行内核不同的内核构建的。这通常发生在你重启到不同内核而没有重新构建，或从具有不同内核源码的机器复制 .ko 时。
 
-**Fix.** `make clean && make` against the running kernel's `/usr/src`.
+**修复。** 针对运行中内核的 `/usr/src` 执行 `make clean && make`。
 
-**How to verify.** `uname -a` should match the kernel version that built the .ko. Check `dmesg` after the failed `kldload` for more details.
+**如何验证。** `uname -a` 应该匹配构建 .ko 的内核版本。检查失败 `kldload` 后的 `dmesg` 获取更多详情。
 
-### Symptom: The driver reports correct data but loses it after several runs
+### 症状：驱动报告正确数据但在多次运行后丢失
 
-**Cause.** The cbuf is not being reset between attaches, or the softc is not being zero-initialised. With `M_ZERO` on the `malloc(9)` call (and the `cbuf_init` call zero-initializing its own state), this should not happen, but a partial fix that misses one of these can leave stale state.
+**原因。** cbuf 在 attach 之间没有被重置，或 softc 没有被零初始化。使用 `malloc(9)` 调用上的 `M_ZERO`（和 `cbuf_init` 调用零初始化自身状态），这不应该发生，但错过其中之一的的部分修复可能留下陈旧状态。
 
-**Fix.** Audit `myfirst_attach` to make sure every field of the softc is initialised explicitly. Use `M_ZERO` on the `malloc(9)` call that allocates the softc (Newbus does this automatically with `device_get_softc`, but verify). Use `cbuf_init` to set the cbuf's indices to zero.
+**修复。** 审计 `myfirst_attach` 确保 softc 的每个字段都被显式初始化。在分配 softc 的 `malloc(9)` 调用上使用 `M_ZERO`（Newbus 通过 `device_get_softc` 自动完成，但请验证）。使用 `cbuf_init` 将 cbuf 的索引设置为零。
 
-**How to verify.** `kldload`, write some data, `kldunload`, `kldload` again. The new attach should report `cb_used = 0`.
+**如何验证。** `kldload`，写入一些数据，`kldunload`，再次 `kldload`。新的 attach 应该报告 `cb_used = 0`。
 
-### Symptom: `producer_consumer` reports a small number of mismatches under heavy load
+### 症状：`producer_consumer` 在重负载下报告少量不匹配
 
-**Cause.** A subtle locking bug, often related to the order of `wakeup` calls and the inner sleep loop's re-check. The classic symptom: under contention, occasionally a thread wakes up and consumes bytes that another thread had thought were still available.
+**原因。** 一个微妙的锁定 bug，通常与 `wakeup` 调用的顺序和内部睡眠循环的重新检查有关。典型症状：在竞争下，偶尔线程醒来并消耗另一个线程认为仍然可用的字节。
 
-**Fix.** Verify that every `mtx_sleep` is in a `while` (not `if`) loop, and that the loop re-checks the condition after waking. The wakeup is a *hint*, not a guarantee; a woken thread might find the condition false again because another thread got there first.
+**修复。** 验证每个 `mtx_sleep` 在 `while`（不是 `if`）循环中，并且循环在醒来后重新检查条件。wakeup 是一个*提示*，不是保证；醒来的线程可能发现条件再次为假，因为另一个线程先到了。
 
-**How to verify.** `producer_consumer` should report zero mismatches across multiple runs. A mismatch count that varies between runs suggests a race; a mismatch count that is always exactly N suggests an off-by-one bug.
+**如何验证。** `producer_consumer` 应该在多次运行中报告零不匹配。运行之间变化的不匹配计数建议存在竞争；总是恰好为 N 的不匹配计数建议差一错误。
 
-### General Advice for Debugging
+### 调试的一般建议
 
-Three habits make driver debugging much faster.
+三个习惯使驱动调试快得多。
 
-The first is to have a `WITNESS`-enabled kernel ready. `WITNESS` catches lock-ordering violations and "sleeping with mutex held" bugs that a production kernel would silently allow. The performance overhead is significant, so run `WITNESS` in your lab environment, not in production.
+第一个是准备好启用 `WITNESS` 的内核。`WITNESS` 捕获生产内核会静默允许的锁排序违规和"持有互斥锁睡眠"bug。性能开销很大，所以在实验室环境中运行 `WITNESS`，而不是在生产中。
 
-The second is to add `device_printf` log lines liberally during development, then remove them or guard them behind `myfirst_debug` before committing. The log buffer is finite, so do not log per-byte; one line per I/O call is the right granularity.
+第二个是在开发期间大量添加 `device_printf` 日志行，然后在提交之前移除它们或用 `myfirst_debug` 保护。日志缓冲区是有限的，所以不要逐字节记录；每次 I/O 调用一行是正确的粒度。
 
-The third is to compile with `-Wall -Wextra` and treat warnings as bugs. The kernel build system passes a lot of warning flags by default; pay attention to them. Almost every warning is the kernel telling you about a real or potential bug.
+第三个是用 `-Wall -Wextra` 编译并将警告视为 bug。内核构建系统默认传递很多警告标志；注意它们。几乎每个警告都是内核在告诉你一个真实的或潜在的 bug。
 
-When all else fails, sit back and trace through the code path on paper. A driver this size is small enough to fit on a single sheet. Ninety percent of the time, drawing the call graph and the lock acquisitions in order shows you the bug.
+当所有其他方法都失败时，坐下来在纸上追踪代码路径。这个大小的驱动足够小，可以放在一张纸上。百分之九十的时间，按顺序画出调用图和锁获取就会显示 bug。
 
-## Quick Reference: Patterns and Primitives
+## 快速参考：模式和原语
 
-This reference is the chapter's material reduced to fast-lookup form. Use it after you have read the chapter; it is a reminder, not a tutorial.
+此参考将本章材料缩减为快速查找形式。在阅读完章节后使用它；它是提醒，不是教程。
 
-### The Circular Buffer API
+### 循环缓冲区 API
 
 ```c
 struct cbuf {
@@ -3503,12 +3503,12 @@ size_t  cbuf_write(struct cbuf *cb, const void *src, size_t n);
 size_t  cbuf_read(struct cbuf *cb, void *dst, size_t n);
 ```
 
-Rules:
-- The cbuf does not lock; the caller is responsible.
-- `cbuf_write` and `cbuf_read` clamp `n` to available space or live data and return the actual count.
-- `cbuf_used` and `cbuf_free` return current state under the assumption that the caller holds whatever lock protects the cbuf.
+规则：
+- cbuf 不加锁；调用者负责。
+- `cbuf_write` 和 `cbuf_read` 将 `n` 限制为可用空间或活跃数据并返回实际计数。
+- `cbuf_used` 和 `cbuf_free` 在假设调用者持有保护 cbuf 的任何锁的情况下返回当前状态。
 
-### The Driver-Level Helpers
+### 驱动级辅助函数
 
 ```c
 size_t  myfirst_buf_read(struct myfirst_softc *sc, void *dst, size_t n);
@@ -3519,12 +3519,12 @@ int     myfirst_wait_room(struct myfirst_softc *sc, int ioflag, ssize_t nbefore,
             struct uio *uio);
 ```
 
-Rules:
-- All four helpers assert that `sc->mtx` is held with `mtx_assert(MA_OWNED)`.
-- The wait helpers return `-1` to mean "break the outer loop, return 0 to user space".
-- The wait helpers return `EAGAIN`, `EINTR`, `ERESTART`, or `ENXIO` for the corresponding conditions.
+规则：
+- 所有四个辅助函数用 `mtx_assert(MA_OWNED)` 断言 `sc->mtx` 被持有。
+- 等待辅助函数返回 `-1` 表示"中断外部循环，向用户空间返回 0"。
+- 等待辅助函数为相应条件返回 `EAGAIN`、`EINTR`、`ERESTART` 或 `ENXIO`。
 
-### The Read Handler Spine
+### 读取处理程序骨架
 
 ```c
 nbefore = uio->uio_resid;
@@ -3550,7 +3550,7 @@ while (uio->uio_resid > 0) {
 return (0);
 ```
 
-### The Write Handler Spine
+### 写入处理程序骨架
 
 ```c
 nbefore = uio->uio_resid;
@@ -3581,7 +3581,7 @@ while (uio->uio_resid > 0) {
 return (0);
 ```
 
-### The Sleep Pattern
+### 睡眠模式
 
 ```c
 mtx_lock(&sc->mtx);
@@ -3599,13 +3599,13 @@ while (CONDITION) {
 /* condition is false now; act on the buffer */
 ```
 
-Rules:
-- Use `while`, not `if`, around the condition.
-- Always pass `PCATCH` for user-driven sleeps.
-- Always re-check the condition after `mtx_sleep` returns.
-- Always check `is_attached` after waking, in case detach is pending.
+规则：
+- 在条件周围使用 `while`，不是 `if`。
+- 对于用户驱动的睡眠始终传递 `PCATCH`。
+- 在 `mtx_sleep` 返回后始终重新检查条件。
+- 醒来后始终检查 `is_attached`，以防拆离待处理。
 
-### The Wake Pattern
+### 唤醒模式
 
 ```c
 /* After a state change that might unblock a sleeper: */
@@ -3613,13 +3613,13 @@ wakeup(CHANNEL);
 selwakeup(SELINFO);
 ```
 
-Rules:
-- The channel must match the channel passed to `mtx_sleep`.
-- The selinfo must be the one that `selrecord` registered against.
-- Use `wakeup` (wake all) for shared waiters; `wakeup_one` for single-handoff patterns.
-- Spurious wakeups are safe; missing wakeups are bugs.
+规则：
+- 通道必须匹配传递给 `mtx_sleep` 的通道。
+- selinfo 必须是 `selrecord` 注册的那个。
+- 对共享等待者使用 `wakeup`（唤醒所有）；对单次交接模式使用 `wakeup_one`。
+- 虚假唤醒是安全的；缺失唤醒是 bug。
 
-### The `d_poll` Handler
+### `d_poll` 处理程序
 
 ```c
 static int
@@ -3646,7 +3646,7 @@ myfirst_poll(struct cdev *dev, int events, struct thread *td)
 }
 ```
 
-### The `d_mmap` Handler
+### `d_mmap` 处理程序
 
 ```c
 static int
@@ -3666,7 +3666,7 @@ myfirst_mmap(struct cdev *dev, vm_ooffset_t offset, vm_paddr_t *paddr,
 }
 ```
 
-### The `cdevsw`
+### `cdevsw`
 
 ```c
 static struct cdevsw myfirst_cdevsw = {
@@ -3703,7 +3703,7 @@ static struct cdevsw myfirst_cdevsw = {
 | `IO_DIRECT`    | `O_DIRECT`     | Bypass caching where possible          |
 | `IO_SYNC`      | `O_FSYNC`      | (write only) Synchronous semantics     |
 
-`O_NONBLOCK == IO_NDELAY` per the kernel's CTASSERT.
+`O_NONBLOCK == IO_NDELAY` 根据内核的 CTASSERT。
 
 ### `poll(2)` Events
 
@@ -3717,7 +3717,7 @@ static struct cdevsw myfirst_cdevsw = {
 | `POLLHUP`    | Hangup (peer closed)                             |
 | `POLLNVAL`   | Invalid file descriptor                          |
 
-A driver typically handles `POLLIN | POLLRDNORM` for read readiness and `POLLOUT | POLLWRNORM` for write readiness. The other events are usually set by the kernel, not the driver.
+驱动通常处理 `POLLIN | POLLRDNORM` 表示读取就绪，`POLLOUT | POLLWRNORM` 表示写入就绪。其他事件通常由内核设置，不是驱动。
 
 ### Memory Allocator Reference
 
@@ -3825,31 +3825,31 @@ examples/part-02/ch10-handling-io-efficiently/
         Makefile
 ```
 
-Each stage directory is independent; you can `make` and `kldload` any of them without touching the others. The userland tools are shared across all stages.
+每个阶段目录是独立的；你可以 `make` 和 `kldload` 其中任何一个而不触及其他的。用户态工具在所有阶段之间共享。
 
-### A Mental Model in One Paragraph
+### 一段话的心智模型
 
-The driver owns a circular buffer, protected by a single mutex. A reader holds the mutex while transferring bytes out of the buffer into a stack-resident bounce, releases the mutex, copies the bounce into user space with `uiomove`, wakes any waiting writers, and loops until the user's request is satisfied or the buffer is empty. A writer mirrors this: holds the mutex, copies user bytes into a bounce, releases the mutex, copies the bounce into the buffer, wakes any waiting readers, and loops. When either the buffer is empty (for reads) or full (for writes), the handler either sleeps with the mutex as interlock (default mode) or returns `EAGAIN` (non-blocking mode). `select(2)` and `poll(2)` integration is provided through `selrecord` (in `d_poll`) and `selwakeup` (in the I/O handlers). The detach path waits for all descriptors to close and then frees everything.
+驱动拥有一个循环缓冲区，由单个互斥锁保护。读取者持有互斥锁将字节从缓冲区传输到栈驻留弹跳缓冲区，释放互斥锁，用 `uiomove` 将弹跳缓冲区复制到用户空间，唤醒任何等待的写入者，并循环直到用户请求满足或缓冲区为空。写入者镜像此过程：持有互斥锁，将用户字节复制到弹跳缓冲区，释放互斥锁，将弹跳缓冲区复制到缓冲区，唤醒任何等待的读取者，并循环。当缓冲区为空（对于读取）或满（对于写入）时，处理程序要么以互斥锁作为互锁睡眠（默认模式），要么返回 `EAGAIN`（非阻塞模式）。`select(2)` 和 `poll(2)` 集成通过 `selrecord`（在 `d_poll` 中）和 `selwakeup`（在 I/O 处理程序中）提供。拆离路径等待所有描述符关闭然后释放一切。
 
-That paragraph fits in your head. Everything else in this chapter is the careful elaboration of how to make each piece of it work.
+这段话适合放在你脑中。本章其余部分是关于如何使每一部分工作的详细阐述。
 
-## Appendix: A Source-Reading Walkthrough of `evdev/cdev.c`
+## 附录：`evdev/cdev.c` 的源码阅读演练
 
-The chapter has pointed at `/usr/src/sys/dev/evdev/cdev.c` several times as the cleanest example in the tree of a character device that does what `myfirst` now does: a per-client ring buffer, blocking reads, non-blocking support, `select`/`poll`/`kqueue` integration. Reading that file once, with the patterns from this chapter in hand, is the fastest way to confirm that the kernel really does work the way the chapter has been describing. This appendix walks through the relevant pieces.
+本章多次指向 `/usr/src/sys/dev/evdev/cdev.c`，作为树中做 `myfirst` 现在做的事情的最干净字符设备示例：每客户端环形缓冲区、阻塞读取、非阻塞支持、`select`/`poll`/`kqueue` 集成。带着本章的模式阅读该文件一次，是确认内核确实按照本章描述的方式工作的最快方式。本附录演练相关部分。
 
-The goal is *not* to teach `evdev`. It is to use `evdev` as an exhibit. By the end of this walkthrough you should feel that what you built in `myfirst` is the same shape as what the kernel uses for real input devices. The differences are in the details (the protocol, the structures, the layered driver stack), not in the underlying patterns.
+目标*不是*教授 `evdev`。而是使用 `evdev` 作为展示。到演练结束时，你应该感到你在 `myfirst` 中构建的与内核用于真实输入设备的是相同形状。差异在细节中（协议、结构、分层驱动栈），而不在底层模式。
 
-### What `evdev` Is
+### `evdev` 是什么
 
-`evdev` is FreeBSD's port of the Linux event-device interface. It exposes input devices (keyboards, mice, touchscreens) through `/dev/input/eventN` nodes that user-space programs (X servers, Wayland compositors, console handlers) read from to get a stream of input events. Each event is a fixed-size structure with a timestamp, a type, a code, and a value.
+`evdev` 是 FreeBSD 对 Linux 事件设备接口的移植。它通过 `/dev/input/eventN` 节点暴露输入设备（键盘、鼠标、触摸屏），用户空间程序（X 服务器、Wayland 合成器、控制台处理程序）从中读取以获取输入事件流。每个事件是一个固定大小的结构，包含时间戳、类型、代码和值。
 
-The driver layer that interests us is the per-client cdev. When a process opens `/dev/input/event0`, the kernel creates a `struct evdev_client` for that descriptor, attaches it to the underlying device, and uses it as the per-open buffer. Reads pull events out of the buffer; writes push events into it (for some devices); `select`/`poll`/`kqueue` report when events are available.
+我们感兴趣的驱动层是每客户端 cdev。当进程打开 `/dev/input/event0` 时，内核为该描述符创建一个 `struct evdev_client`，将其附加到底层设备，并将其用作每次打开的缓冲区。读取从缓冲区拉取事件；写入向其推送事件（对于某些设备）；`select`/`poll`/`kqueue` 报告何时有事件可用。
 
-That description should sound very familiar by now. It is the same architecture as `myfirst` Stage 4, with three differences: the buffer is per-descriptor rather than per-device; the unit of transfer is a fixed-size structure rather than a byte; and the driver participates in a larger framework of input handling.
+这个描述现在应该听起来非常熟悉。它与 `myfirst` 阶段 4 是相同的架构，有三个差异：缓冲区是每描述符而不是每设备；传输单位是固定大小结构而不是字节；驱动参与更大的输入处理框架。
 
-### The Per-Client State
+### 每客户端状态
 
-Open `/usr/src/sys/dev/evdev/evdev_private.h` (the file is short; you can read the relevant parts in a couple of minutes). The key structure is `struct evdev_client`:
+打开 `/usr/src/sys/dev/evdev/evdev_private.h`（文件很短；你可以在几分钟内阅读相关部分）。关键结构是 `struct evdev_client`：
 
 ```c
 struct evdev_client {
@@ -3870,21 +3870,21 @@ struct evdev_client {
 };
 ```
 
-Compare this against your `myfirst` softc:
+将此与你的 `myfirst` softc 比较：
 
-- `ec_evdev` is `evdev`'s analogue of `dev->si_drv1` (a back-pointer from the per-client state to the device-wide state).
-- `ec_buffer_mtx` is the per-client mutex; `myfirst`'s `sc->mtx` is per-device.
-- `ec_buffer_size`, `ec_buffer_head`, `ec_buffer_tail`, `ec_buffer_ready` are the circular-buffer indices. Notice that `evdev` uses an explicit `tail` instead of a derived one; the code is slightly different but the structure is the same.
-- `ec_blocked` is a hint flag for the wakeup logic.
-- `ec_revoked` flags a forcibly-disconnected client; this is the equivalent of `is_attached` in `myfirst`.
-- `ec_selp` is the `selinfo` for `select`/`poll`/`kqueue` support, exactly like `sc->rsel` and `sc->wsel` in your driver (combined here because evdev only does read-readiness; there is no concept of "write would block").
-- `ec_buffer[]` is the flexible-array-member that holds the actual events.
+- `ec_evdev` 是 `evdev` 中 `dev->si_drv1` 的等价物（从每客户端状态到设备范围状态的反向指针）。
+- `ec_buffer_mtx` 是每客户端互斥锁；`myfirst` 的 `sc->mtx` 是每设备的。
+- `ec_buffer_size`、`ec_buffer_head`、`ec_buffer_tail`、`ec_buffer_ready` 是循环缓冲区索引。注意 `evdev` 使用显式 `tail` 而不是推导的；代码略有不同但结构相同。
+- `ec_blocked` 是唤醒逻辑的提示标志。
+- `ec_revoked` 标记强制断开的客户端；这是 `myfirst` 中 `is_attached` 的等价物。
+- `ec_selp` 是 `select`/`poll`/`kqueue` 支持的 `selinfo`，与你驱动中的 `sc->rsel` 和 `sc->wsel` 完全相同（这里合并了，因为 evdev 只做读取就绪；没有"写入会阻塞"的概念）。
+- `ec_buffer[]` 是保存实际事件的灵活数组成员。
 
-The patterns are the same. The naming is different.
+模式相同。命名不同。
 
-### The Read Handler
+### 读取处理程序
 
-Open `/usr/src/sys/dev/evdev/cdev.c` and find `evdev_read`:
+打开 `/usr/src/sys/dev/evdev/cdev.c` 并找到 `evdev_read`：
 
 ```c
 static int
@@ -3945,21 +3945,21 @@ evdev_read(struct cdev *dev, struct uio *uio, int ioflag)
 }
 ```
 
-Walk through it slowly.
+慢慢走一遍。
 
-The handler retrieves the per-client state with `devfs_get_cdevpriv`, exactly as `myfirst_read` does. The `ec_revoked` check is `evdev`'s equivalent of `myfirst`'s `is_attached` check, except that `evdev` returns `ENODEV` rather than `ENXIO` (both are valid choices for "the device is gone").
+处理程序用 `devfs_get_cdevpriv` 获取每客户端状态，与 `myfirst_read` 完全相同。`ec_revoked` 检查是 `evdev` 中 `myfirst` 的 `is_attached` 检查的等价物，除了 `evdev` 返回 `ENODEV` 而不是 `ENXIO`（两者都是"设备已消失"的有效选择）。
 
-The handler then validates that the requested transfer size is a multiple of an event-record size (because partial events make no sense to deliver). This is a layer above what `myfirst` does, and it is specific to event-stream devices.
+处理程序然后验证请求的传输大小是事件记录大小的倍数（因为传递部分事件没有意义）。这是 `myfirst` 所做之上的一个层，特定于事件流设备。
 
-Then, exactly as Section 5 described, the handler enters a *check-wait-recheck* loop. If the buffer is empty (`EVDEV_CLIENT_EMPTYQ(client)`), the handler either returns `EWOULDBLOCK` (the same value as `EAGAIN`) for non-blocking callers, or sleeps with `mtx_sleep` and `PCATCH`. The sleep channel is `client` itself; the mutex interlock is `&client->ec_buffer_mtx`. When the sleep returns, the handler re-checks `ec_revoked`, returning `ENODEV` if the client has been disconnected during the sleep.
+然后，正如第5节描述的，处理程序进入*检查-等待-重新检查*循环。如果缓冲区为空（`EVDEV_CLIENT_EMPTYQ(client)`），处理程序要么为非阻塞调用者返回 `EWOULDBLOCK`（与 `EAGAIN` 相同的值），要么用 `mtx_sleep` 和 `PCATCH` 睡眠。睡眠通道是 `client` 本身；互斥锁互锁是 `&client->ec_buffer_mtx`。当睡眠返回时，处理程序重新检查 `ec_revoked`，如果客户端在睡眠期间被断开则返回 `ENODEV`。
 
-After the wait, the handler enters the transfer loop. It picks an event off the buffer (with `bcopy` into a stack-resident `event` variable), advances `ec_buffer_head` modulo the buffer size, releases the mutex, and calls `uiomove` to push the event to user space. Then it reacquires the mutex and continues until either the buffer empties or the user's request is satisfied.
+等待之后，处理程序进入传输循环。它从缓冲区取下一个事件（用 `bcopy` 到栈驻留的 `event` 变量），推进 `ec_buffer_head` 取模缓冲区大小，释放互斥锁，并调用 `uiomove` 将事件推送到用户空间。然后重新获取互斥锁并继续，直到缓冲区排空或用户请求满足。
 
-This is the bounce-buffer pattern from Section 3, with `event` playing the role of `bounce`. The cbuf operation is `bcopy(head, &event.t, evsize)` (single-event copy out of the ring) followed by `uiomove(&event, evsize, uio)` (transfer to user). The mutex is held only across the cbuf operation, never across `uiomove`. This is exactly the rule we made operational in `myfirst`.
+这是第3节的弹跳缓冲区模式，`event` 扮演 `bounce` 的角色。cbuf 操作是 `bcopy(head, &event.t, evsize)`（从环形中单事件复制出来）后跟 `uiomove(&event, evsize, uio)`（传输到用户）。互斥锁只跨越 cbuf 操作持有，从不跨越 `uiomove`。这正是我们在 `myfirst` 中实施的规则。
 
-### The Wakeup
+### 唤醒
 
-Find `evdev_notify_event` (the function that gets called when a new event is delivered into a client's buffer):
+找到 `evdev_notify_event`（当新事件被交付到客户端缓冲区时调用的函数）：
 
 ```c
 void
@@ -3981,13 +3981,13 @@ evdev_notify_event(struct evdev_client *client)
 }
 ```
 
-There is the wake-up. `wakeup(client)` matches the `mtx_sleep(client, ...)` from `evdev_read`. `selwakeup(&client->ec_selp)` matches the `selrecord` we will look at in a moment. `KNOTE_LOCKED` is the `kqueue` analogue of `selwakeup`; we have not built that yet (it is Chapter 11 territory) but the pattern is the same.
+这就是唤醒。`wakeup(client)` 匹配 `evdev_read` 中的 `mtx_sleep(client, ...)`。`selwakeup(&client->ec_selp)` 匹配我们稍后将看到的 `selrecord`。`KNOTE_LOCKED` 是 `selwakeup` 的 `kqueue` 等价物；我们还没有构建它（这是第11章的领域）但模式相同。
 
-The `ec_blocked` flag is an optimisation: if no client is currently sleeping, the wakeup is skipped. This is a small but useful optimisation. `myfirst` does not have it because the cost is negligible in our use case, but you could add the same check trivially.
+`ec_blocked` 标志是一个优化：如果没有客户端当前在睡眠，唤醒被跳过。这是一个小但有用的优化。`myfirst` 没有它，因为在我们用例中成本可以忽略不计，但你可以轻松添加相同的检查。
 
-### The Poll
+### Poll
 
-Find `evdev_poll`:
+找到 `evdev_poll`：
 
 ```c
 static int
@@ -4016,13 +4016,13 @@ evdev_poll(struct cdev *dev, int events, struct thread *td)
 }
 ```
 
-This is essentially identical to the `myfirst_poll` from Section 5, with two differences. `evdev` only handles `POLLIN`; there is no `POLLOUT` because input events are unidirectional. And `evdev` returns `POLLNVAL` if `devfs_get_cdevpriv` fails, which is the conventional "this descriptor is invalid" response (compared to `myfirst`'s simpler return-zero approach).
+这与第5节的 `myfirst_poll` 本质上相同，有两个差异。`evdev` 只处理 `POLLIN`；没有 `POLLOUT` 因为输入事件是单向的。而且 `evdev` 在 `devfs_get_cdevpriv` 失败时返回 `POLLNVAL`，这是传统的"此描述符无效"响应（与 `myfirst` 更简单的返回零方法相比）。
 
-The pattern is the one Section 5 introduced: check the condition, return ready if it is true, register with `selrecord` if it is not. The `ec_selected` flag is again a wakeup-elision optimisation; you can ignore it for understanding.
+模式是第5节引入的：检查条件，如果为真则返回就绪，如果不为真则用 `selrecord` 注册。`ec_selected` 标志又是一个唤醒省略优化；理解时可以忽略它。
 
-### The kqfilter
+### kqfilter
 
-Find `evdev_kqfilter`:
+找到 `evdev_kqfilter`：
 
 ```c
 static int
@@ -4050,122 +4050,122 @@ evdev_kqfilter(struct cdev *dev, struct knote *kn)
 }
 ```
 
-This is the `kqueue` registration handler. It is one of Chapter 11's topics; we are showing it here only to point out that the `selinfo`'s `si_note` field is what `kqueue` hooks into. The `selrecord`/`selwakeup` machinery for `select`/`poll`, and the `knlist_add`/`KNOTE_LOCKED` machinery for `kqueue`, share the same `selinfo` structure. That sharing is what lets a single set of state-change calls (in `evdev_notify_event`) wake all three readiness-notification paths at once.
+这是 `kqueue` 注册处理程序。它是第11章的主题之一；我们在这里展示它只是为了指出 `selinfo` 的 `si_note` 字段是 `kqueue` 挂钩的地方。`select`/`poll` 的 `selrecord`/`selwakeup` 机制和 `kqueue` 的 `knlist_add`/`KNOTE_LOCKED` 机制共享相同的 `selinfo` 结构。这种共享让一组状态改变调用（在 `evdev_notify_event` 中）可以同时唤醒所有三个就绪通知路径。
 
-When we extend `myfirst` with `kqueue` support in Chapter 11, the changes will fit into roughly the same pattern: a `myfirst_kqfilter` handler that registers against `&sc->rsel.si_note`, a `KNOTE_LOCKED(&sc->rsel.si_note, 0)` call alongside each `selwakeup(&sc->rsel)`. The substrate is here already.
+当我们在第11章用 `kqueue` 支持扩展 `myfirst` 时，更改将大致符合相同的模式：一个注册到 `&sc->rsel.si_note` 的 `myfirst_kqfilter` 处理程序，一个在每个 `selwakeup(&sc->rsel)` 旁边的 `KNOTE_LOCKED(&sc->rsel.si_note, 0)` 调用。基础已经在这里了。
 
-### What the Walkthrough Confirms
+### 演练确认了什么
 
-Three things should be clear now.
+现在应该清楚三件事。
 
-The first is that the *patterns* you have been building are not invented for this book. They are the patterns the kernel uses, in a real driver that ships with FreeBSD and is exercised by every keyboard and mouse user every day. You can read this code, recognise what each section is doing, and explain it. That is a real skill that pays off in every later chapter.
+第一，你一直在构建的*模式*不是为本书发明的。它们是内核使用的模式，在一个随 FreeBSD 发布的真实驱动中，每天被每个键盘和鼠标用户使用。你可以阅读这段代码，识别每个部分在做什么，并解释它。这是一项在每个后续章节都会产生回报的真实技能。
 
-The second is that the *details* differ between drivers. `evdev` uses an explicit `tail` index. It uses fixed-size event records instead of bytes. It has per-client buffers instead of per-device. It uses `bcopy` instead of a cbuf abstraction. None of these differences invalidate the underlying pattern; they are choices about how to specialise the pattern for a specific use case.
+第二，驱动之间的*细节*不同。`evdev` 使用显式 `tail` 索引。它使用固定大小的事件记录而不是字节。它有每客户端缓冲区而不是每设备。它使用 `bcopy` 而不是 cbuf 抽象。这些差异没有一个使底层模式无效；它们是关于如何为特定用例特化模式的选择。
 
-The third is that *you can read more*. With a couple of hours and a coffee, you can work through `/usr/src/sys/dev/uart/uart_core.c` or `/usr/src/sys/dev/snp/snp.c`. Each one will look different at first glance, but the buffer, the locking, the sleep / wake, the poll: those will be familiar. The chapter has handed you a vocabulary; the kernel source is where you exercise it.
+第三，*你可以阅读更多*。用几个小时和一杯咖啡，你可以读完 `/usr/src/sys/dev/uart/uart_core.c` 或 `/usr/src/sys/dev/snp/snp.c`。每个乍一看都不同，但缓冲区、锁定、睡眠/唤醒、poll：那些将是熟悉的。本章给了你词汇；内核源码是你练习它的地方。
 
-### A Short Reading Plan
+### 短期阅读计划
 
-If you want to build the habit of reading kernel source as part of your driver development workflow, here is a short plan. Spend an hour a week, for three weeks, on the following.
+如果你想养成将阅读内核源码作为驱动开发工作流程一部分的习惯，这里有一个短期计划。每周花一个小时，连续三周，做以下事情。
 
-Week one: re-read `/usr/src/sys/dev/null/null.c` and `/usr/src/sys/dev/evdev/cdev.c`. Compare them. The first is the simplest possible character device; the second is a competent buffered one. Note exactly which features each file has and why.
+第一周：重读 `/usr/src/sys/dev/null/null.c` 和 `/usr/src/sys/dev/evdev/cdev.c`。比较它们。第一个是最简单的可能字符设备；第二个是一个合格的缓冲设备。确切记录每个文件有哪些功能以及为什么。
 
-Week two: read `/usr/src/sys/dev/random/randomdev.c`. It is bigger than `evdev` but uses the same patterns, with the addition of an entropy-collection layer underneath. Note how `randomdev_read` differs from `evdev_read` and `myfirst_read`, and why.
+第二周：阅读 `/usr/src/sys/dev/random/randomdev.c`。它比 `evdev` 更大但使用相同的模式，额外有一个底层的熵收集层。注意 `randomdev_read` 如何与 `evdev_read` 和 `myfirst_read` 不同，以及为什么。
 
-Week three: pick a driver in `/usr/src/sys/dev/` that interests you (a USB driver, a network driver, a storage driver). Read the part of it that handles user-space I/O. By now the patterns should be familiar enough that the unfamiliar parts (bus binding, hardware register access, DMA setup) stand out as the *new* things to learn, not as obstacles to understanding the I/O path.
+第三周：在 `/usr/src/sys/dev/` 中选择一个你感兴趣的驱动（USB 驱动、网络驱动、存储驱动）。阅读处理用户空间 I/O 的部分。现在模式应该足够熟悉，不熟悉的部分（总线绑定、硬件寄存器访问、DMA 设置）将作为要学习的*新*东西突出出来，而不是理解 I/O 路径的障碍。
 
-After three weeks of this rhythm, you will have read more driver code than most professional kernel developers do in a typical month. The investment compounds.
+三周这种节奏后，你将比大多数专业内核开发者在典型一个月中阅读更多驱动代码。投资会复利增长。
 
 ## 章节总结
 
-This chapter took the in-kernel buffer from Chapter 9, which was a linear FIFO that wasted half its capacity, and turned it into a real circular buffer with proper partial-I/O semantics, blocking and non-blocking modes, and `poll(2)` integration. The driver you finish the chapter with is meaningfully better than the one you started with, in four specific ways.
+本章将第9章的内核缓冲区（一个浪费一半容量的线性 FIFO）变成了一个真正的循环缓冲区，具有适当的部分 I/O 语义、阻塞和非阻塞模式以及 `poll(2)` 集成。你完成本章时的驱动在四个具体方面比开始时的驱动明显更好。
 
-It uses its full capacity. The circular buffer keeps the entire allocation in play. A steady writer and a matching reader can keep the buffer at any fill level indefinitely; the wrap-around is invisible to the I/O handlers because it lives inside the cbuf abstraction.
+它使用全部容量。循环缓冲区保持整个分配可用。稳定的生产者和匹配的消费者可以无限期地在任何填充水平保持缓冲区；环绕对 I/O 处理程序不可见，因为它位于 cbuf 抽象内部。
 
-It honours partial transfers. Both `myfirst_read` and `myfirst_write` loop until they cannot make progress, then return zero with `uio_resid` reflecting the unconsumed portion. A user-space caller that loops on `read(2)` or `write(2)` will see correct UNIX semantics. A caller that does not loop will still see correct counts; the driver does not silently throw bytes away.
+它遵循部分传输。`myfirst_read` 和 `myfirst_write` 都循环直到无法取得进展，然后返回零，`uio_resid` 反映未消耗的部分。循环 `read(2)` 或 `write(2)` 的用户空间调用者将看到正确的 UNIX 语义。不循环的调用者仍将看到正确的计数；驱动不会静默丢弃字节。
 
-It blocks correctly. A reader that finds the buffer empty sleeps on a clear channel, with the mutex released atomically; a writer that adds bytes wakes the sleeper. The same pattern works in the other direction. Signals are honoured through `PCATCH`, so the user's Ctrl-C interrupts a blocked reader within microseconds.
+它正确阻塞。发现缓冲区为空的读取者在清晰的通道上睡眠，互斥锁原子释放；添加字节的写入者唤醒睡眠者。相同的模式在相反方向也有效。信号通过 `PCATCH` 被遵循，所以用户的 Ctrl-C 在微秒内中断阻塞的读取者。
 
-It supports non-blocking mode. A descriptor opened with `O_NONBLOCK` (or with the flag set later via `fcntl(2)`) sees `EAGAIN` instead of a sleep. A `d_poll` handler reports `POLLIN` and `POLLOUT` correctly based on the buffer's state, and `selrecord(9)` plus `selwakeup(9)` ensure that `select(2)` and `poll(2)` callers wake when readiness changes.
+它支持非阻塞模式。用 `O_NONBLOCK` 打开的描述符（或稍后通过 `fcntl(2)` 设置标志）看到 `EAGAIN` 而不是睡眠。`d_poll` 处理程序根据缓冲区状态正确报告 `POLLIN` 和 `POLLOUT`，`selrecord(9)` 加 `selwakeup(9)` 确保当就绪状态改变时 `select(2)` 和 `poll(2)` 调用者被唤醒。
 
-Each of those capabilities is built up in a numbered section, each with code that compiles, loads, and behaves predictably. The chapter's stages (a userland buffer, a kernel splice, a blocking-aware version, a poll-aware refactor, a memory-mapped variant) form a clear progression that matches the order in which a beginner naturally encounters these concerns.
+这些能力每一个都在编号的节中构建，每节都有编译、加载和行为可预测的代码。本章的阶段（用户态缓冲区、内核拼接、阻塞感知版本、poll 感知重构、内存映射变体）形成清晰的进展，匹配初学者自然遇到这些关注点的顺序。
 
-Along the way we covered three supplementary topics that often appear next to buffered I/O in real drivers: `d_mmap(9)`, the patterns and limitations of zero-copy thinking, and the readahead and write-coalescing patterns used by high-throughput drivers. None of these is a Chapter 10 topic in its own right, but each one builds naturally on the buffer abstraction you have just put in place.
+沿途我们涵盖了三个经常在真实驱动中与缓冲 I/O 一起出现的补充主题：`d_mmap(9)`、零拷贝思考的模式和限制、以及高吞吐量驱动使用的预读和写合并模式。这些都不是第10章本身的主题，但每一个都自然地建立在你刚刚建立的缓冲区抽象之上。
 
-We exercised the driver with five new user-space test programs (`rw_myfirst_v2`, `rw_myfirst_nb`, `producer_consumer`, `stress_rw`, `mmap_myfirst`) plus the standard base-system tools (`dd`, `cat`, `hexdump`, `truss`, `sysctl`, `vmstat`). The combination is enough to catch most of the bugs this material typically produces. The Troubleshooting section catalogues those bugs with their symptoms and fixes; keep it bookmarked.
+我们用五个新的用户空间测试程序（`rw_myfirst_v2`、`rw_myfirst_nb`、`producer_consumer`、`stress_rw`、`mmap_myfirst`）加上标准基本系统工具（`dd`、`cat`、`hexdump`、`truss`、`sysctl`、`vmstat`）对驱动进行了测试。组合足以捕获这些材料通常产生的大多数 bug。故障排除部分对这些 bug 及其症状和修复进行了分类；保持书签。
 
-Finally, we refactored the buffer access into a small set of helpers (`myfirst_buf_read`, `myfirst_buf_write`, `myfirst_wait_data`, `myfirst_wait_room`), wrote a one-paragraph locking-strategy comment near the top of the source, and put the cbuf into its own file with its own `MALLOC_DEFINE`. The driver's source is now in the shape that Chapter 11 wants: clear locking discipline, narrow abstractions, no surprises.
+最后，我们将缓冲区访问重构为一小组辅助函数（`myfirst_buf_read`、`myfirst_buf_write`、`myfirst_wait_data`、`myfirst_wait_room`），在源码顶部附近写了一段锁定策略注释，并将 cbuf 放入自己带有自己 `MALLOC_DEFINE` 的文件中。驱动的源码现在处于第11章想要的形状：清晰的锁定纪律、窄抽象、无意外。
 
 ## 总结
 
-The buffered driver you have just finished is the foundation for everything that follows in Part 3. The shape of its I/O path, the discipline of its locking, the way it sleeps and wakes, the way it composes with `poll(2)`: these are not Chapter 10 patterns. They are *the* patterns the kernel uses, and once you recognise them in your own code, you will recognise them in every character-device driver in `/usr/src/sys/dev/`.
+你刚刚完成的缓冲驱动是第3部分后续所有内容的基础。其 I/O 路径的形状、锁定纪律、睡眠和唤醒的方式、与 `poll(2)` 组合的方式：这些不是第10章的模式。它们是内核使用的*标准*模式，一旦你在自己的代码中识别它们，你将在 `/usr/src/sys/dev/` 中的每个字符设备驱动中识别它们。
 
-It is worth taking a moment to feel that shift. When you started Chapter 7, the inside of a driver was probably an opaque set of names and signatures. By the end of Chapter 8 you had a sense of the lifecycle. By the end of Chapter 9 you had a sense of the data path. Now, at the end of Chapter 10, you have a sense of how a driver behaves under load: how it shapes itself around concurrent callers, how it manages a finite resource (the buffer), how it cooperates with the kernel's readiness primitives, how it gets out of its own way so that user-space programs can do real work against it.
+值得花点时间感受这种转变。当你开始第7章时，驱动内部可能是一组不透明的名称和签名。到第8章结束时你有了生命周期感。到第9章结束时你有了数据路径感。现在，在第10章结束时，你有了驱动在负载下如何行为的感受：它如何围绕并发调用者塑造自己、如何管理有限资源（缓冲区）、如何与内核的就绪原语合作、如何不阻碍自己以便用户空间程序可以对其做真正的工作。
 
-Most of what you have built will carry through to Chapter 11. The mutex, the buffer, the helpers, the locking strategy, the test kit, the lab discipline: all of it remains. What changes in Chapter 11 is the *depth* of the questions you ask about each piece. Why one mutex and not two? Why `wakeup` and not `wakeup_one`? Why `mtx_sleep` and not `cv_wait`? What guarantees does the kernel make about when a sleeper wakes, and what guarantees does it not make? How do you prove a piece of code is correct under concurrency, rather than hope?
+你构建的大部分内容将延续到第11章。互斥锁、缓冲区、辅助函数、锁定策略、测试套件、实验纪律：所有这些都将保留。第11章改变的是你对每一部分提出问题的*深度*。为什么一个互斥锁而不是两个？为什么 `wakeup` 而不是 `wakeup_one`？为什么 `mtx_sleep` 而不是 `cv_wait`？内核对睡眠者何时醒来做出什么保证，不做出什么保证？你如何证明一段代码在并发下是正确的，而不是期望？
 
-Chapter 11 takes those questions seriously. It introduces `WITNESS` and `INVARIANTS` as the kernel's verification tools, walks through the lock classes, and discusses the patterns that turn merely-working concurrency into provably-correct concurrency. It will be a substantial chapter, but the substrate is what you have just built.
+第11章认真对待这些问题。它引入 `WITNESS` 和 `INVARIANTS` 作为内核的验证工具，遍历锁类别，讨论将"刚好能工作"的并发转变为可证明正确的并发的模式。这将是一个实质性的章节，但基础是你刚刚构建的。
 
-Three closing reminders before you move on.
+三个结束提醒。
 
-The first is to *commit your code*. Whatever version-control system you use, save the four stage directories as a snapshot. The next chapter's first lab will copy your Stage 4 source and modify it; you do not want to lose the working baseline.
+第一是*提交你的代码*。无论你使用什么版本控制系统，将四个阶段目录保存为快照。下一章的第一个实验将复制你的阶段 4 源码并修改它；你不想丢失工作基线。
 
-The second is to *try the labs*. Reading driver code teaches you the patterns; writing driver code teaches you the discipline. The labs in this chapter are short on purpose. Even the long ones can be done in a single sitting. The combination of "I built this" and "I broke it on purpose to see what happens" is what the chapter is designed to produce.
+第二是*尝试实验*。阅读驱动代码教你模式；编写驱动代码教你纪律。本章的实验故意简短。即使是长的也可以在一次会话中完成。"我构建了这个"和"我故意破坏它看会发生什么"的组合是本章设计要产生的。
 
-The third is to *trust the slow path*. The chapter has been deliberately careful, deliberately patient, deliberately repetitive in places. Driver work rewards that style. The bugs that hurt are the ones that look like they could not possibly happen. The defence against them is to be slow, careful, and methodical, even when the code seems simple. The reader who slows down with each step finishes Chapter 11 ready for Chapter 12; the reader who rushes finishes Chapter 11 with a kernel panic and a lost afternoon.
+第三是*信任慢路径*。本章一直刻意小心、刻意耐心、在某些地方刻意重复。驱动工作奖励这种风格。真正伤人的 bug 是那些看起来不可能发生的。对它们的防御是缓慢、仔细、有条理，即使代码看起来很简单。每一步都放慢的读者完成第11章后为第12章做好准备；匆忙的读者完成第11章后带着内核恐慌和失去的一个下午。
 
-You are doing well. Keep going.
+你做得很好。继续前进。
 
-## Part 2 Checkpoint
+## 第2部分检查点
 
-Before you cross into Part 3, pause and check that the ground beneath your feet is solid. Part 2 has carried you from "what is a module" to "a multi-stage pseudo-driver that serves real readers and writers under load." The next part will put that driver on a much heavier scale, so the foundation needs to be firm.
+在你进入第3部分之前，暂停并检查你脚下的基础是否坚实。第2部分带你从"什么是模块"到"一个在负载下服务真实读取者和写入者的多阶段伪驱动"。下一部分将把该驱动放在更重的天平上，所以基础需要牢固。
 
-By now you should be comfortable doing each of the following without hunting for the answer:
+现在你应该能够不查找答案就舒适地做以下每件事：
 
-- Writing, compiling, loading, and unloading a kernel module against a running kernel, and reading `dmesg` to confirm the lifecycle.
-- Building a Newbus skeleton with `device_probe`, `device_attach`, and `device_detach`, backed by a per-unit softc allocated with `device_get_softc`.
-- Exposing a `/dev` node through a `cdevsw` with working `d_open`, `d_close`, `d_read`, `d_write`, and `d_ioctl` handlers, and verifying that `devfs` cleans the node up on unload.
-- Managing a circular buffer whose state is protected by a mutex, whose readers can block with `mtx_sleep` and be woken by `wakeup`, and whose readiness is advertised through `selrecord` and `selwakeup`.
-- Walking a deliberate failure through the attach path and watching every allocation unwind in reverse order.
+- 对运行中的内核编写、编译、加载和卸载内核模块，并阅读 `dmesg` 确认生命周期。
+- 用 `device_probe`、`device_attach` 和 `device_detach` 构建 Newbus 骨架，由通过 `device_get_softc` 分配的每单元 softc 支持。
+- 通过带有工作 `d_open`、`d_close`、`d_read`、`d_write` 和 `d_ioctl` 处理程序的 `cdevsw` 暴露 `/dev` 节点，并验证 `devfs` 在卸载时清理节点。
+- 管理由互斥锁保护状态的循环缓冲区，其读取者可以用 `mtx_sleep` 阻塞并被 `wakeup` 唤醒，其就绪状态通过 `selrecord` 和 `selwakeup` 广告。
+- 将一个故意故障走过 attach 路径并观察每个分配以相反顺序展开。
 
-If any of those feels unsteady, the labs that anchor them are worth a second pass. A targeted review list:
+如果其中任何一个感觉不稳固，锚定它们的实验值得再做一遍。有针对性的复习列表：
 
-- Build, load, and unload discipline: Lab 7.2 (Build, Load, and Verify Lifecycle) and Lab 7.4 (Simulate Attach Failure and Verify Unwinding).
-- `cdevsw` hygiene and `devfs` nodes: Lab 8.1 (Structured Name and Tighter Permissions) and Lab 8.5 (Two-Node Driver).
-- Data path and round-trip behaviour: Lab 9.2 (Exercise Stage 2 with Writes and Reads) and Lab 9.3 (Stage 3 FIFO Behaviour).
-- The Chapter 10 core sequence: Lab 2 (Stage 2 Circular Buffer), Lab 3 (Stage 3 Blocking and Non-Blocking), and Lab 4 (Stage 4 Poll Support and Refactor).
+- 构建、加载和卸载纪律：实验 7.2（构建、加载和验证生命周期）和实验 7.4（模拟 Attach 失败并验证展开）。
+- `cdevsw` 卫生和 `devfs` 节点：实验 8.1（结构化名称和更严格权限）和实验 8.5（双节点驱动）。
+- 数据路径和往返行为：实验 9.2（用写入和读取练习阶段 2）和实验 9.3（阶段 3 FIFO 行为）。
+- 第10章核心序列：实验 2（阶段 2 循环缓冲区）、实验 3（阶段 3 阻塞和非阻塞）和实验 4（阶段 4 Poll 支持和重构）。
 
-Part 3 will assume that all of the above is muscle memory, not a lookup. 具体来说, Chapter 11 will expect:
+第3部分将假设以上所有都是肌肉记忆，不是查阅。具体来说，第11章将期望：
 
-- A working Stage 4 `myfirst` that loads, unloads, and survives concurrent readers and writers without corruption.
-- Familiarity with `mtx_sleep`/`wakeup` and the `selrecord`/`selwakeup` pair as the kernel's basic blocking and readiness primitives, since Part 3 will compare and contrast them with `cv(9)`, `sx(9)`, and `sema(9)`.
-- A kernel built with `INVARIANTS` and `WITNESS`, since every Part 3 chapter leans on both from the first section onward.
+- 一个工作的阶段 4 `myfirst`，可以加载、卸载，并在并发读取者和写入者下存活而不损坏。
+- 熟悉 `mtx_sleep`/`wakeup` 和 `selrecord`/`selwakeup` 对作为内核的基本阻塞和就绪原语，因为第3部分将把它们与 `cv(9)`、`sx(9)` 和 `sema(9)` 进行比较和对比。
+- 用 `INVARIANTS` 和 `WITNESS` 构建的内核，因为每个第3部分章节从第一节开始就依赖两者。
 
-If those three items hold, you are ready to turn the page. If one wobbles, fix that first. A quiet hour now saves a bewildering afternoon later.
+如果这三项成立，你准备好翻页了。如果有一项摇晃，先修复它。现在安静的一小时节省之后困惑的一个下午。
 
-## Looking Ahead: Bridge to Chapter 11
+## 展望：通往第11章的桥梁
 
-Chapter 11 is titled "Concurrency in Drivers." Its job is to take the driver you have just finished and look at it through the lens of concurrency: not the casual "it works under modest load" sense we have used so far, but the rigorous "I can prove this is correct under any interleaving" sense.
+第11章标题为"驱动中的并发"。它的工作是带你刚刚完成的驱动并透过并发的镜头审视它：不是我们迄今为止使用的随意的"在适度负载下能工作"的感觉，而是严格的"我可以证明这在任何交错下都正确"的感觉。
 
-The bridge is built on three observations from Chapter 10's work.
+桥梁建立在第10章工作的三个观察之上。
 
-First, you already have a single mutex protecting all shared state. That is the simplest non-trivial concurrency design a driver can have, and it is the right starting point for understanding the more elaborate alternatives. Chapter 11 will use your driver as a test case for asking when one mutex is enough, when it is not, and what to do when it is not.
+第一，你已经有一个保护所有共享状态的单个互斥锁。这是驱动可以有的最简单的非平凡并发设计，它是理解更精心设计的替代方案的正确起点。第11章将使用你的驱动作为测试用例，问一个互斥锁何时足够，何时不够，以及不够时做什么。
 
-Second, you already have a sleep / wake pattern that uses the mutex as an interlock. `mtx_sleep` and `wakeup` are the building blocks of every blocking primitive in the kernel. Chapter 11 will introduce condition variables (`cv_*`) as a more structured alternative, and will explain when each is appropriate.
+第二，你已经有一个使用互斥锁作为互锁的睡眠/唤醒模式。`mtx_sleep` 和 `wakeup` 是内核中每个阻塞原语的构建块。第11章将引入条件变量（`cv_*`）作为更结构化的替代方案，并解释何时各有优劣。
 
-Third, you already have a buffer abstraction that is intentionally not thread-safe by itself. The cbuf relies on the caller to provide locking. Chapter 11 will discuss the spectrum from "data structure provides no locking" (your cbuf) through "data structure provides internal locking" (some kernel primitives) to "data structure is lock-free" (`buf_ring(9)`, `epoch(9)`-based readers). Each end of the spectrum has uses; understanding when to choose which is part of becoming a driver writer.
+第三，你已经有一个有意设计为自身非线程安全的缓冲区抽象。cbuf 依赖调用者提供锁定。第11章将讨论从"数据结构不提供锁定"（你的 cbuf）到"数据结构提供内部锁定"（某些内核原语）到"数据结构是无锁的"（`buf_ring(9)`、基于 `epoch(9)` 的读取者）的光谱。光谱的每一端都有用途；理解何时选择哪个是成为驱动编写者的一部分。
 
-Specific topics Chapter 11 will cover include:
+第11章将涵盖的具体主题包括：
 
-- The five FreeBSD lock classes (`mtx`, `sx`, `rw`, `rm`, `lockmgr`) and when each is appropriate.
-- Lock ordering and how to use `WITNESS` to verify it.
-- The interaction between locks and interrupt context.
-- Condition variables and when to prefer them over `mtx_sleep`.
-- Reader/writer locks and their use cases.
-- The `epoch(9)` framework for read-mostly data structures.
-- Atomic operations (`atomic_*`) and when they obviate the need for locks.
-- A walk-through of common concurrency bugs (lost wakeups, lock-order reversals, ABA, double-free under contention).
+- 五种 FreeBSD 锁类别（`mtx`、`sx`、`rw`、`rm`、`lockmgr`）以及何时各有适用。
+- 锁排序以及如何使用 `WITNESS` 验证它。
+- 锁与中断上下文之间的交互。
+- 条件变量以及何时优先于 `mtx_sleep`。
+- 读取者/写入者锁及其用例。
+- 用于读取为主数据结构的 `epoch(9)` 框架。
+- 原子操作（`atomic_*`）以及何时它们使锁变得不必要。
+- 常见并发 bug（丢失唤醒、锁序反转、ABA、竞争下的双重释放）的演练。
 
-You do not need to read ahead to start Chapter 11. Everything in this chapter is sufficient preparation. Bring your Stage 4 driver, your test kit, and your `WITNESS`-enabled kernel; the next chapter starts where this one ended.
+你不需要提前阅读来开始第11章。本章的所有内容都是充分的准备。带上你的阶段 4 驱动、你的测试套件和你启用 `WITNESS` 的内核；下一章从本章结束的地方开始。
 
-A small farewell from this chapter: you have just turned a beginner driver into a respectable one. The bytes that flow through `/dev/myfirst` are now flowing the way bytes flow through every other character device on the system. The patterns are right, the locking is right, the user-space contracts are honoured. The driver is yours to extend, to specialise, and to use as a baseline for whatever real device comes next. Take a moment to enjoy that, and then turn the page.
+本章的一个小告别：你刚刚将一个初学者驱动变成了一个体面的驱动。流过 `/dev/myfirst` 的字节现在以与系统上每个其他字符设备相同的方式流动。模式正确，锁定正确，用户空间契约被遵守。驱动是你的，可以扩展、特化、并用作接下来任何真实设备的基线。花点时间享受这一点，然后翻页。

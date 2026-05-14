@@ -42,7 +42,7 @@ estimatedReadTime: 195
 - `/dev/myfirst/0` 处的主 cdev，所有权为 `root:operator`，模式为 `0660`。
 - `/dev/myfirst` 处指向主设备的别名 cdev。
 - 每次 `open(2)` 分配的 `struct myfirst_fh`，通过 `devfs_set_cdevpriv(9)` 注册，由每个描述符恰好触发一次的析构函数释放。
-- 桩函数 `d_read` 和 `d_write` 处理程序检索每次打开的状态，可选地查看它，并立即返回: `d_read` returns zero bytes (EOF), `d_write` claims to have consumed every byte by setting `uio_resid = 0`.
+- 桩函数 `d_read` 和 `d_write` 处理程序检索每次打开的状态，可选地查看它，并立即返回：`d_read` 返回零字节（EOF），`d_write` 通过设置 `uio_resid = 0` 声称已消耗所有字节。
 
 第九章将这些桩函数变成真正的。 驱动的外部形状变化不大。 新读者仍然应该看到 `/dev/myfirst/0`，仍然看到别名，仍然看到 sysctl。 变化的是 `cat /dev/myfirst/0` 现在会产生输出，`echo hello > /dev/myfirst/0` 现在会将文本存储到驱动内存中，第二次 `cat` 会读回第一次写入的确切内容。 到本章结束时，你的驱动将是一个小型的、纪律严明的内存缓冲区，你可以向其中推送字节并从中拉取字节。 它还不会是带有阻塞读取的循环缓冲区；那是第十章的工作。 它将是一个正确移动字节的驱动。
 
@@ -98,7 +98,7 @@ estimatedReadTime: 195
 - 你有一个等效于 `examples/part-02/ch08-working-with-device-files/stage2-perhandle/` 下第八章阶段 2 源码的工作 `myfirst` 驱动。如果你还没有到达第八章结尾，在此暂停并回来。
 - 你的实验机器运行带有匹配 `/usr/src` 的 FreeBSD 14.3。
 - 你已经阅读过第四章关于指针、结构和内存布局的讨论，以及第五章关于内核空间习惯和安全性的讨论。
-- You understand what a `struct cdev` is and how it is related to a `cdevsw`. Chapter 8 covered this in detail.
+- 你理解 `struct cdev` 是什么以及它如何与 `cdevsw` 相关联。第八章已详细介绍了这些内容。
 
 如果你对这些中的任何一个不确定，本章的其余部分会比它需要的更难。先重温相关部分。
 
@@ -128,7 +128,7 @@ estimatedReadTime: 195
 10. 内部缓冲区：静态、动态和固定大小。如何选择一个、如何安全地拥有它、你应该识别的内核辅助函数。
 11. 错误处理：对 I/O 重要的 errno 值、如何发出文件结束信号、以及如何思考部分传输。
 12. 三阶段 `myfirst` 实现，包括驱动源码。
-13. A step-by-step trace of `read(2)` from user space through the kernel down to your handler, plus a mirrored write trace.
+13. 从用户空间通过内核到你的处理程序的 `read(2)` 的逐步追踪，加上镜像的写入追踪。
 14. 测试的实用工作流：`cat`、`echo`、`dd`、`truss`、`ktrace`，以及将它们变成开发节奏的纪律。
 15. 可观测性：sysctl、dmesg 和 `vmstat -m`，带有驱动在轻负载下的具体快照。
 16. 有符号、无符号和差一的危害——简短但高价值的章节。
@@ -457,9 +457,9 @@ myfirst_read(struct cdev *dev, struct uio *uio, int ioflag)
 
 ### 实际使用中的签名：myfirst_read 阶段 1
 
-Here is what our Stage 1 `d_read` will look like. Do not type it in yet; we will walk through the full source in the implementation section. Seeing it here and now is mostly to anchor the discussion.
+这是我们的阶段 1 `d_read` 的样子。先不要输入它；我们将在实现部分完整演练源码。现在在这里看到它主要是为了锚定讨论。
 
-Before you read the code, pause on one detail that will recur in almost every handler for the rest of this chapter. The first four lines of any per-open-aware handler follow a fixed **boilerplate pattern**:
+在阅读代码之前，请停在一个将在本章余下几乎每个处理程序中重复出现的细节上。任何感知每次打开的处理程序的前四行都遵循固定的**样板模式**：
 
 ```c
 struct myfirst_fh *fh;
@@ -470,7 +470,7 @@ if (error != 0)
         return (error);
 ```
 
-This pattern retrieves the per-descriptor `fh` that `d_open` registered through `devfs_set_cdevpriv(9)`, and it propagates any failure back to the kernel unchanged. You will see it at the top of `myfirst_read`, `myfirst_write`, `myfirst_ioctl`, `myfirst_poll`, and the `kqfilter` helpers. When a later lab says "retrieve the per-open state with the usual `devfs_get_cdevpriv` boilerplate", this is the block it refers to, and the rest of the chapter will not re-explain it. If a handler ever re-orders these lines, treat that as a red flag: running any logic before this call means the handler does not yet know which open it is serving. The one subtlety worth remembering is that the `sc == NULL` liveness check comes *after* this boilerplate, not before, because you need the per-open state retrieved safely even on a device that is being torn down.
+这个模式检索 `d_open` 通过 `devfs_set_cdevpriv(9)` 注册的每次描述符 `fh`，并将任何失败原封不动地传播回内核。你将在 `myfirst_read`、`myfirst_write`、`myfirst_ioctl`、`myfirst_poll` 和 `kqfilter` 辅助函数的顶部看到它。当后面的实验说"用通常的 `devfs_get_cdevpriv` 样板检索每次打开状态"时，它指的就是这个代码块，本章余下部分不会重新解释它。如果一个处理程序曾经重新排列了这些行，请将其视为一个危险信号：在此调用之前运行任何逻辑意味着处理程序尚不知道它正在为哪次打开服务。一个值得记住的微妙之处是 `sc == NULL` 存活检查位于这个样板*之后*，而不是之前，因为你需要安全地检索每次打开状态，即使设备正在被拆除。
 
 ```c
 static int
@@ -642,9 +642,9 @@ myfirst_write(struct cdev *dev, struct uio *uio, int ioflag)
 
 **第五步：找到状态转换。** 处理程序增加什么计数器？它触及什么每次句柄字段？这些转换是驱动的行为签名，通常是驱动之间差异最大的部分。
 
-Apply this protocol to `zero_read` in `/usr/src/sys/dev/null/null.c`. The argument names are the standard ones. The `uiomove` call hands the kernel pointer `zbuf` (pointing at `zero_region`) and a length clamped by `ZERO_REGION_SIZE`. There is no lock; the data is constant. The only errno the handler can return is whatever `uiomove` returned. There are no state transitions; `/dev/zero` is stateless.
+将此协议应用于 `/usr/src/sys/dev/null/null.c` 中的 `zero_read`。参数名称是标准的。`uiomove` 调用传递内核指针 `zbuf`（指向 `zero_region`）和由 `ZERO_REGION_SIZE` 限制的长度。没有锁；数据是常量。处理程序可以返回的唯一 errno 是 `uiomove` 返回的任何值。没有状态转换；`/dev/zero` 是无状态的。
 
-Now apply the same protocol to `myfirst_write` at Stage 3. Argument names: standard. `uiomove` call: kernel pointer `sc->buf + bufhead + bufused`, length `MIN((size_t)uio->uio_resid, avail)`. Lock: `sc->mtx` taken before and released after. Errno returns: `ENXIO` (device gone), `ENOSPC` (buffer full), `EFAULT` via `uiomove`, or zero. State transitions: `sc->bufused += towrite`, `sc->bytes_written += towrite`, `fh->writes += towrite`.
+现在将同样的协议应用于阶段 3 的 `myfirst_write`。参数名称：标准的。`uiomove` 调用：内核指针 `sc->buf + bufhead + bufused`，长度 `MIN((size_t)uio->uio_resid, avail)`。锁：`sc->mtx` 在之前获取、在之后释放。Errno 返回值：`ENXIO`（设备已消失）、`ENOSPC`（缓冲区满）、通过 `uiomove` 产生的 `EFAULT` 或零。状态转换：`sc->bufused += towrite`、`sc->bytes_written += towrite`、`fh->writes += towrite`。
 
 两个驱动，同样的协议，两个关于处理程序功能的连贯描述。一旦你应用这种阅读习惯五六次，不熟悉的处理程序就不再看起来陌生。
 
@@ -1397,7 +1397,7 @@ npages = howmany(buflen, PAGE_SIZE);
 
 ## 错误处理和边界情况
 
-一个"只在正常路径上工作"的初学者驱动最终会崩溃内核。 I/O 处理的有趣部分不是正常路径的部分: 零长度读取、部分写入、错误的用户指针、调用中途传递的信号、耗尽的缓冲区, and several dozen variations of those. 本节讨论常见情况和与之相关的 errno 值。
+一个"只在正常路径上工作"的初学者驱动最终会崩溃内核。 I/O 处理的有趣部分不是正常路径的部分：零长度读取、部分写入、错误的用户指针、调用中途传递的信号、耗尽的缓冲区，以及这些情况的几十种变体。本节讨论常见情况和与之相关的 errno 值。
 
 ### I/O 中重要的 errno 值
 
@@ -1610,7 +1610,7 @@ myfirst_read(struct cdev *dev, struct uio *uio, int ioflag)
 
 其次，`before` 在条目处捕获 `uio->uio_offset`，以便我们可以计算移动了多少字节。`uiomove_frombuf` 返回后，差异就是传输大小，我们将其添加到每次描述符 `reads` 计数器。这是第八章中 `fh->reads` 字段最终发挥作用的地方。
 
-The `__DECONST` cast is a FreeBSD idiom for casting away `const`. `uiomove_frombuf` takes a non-`const` `void *` because it is prepared to move in either direction, but in this context we know the direction is kernel-to-user (a read), so we know the kernel buffer will not be modified. Stripping the `const` here is safe; using a plain `(void *)` cast would work as well but is less self-documenting.
+`__DECONST` 转换是 FreeBSD 中去除 `const` 的惯用法。`uiomove_frombuf` 接受非 `const` 的 `void *`，因为它准备在任一方向移动，但在这种上下文中我们知道方向是内核到用户（读取），所以我们知道内核缓冲区不会被修改。在这里去除 `const` 是安全的；使用普通的 `(void *)` 转换也可以，但不够自文档化。
 
 `myfirst_write` 在阶段 1 保持第八章留下的样子：
 
@@ -1714,7 +1714,7 @@ SYSCTL_ADD_UINT(&sc->sysctl_ctx, SYSCTL_CHILDREN(sc->sysctl_tree),
     &sc->bufused, 0, "Current byte count in the buffer");
 ```
 
-`bufused` is a `size_t`, and the sysctl macro for unsigned integer is `SYSCTL_ADD_UINT` on 32-bit platforms or `SYSCTL_ADD_U64` on 64-bit platforms. Since this driver targets FreeBSD 14.3 on amd64 in the typical lab, `SYSCTL_ADD_UINT` is fine; the field will be presented as an `unsigned int` even though the internal type is `size_t`. If you target arm64 or another 64-bit platform, use `SYSCTL_ADD_U64` and cast accordingly.
+`bufused` 是 `size_t`，无符号整数的 sysctl 宏在 32 位平台上是 `SYSCTL_ADD_UINT`，在 64 位平台上是 `SYSCTL_ADD_U64`。由于此驱动在典型实验室中针对 amd64 上的 FreeBSD 14.3，`SYSCTL_ADD_UINT` 就可以；即使内部类型是 `size_t`，该字段也将被呈现为 `unsigned int`。如果你针对 arm64 或其他 64 位平台，使用 `SYSCTL_ADD_U64` 并相应转换。
 
 在 `attach` 中分配缓冲区：
 
@@ -1739,7 +1739,7 @@ if (sc->buf != NULL) {
 }
 ```
 
-Adjust the error-unwind in `attach` to include the buffer free:
+调整 `attach` 中的错误展开以包含缓冲区释放：
 
 ```c
 fail_dev:
@@ -1757,7 +1757,7 @@ fail_mtx:
         return (error);
 ```
 
-Now the read handler:
+现在来看读取处理程序：
 
 ```c
 static int
@@ -1791,7 +1791,7 @@ myfirst_read(struct cdev *dev, struct uio *uio, int ioflag)
 
 读取处理程序获取互斥锁以一致地读取 `bufused`，然后以当前高水位标记作为有效缓冲区大小调用 `uiomove_frombuf`。在任何写入之前运行的读取者将看到 `have = 0`，`uiomove_frombuf` 将返回零，调用者将其解释为 EOF。在一些写入之后运行的读取者将看到当前 `bufused` 并接收最多那么多字节。
 
-The write handler:
+写入处理程序：
 
 ```c
 static int
@@ -1828,7 +1828,7 @@ myfirst_write(struct cdev *dev, struct uio *uio, int ioflag)
 
 注意限制：`towrite = MIN(uio->uio_resid, avail)`。如果用户请求写入 8 KiB 而我们有 512 字节空间，我们接受 512 字节并让内核向用户空间报告 512 的短写入。行为良好的调用者会用剩余字节循环；行为不太好的调用者会丢失多余部分。那是调用者的责任；驱动已经诚实地完成了它的部分。
 
-Smoke-test from userland:
+从用户态进行冒烟测试：
 
 ```sh
 % sudo kldload ./myfirst.ko
@@ -1844,9 +1844,9 @@ dev.myfirst.0.stats.bufused: 11
 %
 ```
 
-The buffer grew by 6 bytes for `"hello\n"`, then by 5 more for `"more\n"`, yielding 11 bytes. `cat` reads all 11 bytes back. A second `cat` from a fresh open starts at offset zero and reads them again.
+缓冲区因 `"hello\n"` 增长了 6 字节，然后因 `"more\n"` 又增长了 5 字节，总共 11 字节。`cat` 读回所有 11 字节。从一个新打开的描述符的第二次 `cat` 从偏移零开始并再次读取它们。
 
-What happens if we write more than the buffer can hold?
+如果我们写入的数据超过缓冲区容量会发生什么？
 
 ```sh
 % dd if=/dev/zero bs=1024 count=8 | sudo tee /dev/myfirst/0 > /dev/null
@@ -1856,7 +1856,7 @@ tee: /dev/myfirst/0: No space left on device
 7+0 records out
 ```
 
-`dd` wrote 7 blocks of 1024 bytes before the 8th one failed. `tee` reports the error. The driver accepted up to its limit and then returned `ENOSPC` cleanly. The kernel carried the errno value back to user space.
+`dd` 写入了 7 个 1024 字节的块，第 8 个失败了。`tee` 报告了错误。驱动接受到其限制后干净地返回了 `ENOSPC`。内核将 errno 值传回用户空间。
 
 ### 阶段 3：先进先出回显驱动
 
@@ -1864,7 +1864,7 @@ tee: /dev/myfirst/0: No space left on device
 
 缓冲区保持线性：没有环绕。在排空所有数据的读取之后，`bufused` 为零，下一次写入再次从 `sc->buf` 中的偏移零开始。这使记录保持最少，并将阶段集中在 I/O 方向变化而不是环形缓冲区机制上。
 
-The softc gains one more field:
+softc 再增加一个字段：
 
 ```c
 struct myfirst_softc {
@@ -1879,14 +1879,14 @@ struct myfirst_softc {
 
 `bufhead` 是仍然要读取的第一个字节的偏移。`bufused` 是从 `bufhead` 开始的有效字节数。不变量 `bufhead + bufused <= buflen` 总是成立。
 
-Reset both in `attach`:
+在 `attach` 中重置两者：
 
 ```c
 sc->bufhead = 0;
 sc->bufused = 0;
 ```
 
-New read handler:
+新的读取处理程序：
 
 ```c
 static int
@@ -1927,7 +1927,7 @@ myfirst_read(struct cdev *dev, struct uio *uio, int ioflag)
 
 这种"空时折叠"技巧不是环形缓冲区，但对于教学 FIFO 足够接近。额外的重新对齐步骤是 `O(1)`；几乎不花费任何代价。
 
-New write handler (mostly unchanged from Stage 2, but note where it appends):
+新的写入处理程序（与阶段 2 大部分相同，但注意追加的位置）：
 
 ```c
 static int
@@ -1963,9 +1963,9 @@ myfirst_write(struct cdev *dev, struct uio *uio, int ioflag)
 }
 ```
 
-The write appends at `sc->bufhead + sc->bufused`, not at `sc->bufused` alone, because the valid data slice has moved as reads drained it.
+写入在 `sc->bufhead + sc->bufused` 处追加，而不是仅在 `sc->bufused` 处，因为随着读取排空，有效数据切片已经移动了。
 
-Smoke-test:
+冒烟测试：
 
 ```sh
 % echo "one" | sudo tee /dev/myfirst/0 > /dev/null
@@ -1977,143 +1977,143 @@ two
 %
 ```
 
-After the first `cat`, the buffer is empty. The second `cat` sees no data and exits immediately.
+第一次 `cat` 之后，缓冲区为空。第二次 `cat` 看不到数据并立即退出。
 
-This is the Stage 3 shape. The driver is a small, honest, in-memory FIFO. Users can push bytes in, pull them out, and observe the counters from sysctl. That is real I/O, and it is the waypoint Chapter 10 builds from.
+这就是阶段 3 的形状。驱动是一个小型、诚实、内存中的 FIFO。用户可以向其中推入字节、从中拉出字节，并通过 sysctl 观察计数器。这就是真正的 I/O，也是第十章构建的基础。
 
 
 
 ## 从用户空间到你的处理程序追踪 read(2)
 
-Before you start working through the labs, take a step-by-step look at exactly what happens when a user program calls `read(2)` on one of your nodes. Understanding this path is one of those things that changes how you read driver code. Every handler you see in the tree is sitting at the bottom of the call chain described below; once you recognise the chain, every handler starts to look familiar.
+在开始做实验之前，逐步仔细看看当用户程序在你其中一个节点上调用 `read(2)` 时到底发生了什么。理解这条路径是改变你阅读驱动代码方式的事情之一。你在源码树中看到的每个处理程序都位于下面描述的调用链底部；一旦你认识到这个链条，每个处理程序都会变得眼熟。
 
 ### 步骤 1：用户程序调用 read(2)
 
-The C library's `read` wrapper is a thin translation of the call into a system-call trap: it places the file descriptor, the buffer pointer, and the count into the appropriate registers and executes the trap instruction for the current architecture. Control transfers to the kernel.
+C 库的 `read` 包装器将调用简单转换为系统调用陷阱：它将文件描述符、缓冲区指针和计数放入适当的寄存器，并执行当前架构的陷阱指令。控制权转移到内核。
 
-This part has nothing to do with drivers. It is the same for every syscall. What matters is that the kernel is now executing on behalf of the user process, in the kernel's address space, with the user's registers saved and the process's credentials visible through `curthread->td_ucred`.
+这部分与驱动无关。每个系统调用都是相同的。重要的是，内核现在代表用户进程执行，在内核的地址空间中，用户的寄存器已保存，进程的凭据通过 `curthread->td_ucred` 可见。
 
 ### 步骤 2：内核查找文件描述符
 
-The kernel calls `sys_read(2)` (in `/usr/src/sys/kern/sys_generic.c`), which validates the arguments, looks up the file descriptor in the calling process's file table, and acquires a reference on the resulting `struct file`.
+内核调用 `sys_read(2)`（位于 `/usr/src/sys/kern/sys_generic.c`），它验证参数，在调用进程的文件表中查找文件描述符，并获取对结果 `struct file` 的引用。
 
-If the descriptor is not open, the call fails here with `EBADF`. If the descriptor is open but is not readable (for instance, the user opened the device with `O_WRONLY`), the call fails with `EBADF` as well. The driver is not involved; `sys_read` enforces the access mode.
+如果描述符未打开，调用在此处以 `EBADF` 失败。如果描述符已打开但不可读（例如，用户使用 `O_WRONLY` 打开了设备），调用同样以 `EBADF` 失败。驱动不参与；`sys_read` 强制执行访问模式。
 
 ### 步骤 3：通用文件操作向量分派
 
-The `struct file` has a file-type tag (`f_type`) and a file-operations vector (`f_ops`). For a regular file the vector dispatches to the VFS layer; for a socket it dispatches to sockets; for a device opened through devfs, it dispatches to `vn_read`, which in turn calls the vnode operation `VOP_READ` on the vnode behind the file.
+`struct file` 有一个文件类型标签（`f_type`）和一个文件操作向量（`f_ops`）。对于常规文件，向量分派到 VFS 层；对于套接字，它分派到套接字；对于通过 devfs 打开的设备，它分派到 `vn_read`，后者又调用文件背后 vnode 上的 vnode 操作 `VOP_READ`。
 
-This may sound like indirection for its own sake. It is actually how the kernel keeps the rest of the syscall path identical for every kind of file. Drivers do not need to know about this layer; devfs and VFS hand the call to your handler eventually.
+这听起来可能像是为间接而间接。实际上这是内核如何保持系统调用路径的其余部分对每种文件都相同的方式。驱动不需要了解这一层；devfs 和 VFS 最终会将调用传递给你的处理程序。
 
 ### 步骤 4：VFS 调用 devfs
 
-The vnode's filesystem ops point to devfs's implementation of the vnode interface (`devfs_vnops`). `VOP_READ` on a devfs vnode calls `devfs_read_f`, which looks at the cdev behind the vnode, acquires a thread-count reference on it (incrementing `si_threadcount`), and calls `cdevsw->d_read`. That is your function.
+vnode 的文件系统操作指向 devfs 对 vnode 接口的实现（`devfs_vnops`）。devfs vnode 上的 `VOP_READ` 调用 `devfs_read_f`，它查看 vnode 背后的 cdev，获取其上的线程计数引用（递增 `si_threadcount`），并调用 `cdevsw->d_read`。那就是你的函数。
 
-Two details from this step carry implications for your driver.
+这一步的两个细节对你的驱动有影响。
 
-First, **the `si_threadcount` increment is what `destroy_dev(9)` uses to know your handler is active**. When a module unloads and `destroy_dev` runs, it waits until every current invocation of every handler returns. The reference is incremented before your `d_read` is called and released after it returns. The mechanism is why your driver can be safely unloaded while a user is in the middle of `read(2)`.
+首先，**`si_threadcount` 递增是 `destroy_dev(9)` 用来知道你的处理程序是否活跃的方式**。当模块卸载并且 `destroy_dev` 运行时，它会等待直到每个处理程序的每次当前调用都返回。引用在你的 `d_read` 被调用之前递增，并在它返回之后释放。这个机制是你的驱动可以在用户正在进行 `read(2)` 时安全卸载的原因。
 
-Second, **the call is synchronous from the VFS layer's point of view**. VFS calls your handler, waits for it to return, and then propagates the result. You do not need to do anything special to participate in this synchronisation; just return from your handler when you are done.
+其次，**从 VFS 层的角度来看，调用是同步的**。VFS 调用你的处理程序，等待它返回，然后传播结果。你不需要做任何特殊的事情来参与这种同步；完成时从处理程序返回即可。
 
 ### 步骤 5：你的 d_read 处理程序运行
 
-This is where we have been all chapter. The handler:
+这就是我们整章所在的位置。处理程序：
 
-- Receives a `struct cdev *dev` (the node being read), a `struct uio *uio` (the I/O description), and an `int ioflag` (flags from the file-table entry).
-- Retrieves per-open state via `devfs_get_cdevpriv(9)`.
-- Verifies liveness.
-- Transfers bytes through `uiomove(9)`.
-- Returns zero or an errno.
+- 接收一个 `struct cdev *dev`（被读取的节点）、一个 `struct uio *uio`（I/O 描述）和一个 `int ioflag`（来自文件表条目的标志）。
+- 通过 `devfs_get_cdevpriv(9)` 检索每次打开的状态。
+- 验证活跃性。
+- 通过 `uiomove(9)` 传输字节。
+- 返回零或 errno。
 
-Nothing about this step should be mysterious by now.
+到目前为止，这个步骤应该没有任何神秘之处了。
 
 ### 步骤 6：内核展开并报告
 
-`devfs_read_f` sees your return value. If zero, it computes the byte count from the decrease in `uio->uio_resid` and returns that count. If non-zero, it converts the errno into the syscall's error return. VFS's `vn_read` passes the result upward to `sys_read`. `sys_read` writes the result into the return-value register.
+`devfs_read_f` 看到你的返回值。如果为零，它从 `uio->uio_resid` 的减少量计算字节计数并返回该计数。如果非零，它将 errno 转换为系统调用的错误返回。VFS 的 `vn_read` 将结果向上传递给 `sys_read`。`sys_read` 将结果写入返回值寄存器。
 
-Control transfers back to user space. The C library's `read` wrapper examines the result: a positive value is returned as the return value of `read(2)`; a negative value sets `errno` and returns `-1`.
+控制权转移回用户空间。C 库的 `read` 包装器检查结果：正值作为 `read(2)` 的返回值返回；负值设置 `errno` 并返回 `-1`。
 
-The user program sees the integer it expected, and its control flow continues.
+用户程序看到它期望的整数，其控制流继续。
 
 ### 步骤 7：引用计数展开
 
-On the way out, `devfs_read_f` releases the thread-count reference on the cdev. If `destroy_dev(9)` had been waiting for `si_threadcount` to reach zero, it may now proceed with the tear-down.
+在返回途中，`devfs_read_f` 释放 cdev 上的线程计数引用。如果 `destroy_dev(9)` 一直在等待 `si_threadcount` 达到零，它现在可以继续拆除了。
 
-This is why the whole chain is structured as carefully as it is. Every reference is paired; every increment has a matching decrement; every piece of state the handler touches is either owned by the handler, owned by the softc, or owned by the per-open `fh`. If any of those invariants breaks, unload becomes unsafe.
+这就是为什么整个链的结构如此仔细。每个引用都是配对的；每次递增都有匹配的递减；处理程序触及的每段状态要么由处理程序拥有，要么由 softc 拥有，要么由每次打开的 `fh` 拥有。如果这些不变量中的任何一个被破坏，卸载就会变得不安全。
 
 ### 为什么这个追踪对你重要
 
-Three takeaways.
+三个要点。
 
-**The first**: the mechanism above is why your handler does not need to do anything exotic to coexist with module unload. Provided you return from `d_read` in finite time, the kernel will let your driver unload cleanly. This is part of why Chapter 9 keeps all reads non-blocking at the driver level.
+**第一个**：上述机制是你的处理程序不需要做任何奇特操作就能与模块卸载共存的原因。只要你在有限时间内从 `d_read` 返回，内核就能让你的驱动干净地卸载。这是第九章在驱动级别保持所有读取为非阻塞的部分原因。
 
-**The second**: every layer between `read(2)` and your handler is set up by the kernel before your code runs. The user's buffer is valid (or `uiomove` will report `EFAULT`), the cdev is alive (or devfs would have refused the call), the access mode is compatible with the descriptor (or `sys_read` would have refused), and the process's credentials are the current thread's. You can focus on your driver's job and trust the layers.
+**第二个**：`read(2)` 和你的处理程序之间的每一层都是由内核在你的代码运行之前设置的。用户的缓冲区是有效的（否则 `uiomove` 会报告 `EFAULT`），cdev 是活跃的（否则 devfs 会拒绝调用），访问模式与描述符兼容（否则 `sys_read` 会拒绝），进程的凭据是当前线程的。你可以专注于你的驱动工作并信任这些层。
 
-**The third**: when you read an unfamiliar driver in the tree and its `d_read` looks weird, you can walk the chain in reverse. Who called this handler? What state did they prepare? What invariants does my handler promise on return? The chain tells you. The answers are usually the same as they are for `myfirst`.
+**第三个**：当你在源码树中阅读一个不熟悉的驱动，其 `d_read` 看起来很奇怪时，你可以反向追踪调用链。谁调用了这个处理程序？他们准备了什么状态？我的处理程序在返回时承诺了什么不变量？调用链会告诉你。答案通常与 `myfirst` 的相同。
 
 ### 镜像：追踪 write(2)
 
-A write follows the same kind of chain, mirrored. A full seven-step breakdown would be mostly a restatement of the read trace with words substituted, so the paragraph below is deliberately compressed.
+写入遵循相同类型的链，是镜像的。完整的七步分解大部分会是对读取追踪的重复，只是替换了词语，所以下面的段落是刻意压缩的。
 
-The user calls `write(fd, buf, 1024)`. The C library traps into the kernel. `sys_write(2)` in `/usr/src/sys/kern/sys_generic.c` validates arguments, looks up the descriptor, and acquires a reference on its `struct file`. The file-ops vector dispatches to `vn_write`, which calls `VOP_WRITE` on the devfs vnode. `devfs_write_f` in `/usr/src/sys/fs/devfs/devfs_vnops.c` acquires the thread-count reference on the cdev, composes the `ioflag` from `fp->f_flag`, and calls `cdevsw->d_write` with the uio describing the caller's buffer.
+用户调用 `write(fd, buf, 1024)`。C 库陷入内核。`/usr/src/sys/kern/sys_generic.c` 中的 `sys_write(2)` 验证参数，查找描述符，并获取其 `struct file` 的引用。文件操作向量分派到 `vn_write`，后者调用 devfs vnode 上的 `VOP_WRITE`。`/usr/src/sys/fs/devfs/devfs_vnops.c` 中的 `devfs_write_f` 获取 cdev 上的线程计数引用，从 `fp->f_flag` 组合 `ioflag`，并使用描述调用者缓冲区的 uio 调用 `cdevsw->d_write`。
 
-Your `d_write` handler runs. It retrieves per-open state via `devfs_get_cdevpriv(9)`, checks liveness, takes whatever lock the driver needs around the buffer, clamps the transfer length to whatever space is available, and calls `uiomove(9)` to copy bytes from user space into the kernel buffer. On success, the handler updates its bookkeeping and returns zero. `devfs_write_f` releases the thread-count reference. `vn_write` unwinds through `sys_write`, which computes the byte count from the decrease in `uio_resid` and returns it. The user sees the return value of `write(2)`.
+你的 `d_write` 处理程序运行。它通过 `devfs_get_cdevpriv(9)` 检索每次打开的状态，检查活跃性，获取驱动在缓冲区周围需要的任何锁，将传输长度限制到可用空间，并调用 `uiomove(9)` 将字节从用户空间复制到内核缓冲区。成功时，处理程序更新其记账并返回零。`devfs_write_f` 释放线程计数引用。`vn_write` 通过 `sys_write` 展开，后者从 `uio_resid` 的减少量计算字节计数并返回它。用户看到 `write(2)` 的返回值。
 
-Three things differ from the read chain in substantive ways.
+与读取链在实质上有三个方面不同。
 
-**First, the kernel runs `copyin` inside `uiomove` instead of `copyout`.** Same mechanism, opposite direction. The fault handling is identical: a bad user pointer returns `EFAULT`, a short copy leaves `uio_resid` consistent with whatever did transfer, and the handler just propagates the error code.
+**首先，内核在 `uiomove` 内部运行 `copyin` 而不是 `copyout`。** 相同的机制，相反的方向。故障处理是相同的：错误的用户指针返回 `EFAULT`，短复制使 `uio_resid` 与实际传输的内容保持一致，处理程序只需传播错误代码。
 
-**Second, `ioflag` carries `IO_NDELAY` in the same way, but the driver's interpretation is different.** On a read, non-blocking means "return `EAGAIN` if there is no data". On a write, non-blocking means "return `EAGAIN` if there is no space". Symmetric conditions, symmetric errno values.
+**其次，`ioflag` 以相同方式携带 `IO_NDELAY`，但驱动的解释不同。** 在读取上，非阻塞意味着"如果没有数据则返回 `EAGAIN`"。在写入上，非阻塞意味着"如果没有空间则返回 `EAGAIN`"。对称的条件，对称的 errno 值。
 
-**Third, the `atime` / `mtime` updates are direction-specific.** `devfs_read_f` stamps `si_atime` if bytes moved; `devfs_write_f` stamps `si_mtime` (and `si_ctime` in some paths) if bytes moved. These are what `stat(2)` on the node reports, and why `ls -lu /dev/myfirst/0` shows different timestamps for reads versus writes. Your driver does not manage these fields; devfs does.
+**第三，`atime` / `mtime` 更新是方向特定的。** `devfs_read_f` 在字节移动时标记 `si_atime`；`devfs_write_f` 在字节移动时标记 `si_mtime`（在某些路径中还有 `si_ctime`）。这些是 `stat(2)` 在节点上报告的内容，也是为什么 `ls -lu /dev/myfirst/0` 对于读取和写入显示不同的时间戳。你的驱动不管理这些字段；devfs 管理。
 
-Once you recognise the read and write traces as mirror images, you have internalised most of the character-device dispatch path. Every chapter from here on will add hooks (a `d_poll`, a `d_kqfilter`, a `d_ioctl`, an `mmap` path) that sit on the same chain at slightly different slots. The chain itself stays constant.
+一旦你认识到读取和写入追踪是镜像的，你就已经内化了字符设备分派路径的大部分。从这里开始的每一章都会在同一个链的略微不同的槽位上添加钩子（`d_poll`、`d_kqfilter`、`d_ioctl`、`mmap` 路径）。链本身保持不变。
 
 
 
 ## 实用工作流：从 shell 测试你的驱动
 
-The base-system tools are your first and best test harness. This section is a short field guide to using them well on a driver you are developing. None of the commands below are new to you, but using them for driver work has a rhythm worth learning explicitly.
+基本系统工具是你首先也是最好的测试工具。本节是一个简短的实地指南，介绍在开发驱动时如何很好地使用它们。下面的命令对你来说都不陌生，但将它们用于驱动工作有一种值得明确学习的节奏。
 
 ### cat(1)：第一次检查
 
-`cat` reads from its arguments and writes to standard output. For a driver that serves a static message or a drained buffer, `cat` is the fastest way to see what the read path produces:
+`cat` 从其参数读取并写入标准输出。对于提供静态消息或已排空缓冲区的驱动，`cat` 是查看读取路径产生什么的最快方式：
 
 ```sh
 % cat /dev/myfirst/0
 ```
 
-If the output is what you expect, the read path is alive. If it is empty, either your driver has nothing to deliver (check `sysctl dev.myfirst.0.stats.bufused`) or your handler is returning EOF on the first call. If the output is garbled, either your buffer is uninitialised or you are handing out bytes past `bufused`.
+如果输出符合预期，读取路径就是活跃的。如果为空，要么你的驱动没有内容可以提供（检查 `sysctl dev.myfirst.0.stats.bufused`），要么你的处理程序在第一次调用时返回 EOF。如果输出乱码，要么你的缓冲区未初始化，要么你在 `bufused` 之外传递了字节。
 
-`cat` opens its argument once and reads from it until EOF. Every `read(2)` is a separate call into your `d_read`. Use `truss(1)` to see how many calls `cat` makes:
+`cat` 打开其参数一次并从中读取直到 EOF。每次 `read(2)` 都是对你 `d_read` 的独立调用。使用 `truss(1)` 查看 `cat` 进行了多少次调用：
 
 ```sh
 % truss cat /dev/myfirst/0 2>&1 | grep read
 ```
 
-The output shows each `read(2)` with its arguments and return value. If you expected one read and see three, that tells you about your buffer sizing; if you expected three reads and see one, your handler delivered all the data in a single call.
+输出显示每次 `read(2)` 及其参数和返回值。如果你预期一次读取却看到三次，这告诉了你关于缓冲区大小的信息；如果你预期三次读取却看到一次，你的处理程序在单次调用中传递了所有数据。
 
 ### echo(1) 和 printf(1)：简单写入
 
-`echo` is the quickest way to get a known string into your driver's write path:
+`echo` 是将已知字符串放入驱动写入路径的最快方式：
 
 ```sh
 % echo "hello" | sudo tee /dev/myfirst/0 > /dev/null
 ```
 
-Two things to notice. First, `echo` appends a newline by default; the string you sent is six bytes, not five. Use `echo -n` to suppress the newline when that matters. Second, the `tee` invocation is there to solve a permission problem: shell redirection (`>`) runs with the user's privileges, so a `sudo echo > /dev/myfirst/0` fails to open the node. Piping through `tee`, which runs under `sudo`, sidesteps that.
+有两点需要注意。首先，`echo` 默认追加换行符；你发送的字符串是 6 字节，不是 5 字节。在需要时使用 `echo -n` 抑制换行符。其次，`tee` 调用是为了解决权限问题：shell 重定向（`>`）以用户权限运行，所以 `sudo echo > /dev/myfirst/0` 无法打开节点。通过在 `sudo` 下运行的 `tee` 管道传递，可以避开这个问题。
 
-`printf` gives you more control:
+`printf` 给你更多控制：
 
 ```sh
 % printf 'abc' | sudo tee /dev/myfirst/0 > /dev/null
 ```
 
-Three bytes, no newline. Use `printf '\x41\x42\x43'` for binary patterns.
+三个字节，没有换行符。使用 `printf '\x41\x42\x43'` 生成二进制模式。
 
 ### dd(1)：精确工具
 
-For any test that needs a specific byte count or a specific block size, `dd` is the right tool. `dd` is also one of the only base-system tools that reports short reads and short writes in its summary, which makes it uniquely useful for testing driver behaviour:
+对于需要特定字节计数或特定块大小的任何测试，`dd` 是正确的工具。`dd` 也是基本系统工具中少数在其摘要中报告短读取和短写入的工具之一，这使其对测试驱动行为特别有用：
 
 ```sh
 % sudo dd if=/dev/urandom of=/dev/myfirst/0 bs=128 count=4
@@ -2122,47 +2122,47 @@ For any test that needs a specific byte count or a specific block size, `dd` is 
 512 bytes transferred in 0.001234 secs (415000 bytes/sec)
 ```
 
-The `X+Y records in` / `X+Y records out` counters have a precise meaning: `X` is the number of full-block transfers, `Y` is the number of short transfers. A line reading `0+4 records out` means every block was accepted only partially. That is a driver telling you something.
+`X+Y records in` / `X+Y records out` 计数器有精确含义：`X` 是完整块传输的次数，`Y` 是短传输的次数。一行显示 `0+4 records out` 意味着每个块只被部分接受。那是驱动在告诉你某些信息。
 
-`dd` also lets you read with a known block size:
+`dd` 还允许你以已知块大小读取：
 
 ```sh
 % sudo dd if=/dev/myfirst/0 of=/tmp/dump bs=64 count=1
 ```
 
-This issues exactly one `read(2)` for 64 bytes. Your handler sees `uio_resid = 64`; you respond with whatever you have; the result is what `dd` writes to `/tmp/dump`.
+这恰好发出一个 64 字节的 `read(2)`。你的处理程序看到 `uio_resid = 64`；你用你有的内容响应；结果就是 `dd` 写入 `/tmp/dump` 的内容。
 
-The `iflag=fullblock` flag tells `dd` to loop on short reads until it has filled the requested block. Useful when you want to soak all of the driver's output without losing bytes to the short-read default.
+`iflag=fullblock` 标志告诉 `dd` 在短读取时循环，直到填满请求的块。当你想吸收驱动的所有输出而不因短读取默认行为丢失字节时很有用。
 
 ### od(1) 和 hexdump(1)：字节级检查
 
-For driver testing, `od` and `hexdump` let you see the exact bytes your driver emitted:
+对于驱动测试，`od` 和 `hexdump` 让你看到驱动发出的确切字节：
 
 ```sh
 % sudo dd if=/dev/myfirst/0 bs=32 count=1 | od -An -tx1z
   68 65 6c 6c 6f 0a                                 >hello.<
 ```
 
-The `-An` flag suppresses address printing. `-tx1z` shows bytes in hex and ASCII. If the expected output is text, you see it on the right; if it is binary, you see the hex on the left.
+`-An` 标志抑制地址打印。`-tx1z` 以十六进制和 ASCII 显示字节。如果预期输出是文本，你在右侧看到它；如果是二进制，你在左侧看到十六进制。
 
-These tools become essential when a read produces unexpected bytes. "It looks weird" and "I can see every byte in hex" are very different debugging states.
+这些工具在读取产生意外字节时变得不可或缺。"它看起来很奇怪"和"我能以十六进制看到每个字节"是非常不同的调试状态。
 
 ### sysctl(8) 和 dmesg(8)：内核的声音
 
-Your driver publishes counters through `sysctl` and lifecycle events through `dmesg`. Both are worth checking during every test:
+你的驱动通过 `sysctl` 发布计数器，通过 `dmesg` 发布生命周期事件。两者都值得在每次测试时检查：
 
 ```sh
 % sysctl dev.myfirst.0
 % dmesg | tail -20
 ```
 
-The sysctl output is your view into the driver's state right now. `dmesg` is your view into the driver's history since boot (or since the ring buffer wrapped).
+sysctl 输出是你对驱动当前状态的视图。`dmesg` 是你对驱动自启动以来（或自环形缓冲区环绕以来）历史的视图。
 
-A useful habit: after every test, run both. If the numbers do not match your expectation, you have narrowed down the bug quickly.
+一个有用的习惯：每次测试后，都运行两者。如果数字不符合你的预期，你就快速缩小了 bug 的范围。
 
 ### fstat(1)：谁打开了描述符？
 
-When your driver refuses to unload ("module busy"), the question is "who has `/dev/myfirst/0` open right now?". `fstat(1)` answers it:
+当你的驱动拒绝卸载时（"module busy"），问题是"现在谁打开了 `/dev/myfirst/0`？"。`fstat(1)` 回答它：
 
 ```sh
 % fstat -p $(pgrep cat) /dev/myfirst/0
@@ -2170,18 +2170,18 @@ USER     CMD          PID   FD MOUNT      INUM MODE         SZ|DV R/W NAME
 ebrandi  cat          1234    3 /dev         0 crw-rw----  myfirst/0  r /dev/myfirst/0
 ```
 
-Alternatively, `fuser(8)`:
+或者，使用 `fuser(8)`：
 
 ```sh
 % sudo fuser /dev/myfirst/0
 /dev/myfirst/0:         1234
 ```
 
-Either tool names the processes holding the descriptor. Kill the culprit (carefully; do not kill anything you did not start) and the module will unload.
+两种工具都能命名持有描述符的进程。终止罪魁祸首（小心；不要终止任何你没启动的进程）后模块就可以卸载了。
 
 ### truss(1) 和 ktrace(1)：观察系统调用
 
-For a user program whose interaction with your driver you want to inspect, `truss` shows every syscall and its return value:
+对于你想检查其与驱动交互的用户程序，`truss` 显示每个系统调用及其返回值：
 
 ```sh
 % truss ./rw_myfirst
@@ -2191,28 +2191,28 @@ close(3)                                         = 0 (0x0)
 ...
 ```
 
-`ktrace` records to a file that `kdump` prints later; it is the right tool when you want to capture a trace of a long-running program.
+`ktrace` 记录到文件，稍后用 `kdump` 打印；当你想捕获长时间运行程序的追踪时，它是正确的工具。
 
-These two tools are not driver-specific, but they are how you confirm from the outside that your driver is producing the results a user program will see.
+这两个工具不是驱动特定的，但它们是你从外部确认驱动正在产生用户程序将看到的结果的方式。
 
 ### 建议的测试节奏
 
-For each stage of the chapter, try this loop:
+对于章节的每个阶段，尝试这个循环：
 
-1. Build and load.
-2. `cat` to produce initial output, confirm by eye.
-3. `sysctl dev.myfirst.0` to see counters match.
-4. `dmesg | tail` to see lifecycle events.
-5. Write something with `echo` or `dd`.
-6. Read it back.
-7. Repeat with a larger size, a boundary size, and a pathological size.
-8. Unload.
+1. 构建并加载。
+2. 使用 `cat` 产生初始输出，目视确认。
+3. 使用 `sysctl dev.myfirst.0` 查看计数器是否匹配。
+4. 使用 `dmesg | tail` 查看生命周期事件。
+5. 用 `echo` 或 `dd` 写入一些内容。
+6. 读回内容。
+7. 用更大的尺寸、边界尺寸和异常尺寸重复测试。
+8. 卸载。
 
-After a couple of iterations this becomes automatic and fast. It is the kind of rhythm that turns driver development from a slog into a routine.
+经过几次迭代后，这变得自动化且快速。正是这种节奏将驱动开发从苦差事变成了例行公事。
 
 ### 一个具体的 truss 演示
 
-Running a userland program under `truss(1)` is one of the fastest ways to see exactly what syscalls it makes to your driver and what return values the kernel produces. Here is a typical session with the Stage 3 driver loaded and empty:
+在 `truss(1)` 下运行用户态程序是查看它对你的驱动发出了什么系统调用以及内核产生了什么返回值的最快方式之一。以下是加载了阶段 3 驱动且缓冲区为空时的典型会话：
 
 ```sh
 % truss ./rw_myfirst rt 2>&1
@@ -2225,9 +2225,9 @@ close(3)                                         = 0 (0x0)
 exit(0x0)
 ```
 
-A few things are worth pausing on. Each line shows a single syscall, its arguments, and its return value in both decimal and hex. The `write` call received 29 bytes and the driver accepted all 29 (the return value matches the request length). The `read` call received a buffer of 255 bytes of room and the driver produced 29 bytes of content; a short read, which the user program explicitly accepts. Both `open` calls returned 3, because file descriptors 0, 1, and 2 are standard streams and the first free descriptor is 3.
+有几件事值得停下来注意。每一行显示一个系统调用、其参数及其以十进制和十六进制表示的返回值。`write` 调用接收了 29 字节，驱动接受了全部 29 字节（返回值与请求长度匹配）。`read` 调用接收了 255 字节空间的缓冲区，驱动产生了 29 字节的内容；一个短读取，用户程序显式接受。两次 `open` 调用都返回了 3，因为文件描述符 0、1 和 2 是标准流，第一个空闲描述符是 3。
 
-If you force a short write by limiting the driver, `truss` will show it plainly:
+如果你通过限制驱动来强制短写入，`truss` 将清楚地显示它：
 
 ```sh
 % truss ./write_big 2>&1 | head
@@ -2237,17 +2237,17 @@ write(3,"<4096 bytes of data>",4096)             ERR#28 'No space left on device
 close(3)                                         = 0 (0x0)
 ```
 
-The first write requested 8192 bytes and was accepted for 4096. The second write had nothing to say because the buffer is full; the driver returned `ENOSPC`, which `truss` rendered as `ERR#28 'No space left on device'`. This is the view from the user side; your driver side was returning zero (with `uio_resid` decremented to 4096) for the first call and `ENOSPC` for the second. Comparing what `truss` sees against what your `device_printf` says is an excellent way to catch mismatches between the driver's intent and the kernel's reporting.
+第一次写入请求了 8192 字节并被接受了 4096 字节。第二次写入没有什么可说的，因为缓冲区已满；驱动返回了 `ENOSPC`，`truss` 将其呈现为 `ERR#28 'No space left on device'`。这是用户侧的视图；你的驱动侧对第一次调用返回零（`uio_resid` 递减到 4096），对第二次调用返回 `ENOSPC`。将 `truss` 看到的与你的 `device_printf` 输出进行比较是捕获驱动意图与内核报告之间不匹配的绝佳方式。
 
-`truss -f` follows forks, which is useful when your test harness spawns worker processes. `truss -d` prefixes each line with a relative timestamp; useful for reasoning about latency between calls. Both flags are small investments; the rewards add up quickly when you start running multi-process stress tests.
+`truss -f` 跟踪派生，当你的测试工具生成工作进程时很有用。`truss -d` 为每行添加相对时间戳前缀；用于推理调用之间的延迟。两个标志都是小的投入；当你开始运行多进程压力测试时，回报会迅速累积。
 
 ### 关于 ktrace 的简要说明
 
-`ktrace(1)` is `truss`'s bigger sibling. It records a binary trace to a file (`ktrace.out` by default) which you then format with `kdump(1)`. It is the right tool when:
+`ktrace(1)` 是 `truss` 的更大的兄弟。它将二进制追踪记录到文件（默认为 `ktrace.out`），然后用 `kdump(1)` 格式化。它是以下情况的正确工具：
 
-- The test run is long and you do not want to watch output live.
-- You want to capture detail that is too fine-grained for `truss` (syscall timing, signal delivery, namei lookups).
-- You want to replay a trace later, perhaps on a different machine.
+- 测试运行很长，你不想实时观看输出。
+- 你想捕获对 `truss` 来说太细粒度的细节（系统调用时间、信号传递、namei 查找）。
+- 你想稍后重放追踪，也许在不同的机器上。
 
 A typical session:
 
@@ -2264,11 +2264,11 @@ A typical session:
 ...
 ```
 
-For Chapter 9 the difference between `truss` and `ktrace` is small. Use `truss` as the default; reach for `ktrace` when you need more detail or a recorded trace.
+对于第九章，`truss` 和 `ktrace` 之间的差异很小。默认使用 `truss`；当你需要更多细节或记录的追踪时使用 `ktrace`。
 
 ### 用 vmstat -m 观察内核内存
 
-Your driver allocates kernel memory through `malloc(9)` with the `M_DEVBUF` type. FreeBSD's `vmstat -m` reveals how many allocations are active in each type bucket. Run it while your driver is loaded and idle, then again while it has a buffer allocated, and the increase will be visible in the `devbuf` row:
+你的驱动通过 `malloc(9)` 以 `M_DEVBUF` 类型分配内核内存。FreeBSD 的 `vmstat -m` 揭示每个类型桶中有多少活跃分配。在驱动加载且空闲时运行它，然后在它有已分配缓冲区时再次运行，增加量将在 `devbuf` 行中可见：
 
 ```sh
 % vmstat -m | head -1
@@ -2277,88 +2277,88 @@ Your driver allocates kernel memory through `malloc(9)` with the `M_DEVBUF` type
        devbuf   415   4120K       -    39852  16,32,64,128,256,512,1024,2048,...
 ```
 
-The `InUse` column is the current count of live allocations of this type. `MemUse` is the total size currently in use. `HighUse` is the all-time high-water mark since boot. `Requests` is the lifetime count of `malloc` calls that selected this type.
+`InUse` 列是此类型的当前活跃分配计数。`MemUse` 是当前使用的总大小。`HighUse` 是自启动以来的历史高水位标记。`Requests` 是选择此类型的 `malloc` 调用的生命周期计数。
 
-Load the Stage 2 driver. `InUse` goes up by one (the 4096-byte buffer), `MemUse` goes up by approximately 4 KiB, and `Requests` increments. Unload. `InUse` goes down by one; `MemUse` goes down by the 4 KiB. If it does not, you have a memory leak, and `vmstat -m` just told you so.
+加载阶段 2 驱动。`InUse` 增加一（4096 字节缓冲区），`MemUse` 增加约 4 KiB，`Requests` 递增。卸载。`InUse` 减少一；`MemUse` 减少那 4 KiB。如果不是这样，你就有内存泄漏，而 `vmstat -m` 刚刚告诉了你。
 
-This is the second observability channel worth adding to your test rhythm. `sysctl` shows driver-owned counters. `dmesg` shows driver-owned log lines. `vmstat -m` shows kernel-owned allocation counts, and it catches a class of bug (forgot to free) that the first two cannot see.
+这是值得添加到测试节奏中的第二个可观测性通道。`sysctl` 显示驱动拥有的计数器。`dmesg` 显示驱动拥有的日志行。`vmstat -m` 显示内核拥有的分配计数，它捕获一类前两个无法看到的 bug（忘记释放）。
 
-For a driver that declares its own malloc type via `MALLOC_DEFINE(M_MYFIRST, "myfirst", ...)`, `vmstat -m | grep myfirst` is even better: it isolates your driver's allocations from the generic `devbuf` pool. `myfirst` stays with `M_DEVBUF` throughout this chapter for simplicity, but upgrading to a dedicated type is a small change you may want to make before shipping a driver outside the book's lab environment.
+对于通过 `MALLOC_DEFINE(M_MYFIRST, "myfirst", ...)` 声明自己 malloc 类型的驱动，`vmstat -m | grep myfirst` 更好：它将你的驱动的分配从通用 `devbuf` 池中隔离出来。`myfirst` 在本章中为简单起见一直使用 `M_DEVBUF`，但在将驱动发布到本书实验环境之外之前，升级到专用类型是一个你可能想做的小更改。
 
 
 
 ## 可观测性：让你的驱动可读
 
-A driver that does the right thing is worth more if you can confirm, from outside the kernel, that it is doing the right thing. This section is a short meditation on the observability choices this chapter has been making, and why.
+一个做正确事情的驱动，如果你能从内核外部确认它在做正确的事情，就更有价值。本节是对本章一直在做的可观测性选择的简短思考，以及为什么这样做。
 
 ### 三个接口：sysctl、dmesg、用户态
 
-Your driver presents three surfaces to the operator:
+你的驱动向操作员呈现三个界面：
 
-- **sysctl** for live counters: point-in-time values the operator can poll.
-- **dmesg (device_printf)** for lifecycle events: open, close, errors, transitions.
-- **/dev** nodes for the data path: the actual bytes.
+- **sysctl** 用于实时计数器：操作员可以轮询的即时值。
+- **dmesg (device_printf)** 用于生命周期事件：打开、关闭、错误、转换。
+- **/dev** 节点用于数据路径：实际的字节。
 
-Each has a distinct role. sysctl tells the operator *what is true right now*. dmesg tells the operator *what changed recently*. `/dev` is the thing the operator is actually using.
+每个都有不同的角色。sysctl 告诉操作员*现在什么是真的*。dmesg 告诉操作员*最近发生了什么变化*。`/dev` 是操作员实际使用的东西。
 
-A well-observed driver uses all three, deliberately. A minimally-observed driver uses only the third, and debugging it requires either a debugger or a lot of guessing.
+一个可观测性好的驱动刻意使用所有三个。一个可观测性最小的驱动只使用第三个，调试它需要调试器或大量猜测。
 
 ### Sysctl：计数器与状态
 
-`myfirst` exposes counters through the sysctl tree under `dev.myfirst.0.stats`:
+`myfirst` 通过 `dev.myfirst.0.stats` 下的 sysctl 树暴露计数器：
 
-- `attach_ticks`: a point-in-time value (when the driver attached).
-- `open_count`: a monotonically-increasing counter (lifetime opens).
-- `active_fhs`: a live count (current descriptors).
-- `bytes_read`, `bytes_written`: monotonically-increasing counters.
-- `bufused`: a live value (current buffer occupancy).
+- `attach_ticks`：即时值（驱动附加的时间）。
+- `open_count`：单调递增计数器（生命周期打开次数）。
+- `active_fhs`：实时计数（当前描述符数）。
+- `bytes_read`、`bytes_written`：单调递增计数器。
+- `bufused`：实时值（当前缓冲区占用）。
 
-Monotonically-increasing counters are easier to reason about than live values, because their rate of change is informative even when the absolute value is not. An operator who sees `bytes_read` increasing at 1 MB/s has learned something even if 1 MB/s is meaningless out of context.
+单调递增计数器比实时值更容易推理，因为即使绝对值没有意义，它们的变化率也是有用的信息。看到 `bytes_read` 以 1 MB/s 增长的操作员已经学到了某些东西，即使 1 MB/s 在上下文之外没有意义。
 
-Live values are essential when the state matters for decisions (`active_fhs > 0` means unload will fail). Choose monotonically-increasing counters first, live values when you need them.
+实时值在状态对决策有影响时是必不可少的（`active_fhs > 0` 意味着卸载将失败）。优先选择单调递增计数器，在需要时使用实时值。
 
 ### dmesg：值得查看的事件
 
-`device_printf(9)` writes to the kernel message buffer, which `dmesg` shows. Every line is worth seeing exactly once: use dmesg for events, not for continuous status.
+`device_printf(9)` 写入内核消息缓冲区，`dmesg` 显示它。每一行都值得恰好看到一次：将 dmesg 用于事件，而不是用于连续状态。
 
-The events `myfirst` logs:
+`myfirst` 记录的事件：
 
-- Attach (once per instance).
-- Open (once per open).
-- Destructor (once per descriptor close).
-- Detach (once per instance).
+- 附加（每个实例一次）。
+- 打开（每次打开一次）。
+- 析构函数（每个描述符关闭一次）。
+- 拆离（每个实例一次）。
 
-That is four lines per instance per load/unload cycle, plus two lines per open/close pair. Comfortable.
+即每个实例每次加载/卸载周期四行，加上每次打开/关闭对两行。舒适。
 
-What we do not log:
+我们不记录的内容：
 
-- Every `read` or `write` call. That would flood dmesg in any real workload.
-- Every sysctl read. Those are passive.
-- Every successful transfer. The sysctl counters carry that information, and they carry it more compactly.
+- 每次 `read` 或 `write` 调用。那会在任何真实工作负载下淹没 dmesg。
+- 每次 sysctl 读取。那些是被动的。
+- 每次成功传输。sysctl 计数器携带该信息，而且携带得更紧凑。
 
-If a driver needs to log something that happens many times a second, the usual answer is to guard the logging with `if (bootverbose)`, so it is silent on production systems but available to developers who boot with `boot -v`. For `myfirst` we do not need even that.
+如果驱动需要记录每秒发生很多次的事情，通常的答案是用 `if (bootverbose)` 保护日志，这样在生产系统上它是静默的，但对使用 `boot -v` 启动的开发者可用。对于 `myfirst`，我们甚至不需要那样做。
 
 ### 过度日志记录的陷阱
 
-A driver that logs every operation is a driver that hides its important events in a sea of noise. If your dmesg shows ten thousand lines of `read returned 0 bytes`, the line that says `buffer full, returning ENOSPC` is invisible.
+一个记录每次操作的驱动是一个将重要事件隐藏在噪音海洋中的驱动。如果你的 dmesg 显示一万行 `read returned 0 bytes`，那行说 `buffer full, returning ENOSPC` 的消息就是不可见的。
 
-Keep logs sparse. Log transitions, not states. Log once per instance, not once per call. When in doubt, silence.
+保持日志稀疏。记录转换，而不是状态。每个实例记录一次，而不是每次调用记录一次。有疑问时，保持静默。
 
 ### 你稍后要添加的计数器
 
-Chapters 10 and beyond will extend the counter tree with:
+第十章及以后将通过以下内容扩展计数器树：
 
-- `reads_blocked`, `writes_blocked`: count of calls that had to sleep (Chapter 10).
-- `poll_waiters`: count of active `poll(2)` subscribers (Chapter 10).
-- `drain_waits`, `overrun_events`: ring-buffer diagnostics (Chapter 10).
+- `reads_blocked`、`writes_blocked`：不得不睡眠的调用计数（第十章）。
+- `poll_waiters`：活跃 `poll(2)` 订阅者计数（第十章）。
+- `drain_waits`、`overrun_events`：环形缓冲区诊断（第十章）。
 
-Each one is one more thing an operator can look at to understand what the driver is doing. The pattern is the same: expose the counters, keep the mechanism silent, let the operator decide when to inspect.
+每一个都是操作员可以查看以了解驱动正在做什么的又一个东西。模式是相同的：暴露计数器，保持机制静默，让操作员决定何时检查。
 
 ### 你的驱动在轻负载下的样子
 
-A concrete example is more useful than abstract advice. Load Stage 3, run the companion `stress_rw` program for a few seconds with `sysctl dev.myfirst.0.stats` watching from another terminal, and you see something like this:
+一个具体的例子比抽象的建议更有用。加载阶段 3，从另一个终端用 `sysctl dev.myfirst.0.stats` 监控运行伴随的 `stress_rw` 程序几秒钟，你会看到类似这样的内容：
 
-**Before `stress_rw` starts:**
+**`stress_rw` 启动前：**
 
 ```text
 dev.myfirst.0.stats.attach_ticks: 12345678
@@ -2369,9 +2369,9 @@ dev.myfirst.0.stats.bytes_written: 0
 dev.myfirst.0.stats.bufused: 0
 ```
 
-Zero activity, one attach, buffer empty.
+零活动，一次附加，缓冲区为空。
 
-**During `stress_rw`, with `watch -n 0.5 sysctl dev.myfirst.0.stats`:**
+**`stress_rw` 运行期间，使用 `watch -n 0.5 sysctl dev.myfirst.0.stats`：**
 
 ```text
 dev.myfirst.0.stats.attach_ticks: 12345678
@@ -2382,9 +2382,9 @@ dev.myfirst.0.stats.bytes_written: 1359040
 dev.myfirst.0.stats.bufused: 64
 ```
 
-Two active descriptors (writer + reader), counters climbing, buffer holding 64 bytes of in-flight data. `bytes_written` is slightly ahead of `bytes_read`, which is exactly what you would expect: the writer produced a chunk the reader has not quite consumed yet. The difference equals `bufused`.
+两个活跃描述符（写入者 + 读取者），计数器攀升，缓冲区持有 64 字节的在途数据。`bytes_written` 略微领先于 `bytes_read`，这正是你期望的：写入者产生了读取者尚未完全消耗的一块数据。差值等于 `bufused`。
 
-**After `stress_rw` exits:**
+**`stress_rw` 退出后：**
 
 ```text
 dev.myfirst.0.stats.attach_ticks: 12345678
@@ -2395,73 +2395,73 @@ dev.myfirst.0.stats.bytes_written: 4800000
 dev.myfirst.0.stats.bufused: 0
 ```
 
-Both descriptors closed. Lifetime opens is 2 (cumulative). Active is 0. `bytes_read` equals `bytes_written`; the reader caught up fully. Buffer is empty.
+两个描述符都已关闭。生命周期打开次数为 2（累计）。活跃数为 0。`bytes_read` 等于 `bytes_written`；读取者已完全赶上。缓冲区为空。
 
-Three signatures to notice. First, `active_fhs` always tracks live descriptors; it is a live value, not a cumulative counter. Second, `bytes_read == bytes_written` at steady state when the reader is keeping up, plus whatever is sitting in `bufused`. Third, the `open_count` is a lifetime value that never decreases; a quick way to spot churn is to watch it grow while `active_fhs` stays stable.
+三个特征值得注意。首先，`active_fhs` 始终跟踪活跃描述符；它是实时值，不是累计计数器。其次，当读取者跟上时，稳态下 `bytes_read == bytes_written`，加上 `bufused` 中的任何内容。第三，`open_count` 是一个永不减少的生命周期值；发现搅动的一个快速方式是观察它增长而 `active_fhs` 保持稳定。
 
-A driver that behaves predictably under load is a driver you can operate with confidence. Once the counters line up the way this paragraph describes, you have your first real driver, not a toy.
+一个在负载下行为可预测的驱动是你能自信操作的驱动。一旦计数器按照本段描述的方式排列，你就拥有了你的第一个真正的驱动，而不是一个玩具。
 
 
 
 ## 有符号、无符号和差一的危害
 
-A short section on a class of bug that has caused more kernel panics than almost any other. It shows up especially often in I/O handlers.
+关于一类几乎比任何其他类型都导致了更多内核崩溃的 bug 的简短章节。它在 I/O 处理程序中尤其频繁出现。
 
 ### ssize_t 与 size_t
 
-Two types dominate I/O code:
+两种类型主导 I/O 代码：
 
-- `size_t`: unsigned, used for sizes and counts. `sizeof(x)` returns `size_t`. `malloc(9)` takes `size_t`. `memcpy` takes `size_t`.
-- `ssize_t`: signed, used when a value could be negative (usually -1 for error). `read(2)` and `write(2)` return `ssize_t`. `uio_resid` is `ssize_t`.
+- `size_t`：无符号，用于大小和计数。`sizeof(x)` 返回 `size_t`。`malloc(9)` 接受 `size_t`。`memcpy` 接受 `size_t`。
+- `ssize_t`：有符号，用于值可能为负的情况（通常 -1 表示错误）。`read(2)` 和 `write(2)` 返回 `ssize_t`。`uio_resid` 是 `ssize_t`。
 
-The two types have the same width on every platform FreeBSD supports, but they do not silently convert between each other without warnings, and they behave very differently when arithmetic underflows.
+这两种类型在 FreeBSD 支持的每个平台上具有相同的宽度，但它们不会在没有警告的情况下在彼此之间静默转换，并且在算术下溢时行为非常不同。
 
-A subtraction of `size_t` values that would produce a negative result instead wraps around to a huge positive value, because `size_t` is unsigned. For example:
+`size_t` 值的减法如果会产生负数结果，则会回绕成一个巨大的正数，因为 `size_t` 是无符号的。例如：
 
 ```c
 size_t avail = sc->buflen - sc->bufused;
 ```
 
-If `sc->bufused` is larger than `sc->buflen`, `avail` is an enormous number, and the next `uiomove` attempts a transfer that blows past the end of the buffer.
+如果 `sc->bufused` 大于 `sc->buflen`，`avail` 将是一个巨大的数字，下一次 `uiomove` 会尝试一个超过缓冲区末尾的传输。
 
-The defence is the invariant. In every buffer-management section of the chapter, we maintain `sc->bufhead + sc->bufused <= sc->buflen`. As long as that invariant holds, `sc->buflen - (sc->bufhead + sc->bufused)` cannot underflow.
+防御手段就是不变量。在本章的每个缓冲区管理部分，我们维护 `sc->bufhead + sc->bufused <= sc->buflen`。只要这个不变量成立，`sc->buflen - (sc->bufhead + sc->bufused)` 就不可能下溢。
 
-The risk is in code paths that violate the invariant accidentally. A double-free that restores an already-consumed value; a write that updates `bufused` twice; a race between writers. Those are the bugs to hunt for when `avail` ever looks wrong.
+风险在于意外违反不变量的代码路径。一个恢复了已消耗值的重复释放；一个两次更新 `bufused` 的写入；写入者之间的竞争。这些是当 `avail` 看起来不对时要寻找的 bug。
 
 ### uio_resid 可以与无符号值比较
 
-`uio_resid` is `ssize_t`. Your buffer sizes are `size_t`. Code like this:
+`uio_resid` 是 `ssize_t`。你的缓冲区大小是 `size_t`。像这样的代码：
 
 ```c
 if (uio->uio_resid > sc->buflen) ...
 ```
 
-Will be compiled with a signed-vs-unsigned comparison. Modern compilers warn about this; the warning should be taken seriously.
+将以有符号与无符号比较的方式编译。现代编译器对此发出警告；应该认真对待这个警告。
 
-The safer pattern is to cast explicitly:
+更安全的模式是显式转换：
 
 ```c
 if ((size_t)uio->uio_resid > sc->buflen) ...
 ```
 
-Or to use `MIN`, which we have been using:
+或者使用我们一直在用的 `MIN`：
 
 ```c
 towrite = MIN((size_t)uio->uio_resid, avail);
 ```
 
-The cast is defensible because `uio_resid` is documented to be non-negative in valid uios (and `uiomove` `KASSERT`s on it). The cast makes the compiler happy and makes the intent explicit.
+这个转换是合理的，因为 `uio_resid` 在有效 uio 中被文档化为非负的（并且 `uiomove` 对其进行 `KASSERT`）。转换使编译器满意并使意图明确。
 
 ### 计数器中的差一错误
 
-A counter updated on the wrong side of an error check is a classic bug:
+在错误检查的错误一侧更新的计数器是一个经典 bug：
 
 ```c
 sc->bytes_read += towrite;          /* BAD: happens even on error */
 error = uiomove(sc->buf, towrite, uio);
 ```
 
-The correct shape is to increment after success:
+正确的形状是在成功后递增：
 
 ```c
 error = uiomove(sc->buf, towrite, uio);
@@ -2469,11 +2469,11 @@ if (error == 0)
         sc->bytes_read += towrite;
 ```
 
-This is why we have `if (error == 0)` guarding every counter update in the chapter. The cost is one line of code. The benefit is that your counters match reality.
+这就是为什么我们在章节中用 `if (error == 0)` 保护每个计数器更新。代价是一行代码。好处是你的计数器与实际情况匹配。
 
 ### uio_offset - before 惯用法
 
-When you want to know "how many bytes did `uiomove` actually move?", the cleanest way is to compare `uio_offset` before and after:
+当你想知道"`uiomove` 实际移动了多少字节？"时，最干净的方式是比较前后的 `uio_offset`：
 
 ```c
 off_t before = uio->uio_offset;
@@ -2481,64 +2481,64 @@ error = uiomove_frombuf(sc->buf, sc->buflen, uio);
 size_t moved = uio->uio_offset - before;
 ```
 
-This works for both full and short transfers. `moved` is the actual byte count, regardless of what the caller asked for or how much was available.
+这对完整和短传输都有效。`moved` 是实际的字节计数，不管调用者请求了多少或有多少可用。
 
-The idiom is free at runtime (two subtractions) and unambiguous in code. Use it when your driver wants to count bytes; the alternative, inferring the count from `uio_resid`, requires knowing the original request size, which is more bookkeeping.
+这个惯用法在运行时是免费的（两次减法），在代码中是明确的。当你的驱动想计数字节时使用它；替代方案——从 `uio_resid` 推断计数——需要知道原始请求大小，这需要更多簿记。
 
 
 
 ## 额外故障排除：边界情况
 
-Expanding on the earlier troubleshooting section, here are a few more scenarios you are likely to hit the first time you write a real driver.
+扩展前面的故障排除部分，以下是你第一次编写真正驱动时可能遇到的更多场景。
 
-### "The second read on the same descriptor returns zero"
+### "同一描述符上的第二次读取返回零"
 
-Expected for a static-message driver (Stage 1): once `uio_offset` reaches the end of the message, `uiomove_frombuf` returns zero.
+对于静态消息驱动（阶段 1）是预期的：一旦 `uio_offset` 到达消息末尾，`uiomove_frombuf` 返回零。
 
-Unexpected for a FIFO driver (Stage 3): the first read drained the buffer, and no writer has refilled it. The caller should not be issuing a second read back-to-back without a write happening in between.
+对于 FIFO 驱动（阶段 3）是意外的：第一次读取排空了缓冲区，没有写入者重新填充它。调用者不应该在没有写入发生的情况下连续发出第二次读取。
 
-To distinguish the two cases, check `sysctl dev.myfirst.0.stats.bufused`. If it is zero, the buffer is empty. If it is non-zero and you still see zero bytes, you have a bug.
+要区分这两种情况，检查 `sysctl dev.myfirst.0.stats.bufused`。如果为零，缓冲区为空。如果非零但你仍然看到零字节，你有一个 bug。
 
-### "The driver returns zero bytes immediately when the buffer has data"
+### "驱动在缓冲区有数据时立即返回零字节"
 
-The read handler is taking the wrong branch. Common causes:
+读取处理程序走了错误的分支。常见原因：
 
-- A `bufused == 0` check placed in the wrong spot. If the check runs before the per-open state retrieval, it might short-circuit the read before the real work.
-- An accidental `return 0;` earlier in the handler (for example, in a debug branch left from a previous experiment).
-- A missing `mtx_unlock` on an error path, making every subsequent call block on the mutex forever. Symptom: the second call hangs, not a zero-byte return; but it is worth checking.
+- `bufused == 0` 检查放在了错误的位置。如果检查在每次打开状态检索之前运行，它可能在真正工作之前就短路了读取。
+- 处理程序中较早处有一个意外的 `return 0;`（例如，之前实验留下的调试分支）。
+- 错误路径上缺少 `mtx_unlock`，使后续每次调用永远阻塞在互斥锁上。症状：第二次调用挂起，而不是零字节返回；但值得检查。
 
-### "My `uiomove_frombuf` always returns zero regardless of the buffer"
+### "我的 `uiomove_frombuf` 无论缓冲区如何都总是返回零"
 
-Two common causes:
+两个常见原因：
 
-- The `buflen` argument is zero. `uiomove_frombuf` returns zero immediately if `buflen <= 0`.
-- `uio_offset` is already at or past `buflen`. `uiomove_frombuf` returns zero to signal EOF in that case.
+- `buflen` 参数为零。如果 `buflen <= 0`，`uiomove_frombuf` 立即返回零。
+- `uio_offset` 已经达到或超过 `buflen`。在这种情况下，`uiomove_frombuf` 返回零以发出 EOF 信号。
 
-Add a `device_printf` logging the arguments at entry to confirm which case you are in.
+在入口处添加一个 `device_printf` 记录参数以确认你属于哪种情况。
 
-### "The buffer overflows into adjacent memory"
+### "缓冲区溢出到相邻内存"
 
-Your arithmetic is wrong. Somewhere you are calling `uiomove(sc->buf + X, N, uio)` where `X + N > sc->buflen`. The write proceeds silently and corrupts kernel memory.
+你的算术是错误的。某处你调用了 `uiomove(sc->buf + X, N, uio)` 其中 `X + N > sc->buflen`。写入静默进行并损坏内核内存。
 
-Your kernel will usually panic shortly thereafter, possibly in a completely unrelated subsystem. The panic message will not mention your driver; it will mention whichever heap neighbour got clobbered.
+你的内核通常随后会崩溃，可能在一个完全不相关的子系统中。崩溃消息不会提及你的驱动；它会提及被破坏的堆邻居。
 
-If you suspect this, rebuild with `INVARIANTS` and `WITNESS` (and on many targets, KASAN on amd64). These kernel features catch buffer overruns much earlier than the default kernel does.
+如果你怀疑这一点，用 `INVARIANTS` 和 `WITNESS`（在许多目标上还有 amd64 上的 KASAN）重新构建。这些内核特性比默认内核更早捕获缓冲区溢出。
 
-### "A process reading from the device hangs forever"
+### "从设备读取的进程永远挂起"
 
-Since Chapter 9 does not implement blocking I/O, this should not happen with `myfirst` Stage 3. If it does, the most likely cause is the process holding a file descriptor while you tried to unload the driver; `destroy_dev(9)` is waiting for `si_threadcount` to reach zero, and the process is sitting inside your handler for some reason.
+由于第九章不实现阻塞 I/O，这不应该在 `myfirst` 阶段 3 中发生。如果发生了，最可能的原因是进程在你尝试卸载驱动时持有一个文件描述符；`destroy_dev(9)` 正在等待 `si_threadcount` 达到零，而进程因某种原因停留在你的处理程序内部。
 
-To diagnose: `ps auxH | grep <your-test>`; `gdb -p <pid>` and `bt`. The stack should reveal where the thread is parked.
+诊断方法：`ps auxH | grep <your-test>`；`gdb -p <pid>` 和 `bt`。栈应该揭示线程停在哪里。
 
-If your Stage 3 handler accidentally sleeps (for instance, because you added a `tsleep` while experimenting with Chapter 10 material early), the fix is to remove the sleep. Chapter 9's driver does not block.
+如果你的阶段 3 处理程序意外睡眠（例如，因为你在提前实验第十章材料时添加了 `tsleep`），修复方法是移除睡眠。第九章的驱动不阻塞。
 
-### "`kldunload` says `kldunload: can't unload file: Device busy`"
+### "`kldunload` 提示 `kldunload: can't unload file: Device busy`"
 
-Classic symptom of a descriptor still open. Use `fuser /dev/myfirst/0` to find the offending process, close the descriptor or kill the process, and retry.
+描述符仍然打开的经典症状。使用 `fuser /dev/myfirst/0` 找到有问题的进程，关闭描述符或终止进程，然后重试。
 
-### "I modified the driver and `make` compiles but `kldload` fails with version mismatch"
+### "我修改了驱动，`make` 编译成功但 `kldload` 因版本不匹配而失败"
 
-Your build environment does not match your running kernel. Check:
+你的构建环境与运行中的内核不匹配。检查：
 
 ```sh
 % freebsd-version -k
@@ -2546,90 +2546,90 @@ Your build environment does not match your running kernel. Check:
 % ls /usr/obj/usr/src/amd64.amd64/sys/GENERIC
 ```
 
-If `/usr/src` is for a different release, your headers produce a module that the kernel refuses. Rebuild against the matching sources. In a lab VM this usually means syncing `/usr/src` with the running release via `fetch` or `freebsd-update src-install`.
+如果 `/usr/src` 是不同版本的，你的头文件产生的模块会被内核拒绝。用匹配的源码重新构建。在实验虚拟机中，这通常意味着通过 `fetch` 或 `freebsd-update src-install` 将 `/usr/src` 与运行中的版本同步。
 
-### "I see every byte written through the device printed twice in dmesg"
+### "我看到通过设备写入的每个字节在 dmesg 中打印了两次"
 
-You have a `device_printf` inside the hot path that prints every transfer. Remove it or guard it with `if (bootverbose)`.
+你在热路径中有一个打印每次传输的 `device_printf`。移除它或用 `if (bootverbose)` 保护它。
 
-A milder version of the same bug: a single-line log that prints the length of every transfer. For small test workloads that looks fine; for a real user workload it will bury dmesg and cause timestamp compression in the kernel buffer.
+同一个 bug 的更温和版本：打印每次传输长度的单行日志。对于小型测试工作负载看起来没问题；对于真正的用户工作负载，它会淹没 dmesg 并导致内核缓冲区中的时间戳压缩。
 
-### "My `d_read` is called but my `d_write` is not"
+### "我的 `d_read` 被调用了但 `d_write` 没有被调用"
 
-Either the user program never calls `write(2)` on the device, or it calls `write(2)` with the descriptor not opened for writing (`O_RDONLY`). Check both.
+要么是用户程序从未在设备上调用 `write(2)`，要么是调用 `write(2)` 时描述符没有以写入方式打开（`O_RDONLY`）。检查两者。
 
-Also: confirm that `cdevsw.d_write` is assigned to `myfirst_write`. A copy-paste bug that assigns it to `myfirst_read` results in both directions hitting the read handler, with predictably confusing results.
+另外：确认 `cdevsw.d_write` 被分配给了 `myfirst_write`。将其分配给 `myfirst_read` 的复制粘贴 bug 会导致两个方向都命中读取处理程序，产生可预见的混乱结果。
 
 
 
 ## 设计说明：为什么每个阶段停在它停的地方
 
-A short meta-section on why Chapter 9's three stages have the boundaries they have. This is the kind of chapter-design reasoning that is worth making explicit, because it is the reasoning you will apply when you design your own drivers.
+一个简短的元节，解释第九章的三个阶段为什么有这些边界。这是值得明确的章节设计推理类型，因为这是你在设计自己的驱动时将应用的推理。
 
 ### 为什么存在阶段 1
 
-Stage 1 is the smallest possible `d_read` that is not `/dev/null`. It introduces:
+阶段 1 是不是 `/dev/null` 的最小可能 `d_read`。它介绍了：
 
-- The `uiomove_frombuf(9)` helper, the easiest way to get a fixed buffer out to user space.
-- Per-descriptor offset handling.
-- The pattern of using `uio_offset` as the state carrier.
+- `uiomove_frombuf(9)` 辅助函数，将固定缓冲区输出到用户空间的最简单方式。
+- 每次描述符偏移处理。
+- 使用 `uio_offset` 作为状态载体的模式。
 
-Stage 1 does not do anything with writes; the Chapter 8 stub is fine.
+阶段 1 不对写入做任何事情；第八章的桩函数就可以。
 
-Without Stage 1, the jump from stubs to a buffered read/write driver is too large. Stage 1 lets you confirm, with minimal code, that the read handler is wired up correctly. Everything else builds on that confirmation.
+没有阶段 1，从桩函数到缓冲区读/写驱动的跳跃就太大了。阶段 1 让你用最少的代码确认读取处理程序已正确连接。其他一切都建立在那个确认之上。
 
 ### 为什么存在阶段 2
 
-Stage 2 introduces:
+阶段 2 介绍了：
 
-- A dynamically-allocated kernel buffer.
-- A write path that accepts user data.
-- A read path that honours the caller's offset across the accumulating buffer.
-- The first realistic use of the softc mutex in an I/O handler.
+- 动态分配的内核缓冲区。
+- 接受用户数据的写入路径。
+- 遵守调用者偏移穿越累积缓冲区的读取路径。
+- softc 互斥锁在 I/O 处理程序中的首次实际使用。
 
-Stage 2 deliberately does not drain reads. The buffer grows until full; subsequent writes return `ENOSPC`. This lets two concurrent readers confirm that they each have their own `uio_offset`, which is the property Stage 1 couldn't demonstrate (because Stage 1 had nothing to write).
+阶段 2 刻意不排空读取。缓冲区增长直到满；后续写入返回 `ENOSPC`。这让两个并发读取者可以确认它们各自有自己的 `uio_offset`，这是阶段 1 无法演示的属性（因为阶段 1 没有可写入的内容）。
 
 ### 为什么存在阶段 3
 
-Stage 3 introduces:
+阶段 3 介绍了：
 
-- Reads that drain the buffer.
-- The coordination between a head pointer and a used count.
-- The FIFO semantics that most real drivers approximate.
+- 排空缓冲区的读取。
+- 头指针和已用计数之间的协调。
+- 大多数真正驱动近似使用的 FIFO 语义。
 
-Stage 3 does not wrap around. The head and used pointers walk forward through the buffer and the buffer collapses to the beginning when empty. A proper ring buffer (with head and tail wrapping around a fixed-size array) belongs in Chapter 10 because it pairs naturally with blocking reads and `poll(2)`: a ring makes steady-state operation efficient, and efficient steady-state operation is exactly what a blocking reader needs.
+阶段 3 不会环绕。头指针和已用指针在缓冲区中向前移动，当缓冲区为空时折叠回开头。真正的环形缓冲区（头和尾在固定大小数组中环绕）属于第十章，因为它与阻塞读取和 `poll(2)` 自然配对：环形使稳态操作高效，而高效的稳态操作正是阻塞读取者所需要的。
 
 ### 为什么这里没有环形缓冲区
 
-A ring buffer is five to fifteen lines of additional bookkeeping beyond what Stage 3 does. Adding it now would not be a large amount of code. The reason it is deferred is pedagogical: the two concepts ("I/O path semantics" and "ring buffer mechanics") are independently confusing to a beginner, and splitting them into two chapters lets each chapter address one pile of confusion at a time.
+环形缓冲区比阶段 3 多五到十五行的额外簿记。现在添加它不会是大量的代码。推迟的原因是教学性的：两个概念（"I/O 路径语义"和"环形缓冲区机制"）对初学者来说各自都容易混淆，将它们分成两章让每章一次解决一堆困惑。
 
-By the time Chapter 10 introduces the ring, the reader is fluent in the I/O path. The new material is only the ring bookkeeping.
+到第十章引入环形时，读者已经熟练掌握 I/O 路径。新的材料只是环形簿记。
 
 ### 为什么没有阻塞
 
-Blocking is useful, but it introduces `msleep(9)`, condition variables, the `d_purge` teardown hook, and a thicket of correctness issues around what to wake and when. Each of those is a substantial topic. Mixing them into Chapter 9 would double its length and halve its clarity.
+阻塞是有用的，但它引入了 `msleep(9)`、条件变量、`d_purge` 拆卸钩子，以及围绕何时唤醒和唤醒什么的大量正确性问题。其中每一个都是实质性的主题。将它们混入第九章会使长度翻倍、清晰度减半。
 
-Chapter 10's first section is "when your driver has to wait". It is a natural follow-on.
+第十章的第一节是"当你的驱动必须等待时"。这是一个自然的延续。
 
 ### 各阶段**不**试图成为什么
 
-The stages are not a simulation of a hardware driver. They do not mimic DMA. They do not simulate interrupts. They do not pretend to be anything other than what they are: in-memory drivers that exercise the UNIX I/O path.
+这些阶段不是硬件驱动的模拟。它们不模拟 DMA。它们不模拟中断。它们不假装成它们不是的东西：它们是锻炼 UNIX I/O 路径的内存中驱动。
 
-This matters because later in the book, when we write actual hardware drivers, the I/O path will look identical. The hardware specifics (where the bytes come from, where the bytes go to) will change, but the handler shape, the uiomove usage, the errno conventions, the counter patterns, all of these will be recognisable from Chapter 9.
+这很重要，因为在本书后面，当我们编写真正的硬件驱动时，I/O 路径看起来会是相同的。硬件细节（字节从哪里来，字节到哪里去）会改变，但处理程序形状、uiomove 用法、errno 约定、计数器模式，所有这些都将从第九章中可以识别。
 
-A driver that moves bytes correctly across the user/kernel trust boundary is 80% of any real driver. Chapter 9 teaches that 80%.
+一个正确跨越用户/内核信任边界移动字节的驱动是任何真正驱动的 80%。第九章教你那 80%。
 
 
 
 ## 动手实验
 
-The labs below track the three stages above. Each lab is a checkpoint that proves your driver is doing the thing the text just described. Read the lab fully before starting, and do them in order.
+下面的实验跟踪上面的三个阶段。每个实验都是一个检查点，证明你的驱动正在做文本刚才描述的事情。在开始之前完整阅读实验，并按顺序进行。
 
 ### 实验 9.1：构建并加载阶段 1
 
-**Goal:** Build the Stage 1 driver, load it, read the static message, and confirm per-descriptor offset handling.
+**目标：** 构建阶段 1 驱动，加载它，读取静态消息，并确认每次描述符的偏移处理。
 
-**Steps:**
+**步骤：**
 
 1. Start from the companion tree: `cp -r examples/part-02/ch09-reading-and-writing/stage1-static-message ~/drivers/ch09-stage1`. Alternatively, modify your Chapter 8 stage 2 driver according to the Stage 1 walkthrough above.
 2. Change into the directory and build:
@@ -2667,29 +2667,29 @@ The labs below track the three stages above. Each lab is a checkpoint that prove
    ```sh
    % dmesg | tail -5
    ```
-   You should see the `open via /dev/myfirst/0 fh=...` and `per-open dtor fh=...` lines from Chapter 8, plus the message body was read.
+   你应该会看到第 8 章的 `open via /dev/myfirst/0 fh=...` 和 `per-open dtor fh=...` 行，以及消息正文已被读取的信息。
 8. Unload:
    ```sh
    % sudo kldunload myfirst
    ```
 
-**Success criteria:**
+**成功标准：**
 
-- `cat` prints the message.
-- The userland tool shows 75 bytes on the first read and 0 bytes on the second.
-- `dmesg` shows one open and one destructor per `./rw_myfirst read` invocation.
+- `cat` 打印消息。
+- 用户态工具在第一次读取时显示 75 字节，第二次读取时显示 0 字节。
+- `dmesg` 为每次 `./rw_myfirst read` 调用显示一次打开和一次析构。
 
-**Common mistakes:**
+**常见错误：**
 
-- Forgetting the `-1` on `sizeof(myfirst_message) - 1`. The message will include a trailing NUL byte that appears as a stray character in user output.
-- Not calling `devfs_get_cdevpriv` before the `sc == NULL` check. The rest of the chapter depends on this order; run it to see why it is the right one.
-- Using `(void *)sc->message` instead of `__DECONST(void *, sc->message)`. Both work on most compilers; the `__DECONST` form is the convention and suppresses a warning on some compiler configurations.
+- 忘记 `sizeof(myfirst_message) - 1` 中的 `-1`。消息将包含一个作为杂散字符出现在用户输出中的末尾 NUL 字节。
+- 在 `sc == NULL` 检查之前没有调用 `devfs_get_cdevpriv`。本章的其余部分依赖于这个顺序；运行它来看看为什么这是正确的。
+- 使用 `(void *)sc->message` 而不是 `__DECONST(void *, sc->message)`。两者在大多数编译器上都能工作；`__DECONST` 形式是约定并在某些编译器配置上抑制警告。
 
 ### 实验 9.2：用写入和读取练习阶段 2
 
-**Goal:** Build Stage 2, push data in from userland, pull it back out, and observe the sysctl counters.
+**目标：** 构建阶段 2，从用户态推入数据，拉回出来，并观察 sysctl 计数器。
 
-**Steps:**
+**步骤：**
 
 1. From the companion tree: `cp -r examples/part-02/ch09-reading-and-writing/stage2-readwrite ~/drivers/ch09-stage2`.
 2. Build and load:
@@ -2730,7 +2730,7 @@ The labs below track the three stages above. Each lab is a checkpoint that prove
    ```sh
    % dd if=/dev/zero bs=1024 count=8 | sudo tee /dev/myfirst/0 > /dev/null
    ```
-   Expect a short-write error. Inspect `sysctl dev.myfirst.0.stats.bufused`; it should be 4096 (the buffer size).
+   预期会出现短写错误。检查 `sysctl dev.myfirst.0.stats.bufused`；它应该是 4096（缓冲区大小）。
 8. Confirm reads still deliver the content:
    ```sh
    % sudo cat /dev/myfirst/0 | od -An -c | head -3
@@ -2740,24 +2740,24 @@ The labs below track the three stages above. Each lab is a checkpoint that prove
    % sudo kldunload myfirst
    ```
 
-**Success criteria:**
+**成功标准：**
 
-- Writes deposit bytes; reads deliver them back.
-- `bufused` matches the number of bytes written since the last reset.
-- `dd` exhibits a short write when the buffer fills; the driver returns `ENOSPC`.
-- `dmesg` shows open and destructor lines for every process that opened the device.
+- 写入存入字节；读取传回它们。
+- `bufused` 与自上次重置以来写入的字节数匹配。
+- 当缓冲区填满时 `dd` 表现出短写入；驱动返回 `ENOSPC`。
+- `dmesg` 为每个打开设备的进程显示打开和析构行。
 
-**Common mistakes:**
+**常见错误：**
 
-- Forgetting to free `sc->buf` in `detach`. The driver will unload without complaint, but a subsequent kernel memory leak check (`vmstat -m | grep devbuf`) will show drift.
-- Holding the softc mutex while calling `uiomove`, without being sure the mutex is an `MTX_DEF` and not a spin lock. Chapter 7's `mtx_init(..., MTX_DEF)` is the right choice; do not change it.
-- Omitting the `sc->bufused = 0` reset in `attach`. `Newbus` initialises softc to zero for you, but making the initialisation explicit is the convention; it also makes a later refactor less error-prone.
+- 忘记在 `detach` 中释放 `sc->buf`。驱动将无提示地卸载，但后续的内核内存泄漏检查（`vmstat -m | grep devbuf`）将显示漂移。
+- 在调用 `uiomove` 时持有 softc 互斥锁，但不确定互斥锁是 `MTX_DEF` 而不是自旋锁。第七章的 `mtx_init(..., MTX_DEF)` 是正确的选择；不要更改它。
+- 在 `attach` 中省略 `sc->bufused = 0` 重置。Newbus 为你将 softc 初始化为零，但使初始化显式是约定；它也使后续重构更不容易出错。
 
 ### 实验 9.3：阶段 3 FIFO 行为
 
-**Goal:** Build Stage 3, exercise FIFO behaviour from two terminals, and confirm that reads drain the buffer.
+**目标：** 构建阶段 3，从两个终端练习 FIFO 行为，并确认读取排空缓冲区。
 
-**Steps:**
+**步骤：**
 
 1. From the companion tree: `cp -r examples/part-02/ch09-reading-and-writing/stage3-echo ~/drivers/ch09-stage3`.
 2. Build and load:
@@ -2779,7 +2779,7 @@ The labs below track the three stages above. Each lab is a checkpoint that prove
    ```sh
    % cat /dev/myfirst/0
    ```
-   Expect no output. The buffer is empty.
+   预期没有输出。缓冲区是空的。
 6. In terminal A, write two lines in rapid succession:
    ```sh
    % echo "first" | sudo tee /dev/myfirst/0 > /dev/null
@@ -2791,7 +2791,7 @@ The labs below track the three stages above. Each lab is a checkpoint that prove
    first
    second
    ```
-   Expect the two lines concatenated. Both writes appended to the same buffer before either read happened.
+   预期两行会拼接在一起。两次写入在任一读取发生之前追加到了同一个缓冲区。
 8. Inspect the counters:
    ```sh
    % sysctl dev.myfirst.0.stats
@@ -2802,23 +2802,23 @@ The labs below track the three stages above. Each lab is a checkpoint that prove
    % sudo kldunload myfirst
    ```
 
-**Success criteria:**
+**成功标准：**
 
-- Writes append to the buffer; reads drain it.
-- A read after the buffer is drained returns immediately (EOF-on-empty).
-- `bytes_read` always equals `bytes_written` once the reader has caught up.
+- 写入追加到缓冲区；读取排空它。
+- 缓冲区排空后的读取立即返回（空时 EOF）。
+- 一旦读取者跟上，`bytes_read` 总是等于 `bytes_written`。
 
-**Common mistakes:**
+**常见错误：**
 
-- Not resetting `bufhead = 0` when `bufused` reaches zero. The buffer will "drift" toward the end of `sc->buf` and refuse writes long before it is full.
-- Forgetting to update `bufhead` as reads drain. The driver will read the same bytes repeatedly.
-- Using `uio->uio_offset` as a per-descriptor offset. In a FIFO, offsets are shared; a per-descriptor offset does not make sense and will confuse testers.
+- 当 `bufused` 达到零时不重置 `bufhead = 0`。缓冲区将向 `sc->buf` 末尾"漂移"，在满之前很久就拒绝写入。
+- 忘记在读取排空时更新 `bufhead`。驱动将重复读取相同的字节。
+- 使用 `uio->uio_offset` 作为每次描述符的偏移。在 FIFO 中，偏移是共享的；每次描述符偏移没有意义，会使测试者困惑。
 
 ### 实验 9.4：使用 dd 测量传输行为
 
-**Goal:** Use `dd(1)` to generate known-size transfers, read the results back, and check that the counters agree.
+**目标：** 使用 `dd(1)` 生成已知大小的传输，读回结果，并检查计数器是否一致。
 
-`dd` is the tool of choice here because it lets you control the block size, the number of blocks, and the behaviour on short transfers.
+`dd` 是这里的工具选择，因为它让你控制块大小、块数量和短传输上的行为。
 
 1. Reload the Stage 3 driver fresh:
    ```sh
@@ -2856,7 +2856,7 @@ The labs below track the three stages above. Each lab is a checkpoint that prove
    0+0 records out
    0 bytes transferred
    ```
-   The driver accepted 4096 bytes (the buffer size) of the 8192 requested and returned a short write for the rest.
+   驱动接受了 8192 字节请求中的 4096 字节（缓冲区大小），其余部分返回了短写入。
 7. Alternatively, use `bs=4096` with `count=2`:
    ```sh
    % sudo dd if=/dev/urandom of=/dev/myfirst/0 bs=4096 count=2
@@ -2865,22 +2865,22 @@ The labs below track the three stages above. Each lab is a checkpoint that prove
    0+0 records out
    4096 bytes transferred
    ```
-   The first block of 4096 bytes succeeded in full; the second block failed with `ENOSPC`.
+   第一个 4096 字节的块完全成功；第二个块以 `ENOSPC` 失败。
 8. Drain:
    ```sh
    % sudo dd if=/dev/myfirst/0 of=/tmp/out bs=4096 count=1
    % sudo kldunload myfirst
    ```
 
-**Success criteria:**
+**成功标准：**
 
-- `dd` reports the expected byte counts at each step.
-- The driver accepts up to 4096 bytes and refuses the rest with `ENOSPC`.
-- `bufused` tracks the buffer state after every operation.
+- `dd` 在每一步报告预期的字节计数。
+- 驱动接受最多 4096 字节，对剩余部分返回 `ENOSPC`。
+- `bufused` 在每次操作后跟踪缓冲区状态。
 
 ### 实验 9.5：一个小型往返 C 程序
 
-**Goal:** Write a short userland C program that opens the device, writes known bytes, closes the descriptor, opens it again, reads the bytes back, and verifies they match.
+**目标：** 编写一个短的用户态 C 程序，打开设备，写入已知字节，关闭描述符，再次打开，读回字节，并验证它们匹配。
 
 1. Save the following as `rw_myfirst.c` in `~/drivers/ch09-stage3`:
 
@@ -2934,20 +2934,20 @@ main(void)
    ```
 3. Inspect `dmesg` to see the two opens and two destructors.
 
-**Success criteria:**
+**成功标准：**
 
-- The program prints `round-trip OK: 24 bytes`.
-- `dmesg` shows one open/destructor pair for the write and one for the read.
+- 程序打印 `round-trip OK: 24 bytes`。
+- `dmesg` 显示一次写入的打开/析构对和一次读取的打开/析构对。
 
-**Common mistakes:**
+**常见错误：**
 
-- Writing fewer bytes than the payload and not checking the return value. `write(2)` can return a short count; your test must handle it.
-- Forgetting `O_WRONLY` vs `O_RDONLY`. `open(2)` enforces the mode against the access bits of the node; opening with the wrong mode returns `EACCES` (or similar).
-- Assuming `read(2)` returns the requested count. It can return less; again, the caller loops.
+- 写入的字节少于载荷且未检查返回值。`write(2)` 可以返回短计数；你的测试必须处理它。
+- 忘记 `O_WRONLY` 与 `O_RDONLY` 的区别。`open(2)` 根据节点的访问位强制执行模式；以错误模式打开返回 `EACCES`（或类似的错误）。
+- 假设 `read(2)` 返回请求的计数。它可以返回更少；同样，调用者需要循环。
 
 ### 实验 9.6：检查二进制往返
 
-**Goal:** Confirm that the driver handles arbitrary binary data, not only text, by pushing random bytes through and checking that the same bytes come back.
+**目标：** 通过推送随机字节并检查相同字节返回，确认驱动处理任意二进制数据，而不仅仅是文本。
 
 1. With Stage 3 loaded and empty, write 256 random bytes:
    ```sh
@@ -2970,19 +2970,19 @@ main(void)
    ```
 5. Try a pathological pattern: all zeros, all `0xff`, then a file full of a single byte. Confirm every pattern round-trips exactly.
 
-**Success criteria:**
+**成功标准：**
 
-- `cmp` reports no differences.
-- The driver preserves every bit of the input.
-- No byte-ordering, no "helpful" interpretation, no surprise transformations.
+- `cmp` 报告没有差异。
+- 驱动保留输入的每一位。
+- 没有字节顺序问题，没有"有帮助的"解释，没有意外的转换。
 
-This lab is short but important: it verifies that your driver is a transparent byte store, not a text filter that accidentally interprets some bytes specially. If you ever see differences between the sent and received files, you have a bug in the transfer path, probably a length miscount or an off-by-one in the buffer arithmetic.
+这个实验很短但很重要：它验证你的驱动是一个透明的字节存储，而不是一个意外特殊解释某些字节的文本过滤器。如果你在发送和接收的文件之间看到差异，你的传输路径中有 bug，可能是长度误算或缓冲区算术中的差一错误。
 
 ### 实验 9.7：端到端观察运行中的驱动
 
-**Goal:** Combine sysctl, dmesg, truss, and vmstat into a single end-to-end observation of the Stage 3 driver under real load. This lab has no new code; it is the bridge from "I wrote the driver" to "I can see what it is doing".
+**目标：** 将 sysctl、dmesg、truss 和 vmstat 组合成对阶段 3 驱动在真实负载下的单一端到端观察。这个实验没有新代码；它是从"我写了驱动"到"我能看到它在做什么"的桥梁。
 
-**Steps:**
+**步骤：**
 
 1. With Stage 3 loaded fresh, open four terminals. Terminal A will run the driver load / unload cycles. Terminal B will monitor sysctl. Terminal C will tail dmesg. Terminal D will run a user workload.
 2. **Terminal A:**
@@ -2990,7 +2990,7 @@ This lab is short but important: it verifies that your driver is a transparent b
    % sudo kldload ./myfirst.ko
    % vmstat -m | grep devbuf
    ```
-   Note the `devbuf` row's `InUse` and `MemUse` values.
+   注意 `devbuf` 行的 `InUse` 和 `MemUse` 值。
 3. **Terminal B:**
    ```sh
    % watch -n 1 sysctl dev.myfirst.0.stats
@@ -3000,7 +3000,7 @@ This lab is short but important: it verifies that your driver is a transparent b
    % sudo dmesg -c > /dev/null
    % sudo dmesg -w
    ```
-   The `-c` clears accumulated messages; the `-w` watches for new ones.
+   `-c` 清除累积的消息；`-w` 监视新消息。
 5. **Terminal D:**
    ```sh
    % cd examples/part-02/ch09-reading-and-writing/userland
@@ -3014,7 +3014,7 @@ This lab is short but important: it verifies that your driver is a transparent b
    ```sh
    % sudo ./stress_rw -s 5
    ```
-   Watch terminal B. You should see `bufused` oscillate, counters climb, and `active_fhs` hit 2 while the test runs.
+   观察终端 B。你应该会看到 `bufused` 在振荡，计数器在攀升，并且测试运行期间 `active_fhs` 达到了 2。
 10. When the stress run finishes, in terminal B verify `active_fhs` is 0. In terminal A,
     ```sh
     % sudo kldunload myfirst
@@ -3022,193 +3022,193 @@ This lab is short but important: it verifies that your driver is a transparent b
     ```
     `InUse` should have returned to its pre-load baseline. If it has not, your driver leaked an allocation and `vmstat -m` just told you.
 
-**Success criteria:**
+**成功标准：**
 
-- Sysctl counters match the workload you ran.
-- Dmesg shows one open/destructor pair per descriptor open/close.
-- Truss output matches your mental model of what the program did.
-- `vmstat -m | grep devbuf` returns to its baseline after unload.
-- No panics, no warnings, no unexplained counter drift.
+- Sysctl 计数器与你运行的工作负载匹配。
+- Dmesg 为每个描述符的打开/关闭显示一个打开/析构对。
+- Truss 输出与你对程序所做操作的心理模型匹配。
+- `vmstat -m | grep devbuf` 在卸载后回到其基线。
+- 没有崩溃、没有警告、没有无法解释的计数器漂移。
 
-**Why this lab matters:** this is the first lab that exercises the full observability toolchain at once. In production, the signal that something is wrong almost never comes from a crash; it comes from a counter that has drifted out of bounds, a `dmesg` line nobody expected, or a `vmstat -m` reading that does not match reality. Building the habit of looking at all four surfaces together is what separates "I wrote a driver" from "I am responsible for a driver".
+**为什么这个实验重要：** 这是第一个同时锻炼完整可观测性工具链的实验。在生产中，出问题的信号几乎从不来自崩溃；它来自一个超出范围的计数器、一条没人预期的 `dmesg` 行，或一个与现实不匹配的 `vmstat -m` 读数。建立同时查看所有四个界面的习惯是区分"我写了一个驱动"和"我对一个驱动负责"的关键。
 
 
 
 ## 挑战练习
 
-These challenges stretch the material without introducing topics that belong to later chapters. Each one uses only the primitives we have introduced. Try them before looking at the companion tree; the learning is in the attempt, not the answer.
+这些挑战扩展了材料而没有引入属于后续章节的主题。每一个都只使用我们已介绍的原语。在看伴随树之前先尝试它们；学习在于尝试，而不在于答案。
 
 ### 挑战 9.1：每次描述符的读取计数器
 
-Extend Stage 2 so that the per-descriptor `reads` counter is exposed via a sysctl. The counter should be available per active descriptor, which means a per-`fh` sysctl rather than a per-softc one.
+扩展阶段 2，使每次描述符的 `reads` 计数器通过 sysctl 暴露。计数器应该对每个活跃描述符可用，这意味着是每次 `fh` 的 sysctl 而不是每次 softc 的。
 
-This challenge is harder than it looks: sysctls are allocated and freed at known points in the softc lifecycle, and the per-descriptor structure lives only as long as its descriptor. A clean solution registers a sysctl node per `fh` in `d_open` and unregisters it in the destructor. Be careful about lifetimes; the sysctl context must be freed before the `fh` memory.
+这个挑战比看起来更难：sysctl 在 softc 生命周期的已知点分配和释放，而每次描述符的结构只在其描述符存活期间存在。一个干净的解决方案在 `d_open` 中为每个 `fh` 注册一个 sysctl 节点，并在析构函数中取消注册。注意生命周期；sysctl 上下文必须在 `fh` 内存之前释放。
 
-*Hint:* `sysctl_ctx_init` and `sysctl_ctx_free` are per-context. You can give each `fh` its own context, and free it in the destructor.
+*提示：* `sysctl_ctx_init` 和 `sysctl_ctx_free` 是每次上下文的。你可以给每个 `fh` 自己的上下文，并在析构函数中释放它。
 
-*Alternative:* keep a linked list of `fh` pointers in the softc (under the mutex) and expose it through a custom sysctl handler that walks the list on demand. This is the pattern `/usr/src/sys/kern/tty_info.c` uses for per-process stats.
+*替代方案：* 在 softc 中（在互斥锁下）保持一个 `fh` 指针链表，并通过按需遍历链表的自定义 sysctl 处理程序暴露它。这是 `/usr/src/sys/kern/tty_info.c` 用于每次进程统计的模式。
 
 ### 挑战 9.2：一个支持 readv(2) 的测试
 
-Write a user program that uses `readv(2)` to read from the driver into three separate buffers of sizes 8, 16, and 32 bytes. Confirm that the driver delivers bytes into all three buffers in sequence.
+编写一个用户程序，使用 `readv(2)` 从驱动读取到三个大小分别为 8、16 和 32 字节的独立缓冲区。确认驱动按顺序将字节传递到所有三个缓冲区。
 
-The kernel and `uiomove(9)` already handle `readv(2)`; the driver does not need changes. The purpose of this challenge is to convince yourself of that fact.
+内核和 `uiomove(9)` 已经处理 `readv(2)`；驱动不需要更改。这个挑战的目的是让你自己确信这个事实。
 
-*Hint:* `struct iovec iov[3] = {{buf1, 8}, {buf2, 16}, {buf3, 32}};`, then `readv(fd, iov, 3)`. The return value is the total bytes delivered across all three buffers; the individual `iov_len` values are not modified on the user side.
+*提示：* `struct iovec iov[3] = {{buf1, 8}, {buf2, 16}, {buf3, 32}};`，然后 `readv(fd, iov, 3)`。返回值是所有三个缓冲区传递的总字节数；用户端不会修改各个 `iov_len` 值。
 
 ### 挑战 9.3：短写入演示
 
-Modify Stage 2's `myfirst_write` to accept at most 128 bytes per call, regardless of `uio_resid`. A user program that writes 1024 bytes should see a short write of 128 every time.
+修改阶段 2 的 `myfirst_write` 使其每次调用最多接受 128 字节，不管 `uio_resid` 是多少。写入 1024 字节的用户程序应该每次看到 128 字节的短写入。
 
-Then write a short test program that writes 1024 bytes in a single `write(2)` call, observes the short-write return value, and loops until all 1024 bytes have been accepted.
+然后编写一个短测试程序，在单次 `write(2)` 调用中写入 1024 字节，观察短写入返回值，并循环直到所有 1024 字节都被接受。
 
-Questions to think through:
+值得思考的问题：
 
-- Does `cat` handle short writes correctly? (Yes.)
-- Does `echo > /dev/myfirst/0 "..."` handle them correctly? (Usually, via `printf` in the shell, but sometimes not; worth testing.)
-- What happens if you remove the short-write behaviour and try to exceed the buffer size? (You get `ENOSPC` after the first 4096-byte write.)
+- `cat` 是否正确处理短写入？（是的。）
+- `echo > /dev/myfirst/0 "..."` 是否正确处理它们？（通常通过 shell 中的 `printf` 处理，但有时不会；值得测试。）
+- 如果你移除短写入行为并尝试超过缓冲区大小会发生什么？（在第一次 4096 字节写入后你会得到 `ENOSPC`。）
 
-This challenge teaches you to separate "the driver does the right thing" from "user programs assume what drivers do".
+这个挑战教你区分"驱动做正确的事"和"用户程序假设驱动做什么"。
 
 ### 挑战 9.4：一个 ls -l 传感器
 
-Make the driver's response to a read depend on the `ls -l` output of the device itself. That is: every read produces the current timestamp of the device node.
+使驱动对读取的响应取决于设备本身的 `ls -l` 输出。即：每次读取产生设备节点的当前时间戳。
 
-*Hint:* `sc->cdev->si_ctime` and `sc->cdev->si_mtime` are `struct timespec` fields on the cdev. You can convert them to a string with `printf` formatting, place the string in a kernel buffer, and `uiomove_frombuf(9)` it out.
+*提示：* `sc->cdev->si_ctime` 和 `sc->cdev->si_mtime` 是 cdev 上的 `struct timespec` 字段。你可以用 `printf` 格式化将它们转换为字符串，将字符串放入内核缓冲区，然后用 `uiomove_frombuf(9)` 输出。
 
-*Warning:* `si_ctime` / `si_mtime` may be updated by devfs as nodes are touched. Observe what happens when you `touch /dev/myfirst/0` and read again.
+*警告：* `si_ctime` / `si_mtime` 可能会在节点被触及时由 devfs 更新。观察当你 `touch /dev/myfirst/0` 并再次读取时会发生什么。
 
 ### 挑战 9.5：一个反向回显驱动
 
-Modify Stage 3 so that every read returns the bytes in reverse order from how they were written. A write of `"hello"` followed by a read should produce `"olleh"`.
+修改阶段 3，使每次读取以写入顺序的相反顺序返回字节。写入 `"hello"` 后跟读取应该产生 `"olleh"`。
 
-This challenge is entirely about buffer bookkeeping. The `uiomove` calls stay the same; you change the addresses you hand to them.
+这个挑战完全关于缓冲区簿记。`uiomove` 调用保持不变；你改变传递给它们的地址。
 
-*Hint:* You can either reverse the buffer on every read (expensive) or store bytes in reverse order on the write side (cheaper). Neither is the "right" answer; each has different correctness and concurrency properties. Pick one and argue for it in a comment.
+*提示：* 你可以在每次读取时反转缓冲区（昂贵），或者在写入端以相反顺序存储字节（更便宜）。两者都不是"正确"的答案；每个都有不同的正确性和并发属性。选择一个并在注释中论证它。
 
 ### 挑战 9.6：二进制往返
 
-Write a user program that writes a `struct timespec` to the driver, then reads one back. Compare the two structures. Are they equal? They should be, because `myfirst` is a transparent byte store.
+编写一个用户程序，向驱动写入一个 `struct timespec`，然后读回一个。比较两个结构。它们相等吗？它们应该相等，因为 `myfirst` 是一个透明字节存储。
 
-Extend the program to write two `struct timespec` values, then `lseek(fd, sizeof(struct timespec), SEEK_SET)` and read the second one. What happens? (Clue: the FIFO does not support seeks meaningfully.)
+扩展程序写入两个 `struct timespec` 值，然后 `lseek(fd, sizeof(struct timespec), SEEK_SET)` 并读取第二个。会发生什么？（线索：FIFO 不有意义地支持寻址。）
 
-This challenge illustrates the "read and write carry bytes, not types" point from the safe-data-transfer section. The bytes round-trip perfectly; the type information does not.
+这个挑战说明了安全数据传输部分的"读取和写入携带字节，而不是类型"的观点。字节完美往返；类型信息则不会。
 
 ### 挑战 9.7：一个十六进制查看测试工具
 
-Write a short shell script that, given a byte count N, generates N random bytes with `dd if=/dev/urandom bs=$N count=1`, pipes them into your Stage 3 driver, then reads them back with `dd if=/dev/myfirst/0 bs=$N count=1`, and compares the two streams with `cmp`. The script should report success for matching streams and diff-like output for mismatching streams. Run it with N = 1, 2, 4, ..., 4096 to sweep small, boundary, and capacity-filling sizes.
+编写一个短 shell 脚本，给定字节计数 N，用 `dd if=/dev/urandom bs=$N count=1` 生成 N 个随机字节，通过管道传入你的阶段 3 驱动，然后用 `dd if=/dev/myfirst/0 bs=$N count=1` 读回它们，并用 `cmp` 比较两个流。脚本应该对匹配的流报告成功，对不匹配的流报告类似 diff 的输出。用 N = 1, 2, 4, ..., 4096 运行它来覆盖小型、边界和容量填满的大小。
 
-Questions to answer as you run the sweep:
+运行扫描时要回答的问题：
 
-- Does every size round-trip cleanly up to and including 4096?
-- At 4097, what does the driver do? Does the test harness report the error meaningfully?
-- Is there any size at which `cmp` reports a difference? If so, what was the underlying cause?
+- 每个大小（包括 4096）是否都能干净地往返？
+- 在 4097 时，驱动做什么？测试工具是否有意义地报告错误？
+- 是否有任何大小使得 `cmp` 报告差异？如果有，根本原因是什么？
 
-This challenge rewards combining the tools in the Practical Workflow section: `dd` for precise transfers, `cmp` for byte-level verification, `sysctl` for counters, and the shell for orchestration. A robust test harness like this is the kind of habit that pays for itself every time you refactor a driver and want to know quickly whether the behaviour is still right.
+这个挑战奖励你在实用工作流部分组合工具：`dd` 用于精确传输，`cmp` 用于字节级验证，`sysctl` 用于计数器，shell 用于编排。像这样健壮的测试工具是每次重构驱动并想快速知道行为是否仍然正确时都会回报的习惯。
 
 ### 挑战 9.8：谁打开了描述符？
 
-Write a small C program that opens `/dev/myfirst/0`, blocks on `pause()` (so it holds the descriptor indefinitely), and runs until `SIGTERM`. In a second terminal, run `fstat | grep myfirst` and then `fuser /dev/myfirst/0`. Note the output. Now try to `kldunload myfirst`. What error do you get? Why?
+编写一个小型 C 程序，打开 `/dev/myfirst/0`，在 `pause()` 上阻塞（从而无限期持有描述符），运行直到收到 `SIGTERM`。在第二个终端中，运行 `fstat | grep myfirst` 然后运行 `fuser /dev/myfirst/0`。注意输出。现在尝试 `kldunload myfirst`。你得到什么错误？为什么？
 
-Now kill the holder with `SIGTERM` or plain `kill`. Observe the destructor fire in `dmesg`. Try `kldunload` again. It should succeed.
+现在用 `SIGTERM` 或普通 `kill` 终止持有者。观察 `dmesg` 中析构函数的触发。再次尝试 `kldunload`。它应该成功。
 
-This challenge is short, but it grounds one of the chapter's subtler invariants: a driver cannot unload while any descriptor is open on one of its cdevs, and FreeBSD gives operators a standard set of tools to find the holder. The next time a real-world `kldunload` fails with `EBUSY`, you will have seen the shape of the problem before.
+这个挑战很短，但它巩固了本章一个更微妙的不变量：当任何描述符在其某个 cdev 上打开时，驱动无法卸载，FreeBSD 给操作员提供了一套标准工具来找到持有者。下次真正的 `kldunload` 因 `EBUSY` 失败时，你将已经见过这种问题的形状。
 
 
 
 ## 常见错误故障排除
 
-Every `d_read` / `d_write` mistake you are likely to make falls into one of a small number of categories. This section is a short field guide.
+你可能犯的每个 `d_read` / `d_write` 错误都属于少数几个类别之一。本节是一个简短的实地指南。
 
-### "My driver returns zero bytes even though I wrote data"
+### "我的驱动即使写入了数据也返回零字节"
 
-This is usually one of two bugs.
+这通常是两个 bug 之一。
 
-**Bug 1**: You forgot to update `bufused` (or equivalent) after the successful `uiomove`. The write arrived, the bytes moved, but the driver's state never reflected the arrival. The next read sees `bufused == 0` and reports EOF.
+**Bug 1**：你在成功的 `uiomove` 之后忘记更新 `bufused`（或等价物）。写入到达了，字节移动了，但驱动的状态从未反映到达。下一次读取看到 `bufused == 0` 并报告 EOF。
 
-Fix: always update your tracking fields inside `if (error == 0) { ... }` after `uiomove` returns.
+修复：总是在 `uiomove` 返回后在 `if (error == 0) { ... }` 内更新你的跟踪字段。
 
-**Bug 2**: You reset `bufused` (or `bufhead`) somewhere inappropriate. A common pattern is adding a reset line inside `d_open` or `d_close` "for cleanliness". That wipes out the data the previous caller wrote.
+**Bug 2**：你在不合适的地方重置了 `bufused`（或 `bufhead`）。一个常见的模式是在 `d_open` 或 `d_close` 中添加重置行"为了整洁"。那会擦除前一个调用者写入的数据。
 
-Fix: reset driver-wide state only in `attach` (at load) or `detach` (at unload). Per-descriptor state belongs in `fh`, reset by `malloc(M_ZERO)` and cleaned up by the destructor.
+修复：仅在 `attach`（加载时）或 `detach`（卸载时）中重置驱动范围的状态。每次描述符的状态属于 `fh`，由 `malloc(M_ZERO)` 重置并由析构函数清理。
 
-### "My reads return garbage"
+### "我的读取返回垃圾"
 
-The buffer is uninitialised. `malloc(9)` without `M_ZERO` returns a block of memory whose contents are undefined. If your `d_read` reaches past `bufused`, or reads from offsets that have not been written, the bytes you see are leftovers from whatever memory the kernel recycled.
+缓冲区未初始化。不带 `M_ZERO` 的 `malloc(9)` 返回内容未定义的内存块。如果你的 `d_read` 越过 `bufused`，或从尚未写入的偏移读取，你看到的字节是内核回收的任何内存的残留。
 
-Fix: always pass `M_ZERO` to `malloc` in `attach`. Always clamp reads to the current high-water mark (`bufused`), not to the buffer's total size (`buflen`).
+修复：在 `attach` 中总是传递 `M_ZERO` 给 `malloc`。总是将读取限制在当前高水位标记（`bufused`），而不是缓冲区的总大小（`buflen`）。
 
-There is a more serious variant of this bug. A driver that returns uninitialised kernel memory to user space has just leaked kernel state into user space. In production that is a security hole. In development it is a bug; in production it is a CVE.
+这个 bug 有一个更严重的变体。将未初始化的内核内存返回给用户空间的驱动刚刚将内核状态泄露到了用户空间。在开发中这是一个 bug；在生产中这是一个安全漏洞和一个 CVE。
 
-### "The kernel panics with a pagefault on a user address"
+### "内核在用户地址上发生页错误而崩溃"
 
-You called `memcpy` or `bcopy` directly on a user pointer instead of going through `uiomove` / `copyin` / `copyout`. The access faulted, the kernel had no fault handler installed, and the result was a panic.
+你直接在用户指针上调用了 `memcpy` 或 `bcopy`，而不是通过 `uiomove` / `copyin` / `copyout`。访问出错，内核没有安装故障处理程序，结果是崩溃。
 
-Fix: never dereference a user pointer directly. Route through `uiomove(9)` (in handlers) or `copyin(9)` / `copyout(9)` (in other contexts).
+修复：永远不要直接解引用用户指针。通过 `uiomove(9)`（在处理程序中）或 `copyin(9)` / `copyout(9)`（在其他上下文中）路由。
 
-### "The driver refuses to unload"
+### "驱动拒绝卸载"
 
-You have at least one file descriptor still open. `detach` returns `EBUSY` when `active_fhs > 0`; the module will not unload until every `fh` has been destroyed.
+你至少有一个文件描述符仍然打开。当 `active_fhs > 0` 时 `detach` 返回 `EBUSY`；在所有 `fh` 被销毁之前模块不会卸载。
 
-Fix: close the descriptor in userland. If a background process is holding it, kill the process (after confirming it is yours; do not kill system daemons). `fstat -p <pid>` shows which files a process has open; `fuser /dev/myfirst/0` shows which processes have the node open.
+修复：在用户态关闭描述符。如果后台进程持有它，终止进程（在确认它是你的之后；不要终止系统守护进程）。`fstat -p <pid>` 显示进程打开了哪些文件；`fuser /dev/myfirst/0` 显示哪些进程打开了节点。
 
-Chapter 10 will introduce `destroy_dev_drain` patterns for drivers that need to coerce a blocked reader to exit. Chapter 9 does not block, so this issue does not arise in normal operation; when it arises, it is because userland is holding the descriptor somewhere unexpected.
+第十章将为需要强制阻塞读取者退出的驱动引入 `destroy_dev_drain` 模式。第九章不阻塞，所以这个问题在正常操作中不会出现；当它出现时，是因为用户态在某个意外的地方持有描述符。
 
-### "My write handler returns EFAULT"
+### "我的写入处理程序返回 EFAULT"
 
-Your `uiomove` call hit an invalid user address. The common causes:
+你的 `uiomove` 调用遇到了无效的用户地址。常见原因：
 
-- A user program called `write(fd, NULL, n)` or `write(fd, (void*)0xdeadbeef, n)`.
-- A user program wrote a pointer it had freed.
-- You accidentally passed a kernel pointer as the destination to `uiomove`. This can happen if you build a uio by hand for kernel-space data and then pass it to a handler expecting a user-space uio. The resulting `copyout` sees a "user" address that is actually a kernel address; depending on the architecture, you either get `EFAULT` or a subtle corruption.
+- 用户程序调用了 `write(fd, NULL, n)` 或 `write(fd, (void*)0xdeadbeef, n)`。
+- 用户程序写入了一个它已释放的指针。
+- 你意外地将内核指针作为目标传递给 `uiomove`。如果你手工构建了一个用于内核空间数据的 uio，然后将其传递给期望用户空间 uio 的处理程序，就会发生这种情况。由此产生的 `copyout` 看到一个实际上是内核地址的"用户"地址；取决于架构，你要么得到 `EFAULT`，要么得到微妙的损坏。
 
-Fix: check `uio->uio_segflg`. For user-driven handlers, it should be `UIO_USERSPACE`. If you are passing around a kernel-space uio, make sure `uio_segflg == UIO_SYSSPACE` and that your code paths know the difference.
+修复：检查 `uio->uio_segflg`。对于用户驱动的处理程序，它应该是 `UIO_USERSPACE`。如果你传递的是内核空间 uio，确保 `uio_segflg == UIO_SYSSPACE` 并且你的代码路径知道区别。
 
-### "My counters are wrong under concurrent writes"
+### "并发写入下我的计数器是错误的"
 
-Two writers raced on `bufused`. Each read the current value, added to it, and wrote back, and the second writer overwrote the first writer's update with a stale value.
+两个写入者在 `bufused` 上竞争。每个都读取当前值，添加到它，然后写回，第二个写入者用陈旧的值覆盖了第一个写入者的更新。
 
-Fix: take `sc->mtx` around every read-modify-write of shared state. Part 3 makes this a first-class topic; for Chapter 9, a single mutex around the whole critical section is enough.
+修复：在共享状态的每次读-修改-写周围获取 `sc->mtx`。第三部分将此作为一等主题；对于第九章，整个临界区周围的一个互斥锁就足够了。
 
-### "sysctl counters do not reflect the real state"
+### "sysctl 计数器不反映真实状态"
 
-Two variants.
+两个变体。
 
-**Variant A**: the counter is a `size_t`, but the sysctl macro is `SYSCTL_ADD_U64`. On 32-bit architectures, the macro reads 8 bytes where the field is only 4 bytes wide; half the value is junk.
+**变体 A**：计数器是 `size_t`，但 sysctl 宏是 `SYSCTL_ADD_U64`。在 32 位架构上，宏读取 8 字节而字段只有 4 字节宽；值的一半是垃圾。
 
-Fix: match the sysctl macro to the field type. `size_t` pairs with `SYSCTL_ADD_UINT` on 32-bit platforms and `SYSCTL_ADD_U64` on 64-bit platforms. To be portable, use `uint64_t` for counters and cast when updating.
+修复：将 sysctl 宏与字段类型匹配。`size_t` 在 32 位平台上与 `SYSCTL_ADD_UINT` 配对，在 64 位平台上与 `SYSCTL_ADD_U64` 配对。为了可移植性，使用 `uint64_t` 作为计数器并在更新时转换。
 
-**Variant B**: the counter is never updated because the update is inside the `if (error == 0)` block and `uiomove` returned a non-zero error. That is actually correct behaviour: you should not count bytes you did not move. The symptom only looks like a bug if you are trying to use the counter to debug the error.
+**变体 B**：计数器从未更新，因为更新在 `if (error == 0)` 块内，而 `uiomove` 返回了非零错误。这实际上是正确的行为：你不应该计算你没有移动的字节。症状只在你想用计数器调试错误时看起来像 bug。
 
-Fix: add an `error_count` counter that ticks on every non-zero return, independently of `bytes_read` and `bytes_written`. Useful for debugging.
+修复：添加一个 `error_count` 计数器，在每次非零返回时递增，独立于 `bytes_read` 和 `bytes_written`。对调试有用。
 
-### "The first read after a fresh load returns zero bytes"
+### "全新加载后的第一次读取返回零字节"
 
-Usually intentional. In Stage 3, an empty buffer returns zero bytes. If you expected the static message from Stage 1, check that you are running the Stage 1 driver, not a later one.
+通常是有意的。在阶段 3 中，空缓冲区返回零字节。如果你期望阶段 1 的静态消息，检查你运行的是阶段 1 驱动，而不是更高版本。
 
-If it is unintentional, double-check that `attach` is setting `sc->buf`, `sc->buflen`, and `sc->message_len` as expected. A common bug is copy-pasting the attach code from Stage 1 into Stage 2 and leaving the `sc->message = ...` assignment in place, which then takes precedence over the `malloc` line.
+如果是无意的，仔细检查 `attach` 是否按预期设置了 `sc->buf`、`sc->buflen` 和 `sc->message_len`。一个常见的 bug 是从阶段 1 复制粘贴附加代码到阶段 2 并保留了 `sc->message = ...` 赋值，然后它优先于 `malloc` 行。
 
-### "The build fails with unknown reference to uiomove_frombuf"
+### "构建失败，提示未知的 uiomove_frombuf 引用"
 
-You forgot to include `<sys/uio.h>`. Add it to the top of `myfirst.c`.
+你忘记包含 `<sys/uio.h>`。将它添加到 `myfirst.c` 的顶部。
 
-### "My handler is called twice for one read(2)"
+### "我的处理程序对一次 read(2) 被调用了两次"
 
-It almost certainly is not. What is more likely: your handler is being called once with `uio_iovcnt > 1` (a `readv(2)` call), and inside `uiomove` each iovec entry is being drained in turn. The internal loop in `uiomove` may make multiple `copyout` calls in what is a single invocation of your handler.
+几乎肯定不是。更可能的是：你的处理程序被调用了一次，`uio_iovcnt > 1`（一个 `readv(2)` 调用），在 `uiomove` 内部每个 iovec 条目依次被排空。`uiomove` 中的内部循环可能在处理程序的单次调用中进行多次 `copyout` 调用。
 
-Verify by adding a `device_printf` at entry and exit of your `d_read`. You should see one entry and one exit per user-space `read(2)` call, regardless of iovec count.
+通过在 `d_read` 的入口和出口添加 `device_printf` 来验证。你应该看到每次用户空间 `read(2)` 调用有一个入口和一个出口，不管 iovec 计数是多少。
 
 
 
 ## 对比模式：正确与有问题的处理程序
 
-The troubleshooting guide above is reactive: it helps when something has already gone wrong. This section is the prescriptive companion. Each entry shows a plausible but wrong way to write part of a handler, pairs it with the correct rewrite, and explains the distinction. Studying the contrasts in advance is the fastest way to avoid the bugs in the first place.
+上面的故障排除指南是被动的：它帮助处理已经出错的情况。本节是规范性的配套。每个条目展示编写处理程序某部分的一个看似合理但错误的方式，将其与正确的重写配对，并解释区别。提前学习对比是避免 bug 的最快方式。
 
-Read each pair carefully. The correct version is the pattern you should reach for; the buggy version is the shape your own hands may produce when you are moving fast. Recognising the mistake in the wild, months from now, is worth the five minutes it takes to internalise the difference today.
+仔细阅读每对。正确的版本是你应该采用的模式；有 bug 的版本是你在快速移动时自己的手可能产生的形状。在几个月后从野外识别出错误，值得今天花五分钟来内化差异。
 
 ### 对比 1：返回字节计数
 
-**Buggy:**
+**有 bug 的：**
 
 ```c
 static int
@@ -3222,7 +3222,7 @@ myfirst_read(struct cdev *dev, struct uio *uio, int ioflag)
 }
 ```
 
-**Correct:**
+**正确的：**
 
 ```c
 static int
@@ -3233,13 +3233,13 @@ myfirst_read(struct cdev *dev, struct uio *uio, int ioflag)
 }
 ```
 
-**Why it matters.** The handler's return value is an errno, not a count. The kernel computes the byte count from the change in `uio->uio_resid` and reports it to user space. A non-zero positive return is interpreted as an errno; if you returned `sc->message_len`, the caller would receive a very strange `errno` value. For example, returning `75` would manifest as `errno = 75`, which on FreeBSD happens to be `EPROGMISMATCH`. The bug is both wrong and deeply confusing to anybody looking at it from the user side.
+**为什么重要。** 处理程序的返回值是 errno，不是计数。内核从 `uio->uio_resid` 的变化计算字节计数并报告给用户空间。非零正返回被解释为 errno；如果你返回 `sc->message_len`，调用者会收到一个非常奇怪的 `errno` 值。例如，返回 `75` 会表现为 `errno = 75`，在 FreeBSD 上恰好是 `EPROGMISMATCH`。这个 bug 既错误又对从用户侧查看它的任何人来说非常困惑。
 
-The rule is simple and absolute: handlers return errno values, never counts. If you want to know the byte count, compute it from the uio.
+规则简单且绝对：处理程序返回 errno 值，永远不返回计数。如果你想知道字节计数，从 uio 计算。
 
 ### 对比 2：处理零长度请求
 
-**Buggy:**
+**有 bug 的：**
 
 ```c
 static int
@@ -3251,7 +3251,7 @@ myfirst_read(struct cdev *dev, struct uio *uio, int ioflag)
 }
 ```
 
-**Correct:**
+**正确的：**
 
 ```c
 static int
@@ -3262,11 +3262,11 @@ myfirst_read(struct cdev *dev, struct uio *uio, int ioflag)
 }
 ```
 
-**Why it matters.** A `read(fd, buf, 0)` call is legal UNIX. A driver that rejects it with `EINVAL` breaks programs that use zero-byte reads to check descriptor state. `uiomove` returns zero immediately if the uio has nothing to move; your handler does not need to special-case it. Special-casing it wrong is worse than not special-casing it at all.
+**为什么重要。** `read(fd, buf, 0)` 调用是合法的 UNIX 操作。用 `EINVAL` 拒绝它的驱动会破坏使用零字节读取检查描述符状态的程序。如果 uio 没有东西要移动，`uiomove` 立即返回零；你的处理程序不需要特殊情况处理它。错误地特殊情况处理它比完全不特殊情况处理更糟糕。
 
 ### 对比 3：缓冲区容量计算
 
-**Buggy:**
+**有 bug 的：**
 
 ```c
 mtx_lock(&sc->mtx);
@@ -3279,7 +3279,7 @@ mtx_unlock(&sc->mtx);
 return (error);
 ```
 
-**Correct:**
+**正确的：**
 
 ```c
 mtx_lock(&sc->mtx);
@@ -3296,13 +3296,13 @@ mtx_unlock(&sc->mtx);
 return (error);
 ```
 
-**Why it matters.** The buggy version hands `uiomove` a length of `uio_resid`, which may exceed the buffer's remaining capacity. `uiomove` will not move more than `uio_resid` bytes, but the *destination* is `sc->buf + sc->bufused`, and the math does not know about `sc->buflen`. If the user writes 8 KiB into a 4 KiB buffer with `bufused = 0`, the handler will write 4 KiB past the end of `sc->buf`. That is a classic kernel heap overflow: the crash will not be immediate, will not implicate your driver, and may reveal itself as a panic inside a completely unrelated subsystem half a second later.
+**为什么重要。** 有 bug 的版本传递给 `uiomove` 的长度是 `uio_resid`，可能超过缓冲区的剩余容量。`uiomove` 不会移动超过 `uio_resid` 字节，但*目标*是 `sc->buf + sc->bufused`，数学计算不知道 `sc->buflen`。如果用户向 `bufused = 0` 的 4 KiB 缓冲区写入 8 KiB，处理程序将在 `sc->buf` 末尾之后写入 4 KiB。这是一个经典的内核堆溢出：崩溃不会立即发生，不会牵连你的驱动，可能在半秒后作为完全不相关子系统内的崩溃显现。
 
-The correct version clamps the transfer to `avail`, guaranteeing that the pointer arithmetic stays inside the buffer. The clamp is one `MIN` call, and it is not optional.
+正确的版本将传输限制到 `avail`，保证指针算术留在缓冲区内。限制是一个 `MIN` 调用，而且它不是可选的。
 
 ### 对比 4：跨 uiomove 持有自旋锁
 
-**Buggy:**
+**有 bug 的：**
 
 ```c
 mtx_lock_spin(&sc->spin);            /* BAD: spin lock, not a regular mutex */
@@ -3311,7 +3311,7 @@ mtx_unlock_spin(&sc->spin);
 return (error);
 ```
 
-**Correct:**
+**正确的：**
 
 ```c
 mtx_lock(&sc->mtx);                  /* MTX_DEF mutex */
@@ -3320,13 +3320,13 @@ mtx_unlock(&sc->mtx);
 return (error);
 ```
 
-**Why it matters.** `uiomove(9)` may sleep. When it calls `copyin` or `copyout`, the user page may be paged out, and the kernel may need to page it in from disk, which requires waiting on I/O. A sleep while holding a spin lock (`MTX_SPIN`) deadlocks the system. FreeBSD's `WITNESS` framework panics on this the first time it happens, if `WITNESS` is enabled. On a non-`WITNESS` kernel the result is silent livelock.
+**为什么重要。** `uiomove(9)` 可能睡眠。当它调用 `copyin` 或 `copyout` 时，用户页面可能被换出，内核可能需要从磁盘换入，这需要等待 I/O。持有自旋锁（`MTX_SPIN`）时睡眠会死锁系统。如果启用了 `WITNESS`，FreeBSD 的 `WITNESS` 框架在第一次发生时会崩溃。在非 `WITNESS` 内核上，结果是静默的活锁。
 
-The rule is straightforward: spin locks cannot be held across functions that may sleep, and `uiomove` may sleep. Use an `MTX_DEF` mutex (the default, and the one `myfirst` uses) for softc state that is touched by I/O handlers.
+规则很简单：自旋锁不能跨可能睡眠的函数持有，而 `uiomove` 可能睡眠。对 I/O 处理程序触及的 softc 状态使用 `MTX_DEF` 互斥锁（默认的，也是 `myfirst` 使用的）。
 
 ### 对比 5：在 d_open 中重置共享状态
 
-**Buggy:**
+**有 bug 的：**
 
 ```c
 static int
@@ -3342,7 +3342,7 @@ myfirst_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 }
 ```
 
-**Correct:**
+**正确的：**
 
 ```c
 static int
@@ -3357,13 +3357,13 @@ myfirst_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 }
 ```
 
-**Why it matters.** `d_open` runs once per descriptor. If two readers open the device, the second open will wipe whatever the first open left behind. Driver-wide state (`sc->bufused`, `sc->buf`, counters) belongs to the whole driver, and is reset only at `attach` and `detach`. Per-descriptor state belongs in `fh`, which `malloc(M_ZERO)` initialises to zeros automatically.
+**为什么重要。** `d_open` 每个描述符运行一次。如果两个读取者打开设备，第二次打开将擦除第一次打开留下的所有内容。驱动范围的状态（`sc->bufused`、`sc->buf`、计数器）属于整个驱动，仅在 `attach` 和 `detach` 时重置。每次描述符的状态属于 `fh`，`malloc(M_ZERO)` 自动将其初始化为零。
 
-A driver that resets shared state in `d_open` looks like it works under a single opener and silently corrupts state when two openers appear. The bug is invisible until the day two users read the device at once.
+在 `d_open` 中重置共享状态的驱动在单一打开者下看起来正常工作，当两个打开者出现时静默地损坏状态。这个 bug 在两个用户同时读取设备的那一天之前是不可见的。
 
 ### 对比 6：在知道结果之前记账
 
-**Buggy:**
+**有 bug 的：**
 
 ```c
 sc->bytes_written += towrite;       /* BAD: count before success */
@@ -3372,7 +3372,7 @@ if (error == 0)
         sc->bufused += towrite;
 ```
 
-**Correct:**
+**正确的：**
 
 ```c
 error = uiomove(sc->buf + tail, towrite, uio);
@@ -3382,13 +3382,13 @@ if (error == 0) {
 }
 ```
 
-**Why it matters.** If `uiomove` fails part-way through, some bytes may have moved and some may not. The `sc->bytes_written` counter should reflect what actually reached the buffer, not what the driver attempted. Updating counters before the outcome is known makes the counters lie. If a user reads the sysctl to diagnose a problem, they see numbers that do not correspond to reality.
+**为什么重要。** 如果 `uiomove` 中途失败，一些字节可能已移动而另一些没有。`sc->bytes_written` 计数器应该反映实际到达缓冲区的内容，而不是驱动尝试的内容。在知道结果之前更新计数器使计数器说谎。如果用户读取 sysctl 来诊断问题，他们看到的数字与现实不符。
 
-The rule: update counters inside the `if (error == 0)` branch, so success is the only path that increments them. This is a small cost for a large correctness benefit.
+规则：在 `if (error == 0)` 分支内更新计数器，这样成功是递增它们的唯一路径。这是小的代价换来大的正确性收益。
 
 ### 对比 7：直接解引用用户指针
 
-**Buggy:**
+**有 bug 的：**
 
 ```c
 /* Imagine the driver somehow gets a user pointer, maybe through ioctl. */
@@ -3401,7 +3401,7 @@ handle_user_string(void *user_ptr)
 }
 ```
 
-**Correct:**
+**正确的：**
 
 ```c
 static int
@@ -3417,13 +3417,13 @@ handle_user_string(void *user_ptr)
 }
 ```
 
-**Why it matters.** `memcpy` assumes both pointers refer to memory accessible in the current address space. A user pointer does not. Depending on the platform, the result of passing a user pointer to `memcpy` in kernel context ranges from an `EFAULT`-equivalent fault (on amd64 with SMAP enabled) to silent data corruption (on platforms without user/kernel separation) to an outright kernel panic.
+**为什么重要。** `memcpy` 假设两个指针都引用当前地址空间中可访问的内存。用户指针不是。取决于平台，在内核上下文中将用户指针传递给 `memcpy` 的结果从 `EFAULT` 等效故障（在启用了 SMAP 的 amd64 上）到静默数据损坏（在没有用户/内核分离的平台上）到彻底的内核崩溃。
 
-`copyin` and `copyout` are the one-and-only correct way to access user memory from kernel context. They install a fault handler, validate the address, walk page tables safely, and return `EFAULT` on any failure. The performance cost is a few extra instructions; the correctness benefit is "the kernel does not panic when a buggy user program is running".
+`copyin` 和 `copyout` 是从内核上下文访问用户内存的唯一正确方式。它们安装故障处理程序、验证地址、安全地遍历页表，并在任何失败时返回 `EFAULT`。性能成本是几条额外的指令；正确性收益是"当有 bug 的用户程序运行时内核不会崩溃"。
 
 ### 对比 8：在 d_open 失败时泄漏每次打开的结构
 
-**Buggy:**
+**有 bug 的：**
 
 ```c
 static int
@@ -3441,7 +3441,7 @@ myfirst_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 }
 ```
 
-**Correct:**
+**正确的：**
 
 ```c
 static int
@@ -3461,53 +3461,53 @@ myfirst_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 }
 ```
 
-**Why it matters.** When `devfs_set_cdevpriv` fails, the kernel does not register the destructor, so the destructor will never run on this `fh`. If the handler returns without freeing `fh`, the memory is leaked. Under steady load, repeated `d_open` failures can leak enough memory to destabilise the kernel.
+**为什么重要。** 当 `devfs_set_cdevpriv` 失败时，内核不会注册析构函数，所以析构函数永远不会在这个 `fh` 上运行。如果处理程序返回而不释放 `fh`，内存就泄漏了。在持续负载下，重复的 `d_open` 失败可以泄漏足够的内存使内核不稳定。
 
-The rule: in error-unwind paths, every allocation made so far must be freed. The Chapter 8 reader has seen this pattern for attach; it applies equally to `d_open`.
+规则：在错误展开路径中，到目前为止所做的每个分配都必须被释放。第八章的读者已经在 attach 中见过这个模式；它同样适用于 `d_open`。
 
 ### 如何使用这个对比表
 
-These eight pairs are not an exhaustive list. They are the bugs we have seen most often in early student drivers, and the bugs the chapter's text has been trying to help you avoid. Read through them once now. Before you write your first real driver outside this book, read them again.
+这八对不是详尽的列表。它们是我们早期学生驱动中最常见到的 bug，也是本章文本一直在试图帮你避免的 bug。现在通读它们一次。在你写本书之外的第一个真正驱动之前，再读一遍。
 
-A useful habit while developing: whenever you finish a handler, walk it against the contrast table mentally. Does the handler return a count? Does it special-case zero-resid? Does it have a capacity clamp? Is the mutex type right? Does it reset shared state in `d_open`? Does it account for bytes on failure? Does it dereference any user pointer directly? Does it leak on `d_open` failure? Eight questions, five minutes. The price of the check is small; the cost of shipping one of these bugs into production is large.
+开发过程中的一个有用习惯：每当你完成一个处理程序，在脑海中对照对比表走一遍。处理程序返回计数了吗？它特殊情况处理零 resid 了吗？它有容量限制吗？互斥锁类型正确吗？它在 `d_open` 中重置共享状态了吗？它在失败时计入字节了吗？它直接解引用任何用户指针了吗？它在 `d_open` 失败时泄漏了吗？八个问题，五分钟。检查的代价很小；将这些 bug 中的一个发布到生产的成本很大。
 
 
 
 ## 第十章前的自我评估
 
-Chapter 9 has covered a lot of ground. Before you put it down, run through the following checklist. If any item makes you hesitate, the relevant section is worth re-reading before moving on. This is not a test; it is a quick way to identify the spots where your mental model may still be thin.
+第九章涵盖了很多内容。在你放下它之前，过一遍以下检查清单。如果任何项目让你犹豫，相关章节值得在继续之前重读。这不是测试；这是识别你的心理模型可能仍然薄弱的地方的快速方式。
 
-**Concepts:**
+**概念：**
 
-- [ ] I can explain in one sentence what `struct uio` is for.
-- [ ] I can name the three fields of `struct uio` my driver reads most often.
-- [ ] I can explain why `uiomove(9)` is preferred over `copyin` / `copyout` inside `d_read` and `d_write`.
-- [ ] I can explain why `memcpy` across the user / kernel boundary is unsafe.
-- [ ] I can explain the difference between `ENXIO`, `EAGAIN`, `ENOSPC`, and `EFAULT` in driver terms.
+- [ ] 我可以用一句话解释 `struct uio` 是用来做什么的。
+- [ ] 我能说出 `struct uio` 中我的驱动最常读取的三个字段。
+- [ ] 我可以解释为什么在 `d_read` 和 `d_write` 内部 `uiomove(9)` 优于 `copyin` / `copyout`。
+- [ ] 我可以解释为什么跨用户/内核边界使用 `memcpy` 是不安全的。
+- [ ] 我可以解释在驱动语境下 `ENXIO`、`EAGAIN`、`ENOSPC` 和 `EFAULT` 之间的区别。
 
-**Mechanics:**
+**机制：**
 
-- [ ] I can write a minimal `d_read` handler that serves a fixed buffer using `uiomove_frombuf(9)`.
-- [ ] I can write a minimal `d_write` handler that appends to a kernel buffer with a correct capacity clamp.
-- [ ] I know where to put the mutex acquire and release around the transfer.
-- [ ] I know how to propagate an errno from `uiomove` back to user space.
-- [ ] I know how to mark a write as fully consumed with `uio_resid = 0`.
+- [ ] 我可以编写一个使用 `uiomove_frombuf(9)` 提供固定缓冲区的最小 `d_read` 处理程序。
+- [ ] 我可以编写一个以正确的容量限制向内核缓冲区追加的最小 `d_write` 处理程序。
+- [ ] 我知道在传输周围放置互斥锁获取和释放的位置。
+- [ ] 我知道如何将 errno 从 `uiomove` 传播回用户空间。
+- [ ] 我知道如何用 `uio_resid = 0` 标记写入为完全消耗。
 
-**Observability:**
+**可观测性：**
 
-- [ ] I can read `sysctl dev.myfirst.0.stats` and interpret each counter.
-- [ ] I can spot a memory leak with `vmstat -m | grep devbuf`.
-- [ ] I can use `truss(1)` to see what syscalls my test program makes.
-- [ ] I can use `fstat(1)` or `fuser(8)` to find who is holding a descriptor.
+- [ ] 我可以读取 `sysctl dev.myfirst.0.stats` 并解释每个计数器。
+- [ ] 我可以用 `vmstat -m | grep devbuf` 发现内存泄漏。
+- [ ] 我可以用 `truss(1)` 查看我的测试程序发出了什么系统调用。
+- [ ] 我可以用 `fstat(1)` 或 `fuser(8)` 找到谁持有描述符。
 
-**Traps:**
+**陷阱：**
 
-- [ ] I would not return a byte count from `d_read` / `d_write`.
-- [ ] I would not reject a zero-length request with `EINVAL`.
-- [ ] I would not reset `sc->bufused` inside `d_open`.
-- [ ] I would not hold a spin lock across a `uiomove` call.
+- [ ] 我不会从 `d_read` / `d_write` 返回字节计数。
+- [ ] 我不会用 `EINVAL` 拒绝零长度请求。
+- [ ] 我不会在 `d_open` 内重置 `sc->bufused`。
+- [ ] 我不会在 `uiomove` 调用期间持有自旋锁。
 
-Any "no" here is a signal, not a verdict. Re-read the relevant section; run a small experiment in your lab; come back to the checklist. By the time every box is ticked, you are solidly ready for Chapter 10.
+任何"否"都是一个信号，而不是判决。重读相关章节；在你的实验室运行一个小实验；回到检查清单。当每个复选框都打勾时，你就稳稳地为第十章做好了准备。
 
 
 
@@ -3515,71 +3515,71 @@ Any "no" here is a signal, not a verdict. Re-read the relevant section; run a sm
 
 你刚刚实现了使驱动活跃的入口点。 在第七章结束时你的驱动有了一个骨架。 在第八章结束时它有了一个形状良好的门。 现在，在第九章结束时，数据双向流过这扇门。
 
-本章的核心教训比看起来更短。 你将编写的每个 `d_read` 都有相同的三行骨架：获取每次打开的状态、验证活跃性、调用 `uiomove`。 你将编写的每个 `d_write` 都有类似的骨架，加上一个额外的决定（我有多少空间？）和一个防止缓冲区溢出的钳制（`MIN(uio_resid, avail)`）。 Everything else in the chapter is context: why `struct uio` looks the way it does, why `uiomove` is the only safe mover, why errno values matter, why counters matter, why the buffer has to be freed on every error path.
+本章的核心教训比看起来更短。 你将编写的每个 `d_read` 都有相同的三行骨架：获取每次打开的状态、验证活跃性、调用 `uiomove`。 你将编写的每个 `d_write` 都有类似的骨架，加上一个额外的决定（我有多少空间？）和一个防止缓冲区溢出的钳制（`MIN(uio_resid, avail)`）。本章的其他一切都是上下文：为什么 `struct uio` 看起来是这个样子，为什么 `uiomove` 是唯一安全的移动器，为什么 errno 值重要，为什么计数器重要，为什么缓冲区必须在每个错误路径上被释放。
 
 ### 最重要的三个想法
 
-**First, `struct uio` is the contract between your driver and the kernel's I/O machinery.** It carries everything your handler needs to know about a call: what the user asked for, where the user's memory is, what direction the transfer should move, and how much progress has been made. You do not need to memorise all seven fields. You need to recognise `uio_resid` (the remaining work), `uio_offset` (the position, if you care), and `uio_rw` (the direction), and you need to trust `uiomove(9)` with the rest.
+**首先，`struct uio` 是你的驱动和内核 I/O 机制之间的契约。** 它携带你的处理程序需要知道的关于调用的所有信息：用户请求了什么、用户的内存在哪里、传输应该向哪个方向移动、已经取得了多少进展。你不需要记住所有七个字段。你需要识别 `uio_resid`（剩余工作）、`uio_offset`（位置，如果你关心的话）和 `uio_rw`（方向），你需要信任 `uiomove(9)` 处理其余的。
 
-**Second, `uiomove(9)` is the boundary between user memory and kernel memory.** Everything your driver ever moves between the two passes through it (or through one of its close relatives: `uiomove_frombuf`, `copyin`, `copyout`). This is not a suggestion. Direct pointer access across the trust boundary either corrupts memory or leaks information, and the kernel has no cheap way to catch the mistake before it becomes a CVE. If a pointer came from user space, route it through the kernel's trust-boundary functions. Always.
+**其次，`uiomove(9)` 是用户内存和内核内存之间的边界。** 你的驱动在两者之间移动的所有东西都通过它（或通过其近亲：`uiomove_frombuf`、`copyin`、`copyout`）。这不是建议。跨信任边界的直接指针访问要么损坏内存要么泄露信息，内核没有廉价的方法在错误变成 CVE 之前捕获它。如果指针来自用户空间，通过内核的信任边界函数路由它。永远如此。
 
-**Third, a correct handler is usually a short one.** If your `d_read` or `d_write` is longer than fifteen lines, something is probably wrong. Longer handlers either duplicate logic that belongs elsewhere (in the buffer management, in the per-open state setup, in the sysctls), or they are trying to do something the driver should not be doing in a data-path handler (typically, something that belongs in `d_ioctl`). Keep the handlers short. Put the machinery they call into well-named helper functions. Your future self will thank you.
+**第三，正确的处理程序通常是短的处理程序。** 如果你的 `d_read` 或 `d_write` 超过十五行，可能有问题。更长的处理程序要么复制了属于其他地方的逻辑（在缓冲区管理中、在每次打开状态设置中、在 sysctl 中），要么它们试图做一些驱动不应该在数据路径处理程序中做的事情（通常是属于 `d_ioctl` 的事情）。保持处理程序短。将它们调用的机制放入命名良好的辅助函数。你未来的自己会感谢你。
 
 ### 你结束本章时的驱动形状
 
-Your Stage 3 `myfirst` is a small, honest, in-memory FIFO. The salient features:
+你的阶段 3 `myfirst` 是一个小型、诚实、内存中的 FIFO。显著特征：
 
-- A 4 KiB kernel buffer, allocated in `attach` and freed in `detach`.
-- A per-instance mutex guarding `bufhead`, `bufused`, and the associated counters.
-- A `d_read` that drains the buffer and advances `bufhead`, collapsing to zero when the buffer empties.
-- A `d_write` that appends to the buffer and returns `ENOSPC` when it fills.
-- Per-descriptor counters stored in `struct myfirst_fh`, allocated in `d_open`, freed in the destructor.
-- A sysctl tree exposing the live driver state.
-- Clean `attach` error unwind and clean `detach` ordering.
+- 一个 4 KiB 内核缓冲区，在 `attach` 中分配，在 `detach` 中释放。
+- 一个保护 `bufhead`、`bufused` 和相关计数器的每次实例互斥锁。
+- 一个排空缓冲区并推进 `bufhead` 的 `d_read`，在缓冲区为空时折叠到零。
+- 一个追加到缓冲区并在填满时返回 `ENOSPC` 的 `d_write`。
+- 存储在 `struct myfirst_fh` 中的每次描述符计数器，在 `d_open` 中分配，在析构函数中释放。
+- 暴露实时驱动状态的 sysctl 树。
+- 干净的 `attach` 错误展开和干净的 `detach` 排序。
 
-That shape will come back, recognisable, in half the drivers you will read in Part 4 and Part 6. It is a general pattern, not a one-off demo.
+这个形状会在你在第四部分和第六部分读到的一半驱动中回来，是可识别的。它是一个通用模式，不是一次性的演示。
 
 ### 开始第十章前你应该练习什么
 
-Five exercises, in rough order of increasing challenge:
+五个练习，大致按难度递增排列：
 
-1. Rebuild all three stages from scratch, without looking at the companion tree. Compare your result to the tree afterward; the differences are what you have left to internalise.
-2. Introduce an intentional bug in Stage 3: forget to reset `bufhead` when `bufused` reaches zero. Observe what happens on the second big write. Explain the symptom in terms of the code.
-3. Add a sysctl that exposes `sc->buflen`. Make it read-only. Then convert it into a tunable that can be set at load time via `kenv` or `loader.conf` and picked up in `attach`. (Chapter 10 revisits tunables formally; this is a preview.)
-4. Write a shell script that writes random data of a known length to `/dev/myfirst/0` and then reads it back through `sha256`. Compare the hashes. Do the hashes match even when the write size exceeds the buffer? (They should not; think about why.)
-5. Find a driver under `/usr/src/sys/dev` that implements both `d_read` and `d_write`. Read its handlers. Map them against the patterns in this chapter. Good candidates: `/usr/src/sys/dev/null/null.c` (you already know it), `/usr/src/sys/dev/random/randomdev.c`, `/usr/src/sys/dev/speaker/spkr.c`.
+1. 从头开始重建所有三个阶段，不看伴随树。之后将你的结果与树比较；差异是你还需要内化的内容。
+2. 在阶段 3 中引入一个故意 bug：当 `bufused` 达到零时忘记重置 `bufhead`。观察第二次大写入时发生什么。用代码的术语解释症状。
+3. 添加一个暴露 `sc->buflen` 的 sysctl。使其只读。然后将其转换为可在加载时通过 `kenv` 或 `loader.conf` 设置并在 `attach` 中获取的可调参数。（第十章正式回顾可调参数；这是一个预览。）
+4. 编写一个 shell 脚本，将已知长度的随机数据写入 `/dev/myfirst/0`，然后通过 `sha256` 读回。比较哈希值。当写入大小超过缓冲区时哈希值是否匹配？（不应该匹配；想想为什么。）
+5. 在 `/usr/src/sys/dev` 下找一个同时实现 `d_read` 和 `d_write` 的驱动。阅读其处理程序。将它们映射到本章的模式。好的候选：`/usr/src/sys/dev/null/null.c`（你已经知道它）、`/usr/src/sys/dev/random/randomdev.c`、`/usr/src/sys/dev/speaker/spkr.c`。
 
 ### 展望第十章
 
-Chapter 10 takes the Stage 3 driver and makes it scale. Four new capabilities show up:
+第十章采用阶段 3 驱动并使其扩展。四个新能力出现：
 
-- **A circular buffer** replaces the linear buffer. Writes and reads can both happen continuously without the explicit collapse that Stage 3 uses.
-- **Blocking reads** arrive. A reader that calls `read(2)` on an empty buffer can sleep until data is available, rather than returning zero bytes immediately. The kernel's `msleep(9)` is the primitive; the `d_purge` handler is the teardown safety net.
-- **Non-blocking I/O** becomes a first-class feature. `O_NONBLOCK` users get `EAGAIN` where a blocking caller would sleep.
-- **`poll(2)` and `kqueue(9)` integration**. A user program can wait for the device to become readable or writable without actively attempting the operation. This is the standard way to integrate a device into an event loop.
+- **环形缓冲区**取代线性缓冲区。写入和读取都可以持续发生，而不需要阶段 3 使用的显式折叠。
+- **阻塞读取**到来。在空缓冲区上调用 `read(2)` 的读取者可以睡眠直到数据可用，而不是立即返回零字节。内核的 `msleep(9)` 是原语；`d_purge` 处理程序是拆卸安全网。
+- **非阻塞 I/O**成为一等特性。`O_NONBLOCK` 用户在阻塞调用者会睡眠的地方得到 `EAGAIN`。
+- **`poll(2)` 和 `kqueue(9)` 集成**。用户程序可以等待设备变得可读或可写，而不需要主动尝试操作。这是将设备集成到事件循环中的标准方式。
 
-All four of these build on the same `d_read` / `d_write` shapes you just implemented. You will extend the handlers rather than rewriting them, and the per-descriptor state you have in place will carry the necessary bookkeeping. The chapter before that (this one) is the one where the I/O path itself is correct. Chapter 10 is where the I/O path becomes efficient.
+所有这四个都建立在你刚刚实现的相同 `d_read` / `d_write` 形状之上。你将扩展处理程序而不是重写它们，你已经就位的每次描述符状态将承载必要的簿记。前面的那一章（这一章）是 I/O 路径本身正确的章节。第十章是 I/O 路径变得高效的章节。
 
-Before you close the file, a last reassurance. The material in this chapter is not as difficult as it may feel on a first read. The pattern is small. The ideas are real, but they are finite, and you have just exercised every one of them against working code. When you read a real driver's `d_read` or `d_write` in the tree, you will now recognise what the function is doing and why. You are not a beginner at this any more. You are an apprentice with a real tool in your hands.
+在关闭文件之前，最后一个安慰。本章的材料并不像第一次阅读时感觉的那么难。模式很小。想法是真实的，但它们是有限的，你刚刚针对工作代码练习了每一个。当你在源码树中阅读真正驱动的 `d_read` 或 `d_write` 时，你现在将能识别函数在做什么以及为什么。你不再是这个的初学者了。你是一个手握真正工具的学徒。
 
 
 
 ## 参考：本章使用的签名和辅助函数
 
-A consolidated reference for the declarations, helpers, and constants the chapter leans on. Keep this page bookmarked while you write drivers; most beginner questions are a lookup in one of these tables.
+本章依赖的声明、辅助函数和常量的综合参考。在编写驱动时将此页面加入书签；大多数初学者问题都可以在这些表格之一中找到答案。
 
-### `d_read` and `d_write` Signatures
+### `d_read` 和 `d_write` 签名
 
-From `/usr/src/sys/sys/conf.h`:
+来自 `/usr/src/sys/sys/conf.h`：
 
 ```c
 typedef int d_read_t(struct cdev *dev, struct uio *uio, int ioflag);
 typedef int d_write_t(struct cdev *dev, struct uio *uio, int ioflag);
 ```
 
-The return value is zero on success, a positive errno on failure. The byte count is computed from the change in `uio->uio_resid` and reported to user space as the return value of `read(2)` / `write(2)`.
+返回值成功时为零，失败时为正 errno。字节计数从 `uio->uio_resid` 的变化计算，并作为 `read(2)` / `write(2)` 的返回值报告给用户空间。
 
-### The Canonical `struct uio`
+### 规范的 `struct uio`
 
 来自 `/usr/src/sys/sys/uio.h`：
 
@@ -3595,16 +3595,16 @@ struct uio {
 };
 ```
 
-### The `uio_seg` and `uio_rw` Enumerations
+### `uio_seg` 和 `uio_rw` 枚举
 
-From `/usr/src/sys/sys/_uio.h`:
+来自 `/usr/src/sys/sys/_uio.h`：
 
 ```c
 enum uio_rw  { UIO_READ, UIO_WRITE };
 enum uio_seg { UIO_USERSPACE, UIO_SYSSPACE, UIO_NOCOPY };
 ```
 
-### `uiomove` Family
+### `uiomove` 系列
 
 来自 `/usr/src/sys/sys/uio.h`：
 
@@ -3617,7 +3617,7 @@ int uiomove_nofault(void *cp, int n, struct uio *uio);
 int uiomove_object(struct vm_object *obj, off_t obj_size, struct uio *uio);
 ```
 
-In beginner driver code, only `uiomove` and `uiomove_frombuf` are common. The others support specific kernel subsystems (physical-page I/O, page-fault-free copies, VM-backed objects) and are out of scope for this chapter.
+在初学者驱动代码中，只有 `uiomove` 和 `uiomove_frombuf` 是常见的。其他的支持特定的内核子系统（物理页 I/O、无页故障复制、VM 支持的对象），超出了本章的范围。
 
 ### `copyin` and `copyout`
 
@@ -3633,32 +3633,32 @@ int copyinstr(const void * __restrict udaddr,
               size_t * __restrict lencopied);
 ```
 
-Use these in control paths (`d_ioctl`) where a user pointer arrives outside the uio abstraction. Inside `d_read` and `d_write`, prefer `uiomove`.
+在控制路径（`d_ioctl`）中使用这些函数，当用户指针在 uio 抽象之外到达时。在 `d_read` 和 `d_write` 内部，优先使用 `uiomove`。
 
-### `ioflag` Bits That Matter for Character Devices
+### 字符设备重要的 `ioflag` 位
 
-From `/usr/src/sys/sys/vnode.h`:
+来自 `/usr/src/sys/sys/vnode.h`：
 
 ```c
 #define IO_NDELAY       0x0004  /* FNDELAY flag set in file table */
 ```
 
-Set when the descriptor is in non-blocking mode. Your `d_read` or `d_write` can use this to decide whether to block (missing flag) or return `EAGAIN` (flag set). Most of the other `IO_*` flags are filesystem-level and irrelevant to character devices.
+当描述符处于非阻塞模式时设置。你的 `d_read` 或 `d_write` 可以使用它来决定是阻塞（缺少标志）还是返回 `EAGAIN`（设置了标志）。大多数其他 `IO_*` 标志是文件系统级别的，与字符设备无关。
 
-### Memory Allocation
+### 内存分配
 
-From `/usr/src/sys/sys/malloc.h`:
+来自 `/usr/src/sys/sys/malloc.h`：
 
 ```c
 void *malloc(size_t size, struct malloc_type *type, int flags);
 void  free(void *addr, struct malloc_type *type);
 ```
 
-Common flags: `M_WAITOK`, `M_NOWAIT`, `M_ZERO`. Common types for drivers: `M_DEVBUF` (generic) or a driver-specific type declared via `MALLOC_DECLARE` / `MALLOC_DEFINE`.
+常见标志：`M_WAITOK`、`M_NOWAIT`、`M_ZERO`。驱动的常见类型：`M_DEVBUF`（通用）或通过 `MALLOC_DECLARE` / `MALLOC_DEFINE` 声明的驱动特定类型。
 
-### Per-Open State (Chapter 8 carryover, used here)
+### 每次打开状态（第八章延续，在此使用）
 
-From `/usr/src/sys/sys/conf.h`:
+来自 `/usr/src/sys/sys/conf.h`：
 
 ```c
 int  devfs_set_cdevpriv(void *priv, d_priv_dtor_t *dtr);
@@ -3666,9 +3666,9 @@ int  devfs_get_cdevpriv(void **datap);
 void devfs_clear_cdevpriv(void);
 ```
 
-The pattern is: allocate in `d_open`, register with `devfs_set_cdevpriv`, retrieve in every later handler with `devfs_get_cdevpriv`, clean up in the destructor that `devfs_set_cdevpriv` registered.
+模式是：在 `d_open` 中分配，用 `devfs_set_cdevpriv` 注册，在每个后续处理程序中用 `devfs_get_cdevpriv` 检索，在 `devfs_set_cdevpriv` 注册的析构函数中清理。
 
-### Errno Values Used in This Chapter
+### 本章使用的 Errno 值
 
 | Errno         | Meaning in a driver context                                |
 |---------------|------------------------------------------------------------|
@@ -3682,7 +3682,7 @@ The pattern is: allocate in `d_open`, register with `devfs_set_cdevpriv`, retrie
 | `EACCES`      | Permission denied at `open(2)`.                             |
 | `EPIPE`       | Broken pipe. Not used by `myfirst`.                         |
 
-### Helpful `device_printf(9)` Patterns
+### 有用的 `device_printf(9)` 模式
 
 ```c
 device_printf(sc->dev, "open via %s fh=%p\n", devtoname(sc->cdev), fh);
@@ -3692,9 +3692,9 @@ device_printf(sc->dev, "read delivered %zd bytes\n",
     (ssize_t)(before - uio->uio_offset));
 ```
 
-These are written for readability. A line in `dmesg` you have to decode is a line that probably will not be read when it matters.
+这些是为可读性编写的。`dmesg` 中你需要解码的行可能是在重要时刻不会被阅读的行。
 
-### The Three Stages at a Glance
+### 三个阶段一览
 
 | Stage | `d_read`                                             | `d_write`                          |
 |-------|------------------------------------------------------|------------------------------------|
@@ -3702,11 +3702,11 @@ These are written for readability. A line in `dmesg` you have to decode is a lin
 | 2     | Serve buffer up to `bufused`                         | Append to buffer, `ENOSPC` if full |
 | 3     | Drain buffer from `bufhead`, reset on empty          | Append at `bufhead + bufused`, `ENOSPC` if full |
 
-Stage 3 is the foundation Chapter 10 builds on.
+阶段 3 是第十章构建的基础。
 
-### Consolidated File List for the Chapter
+### 本章的综合文件列表
 
-Companion files under `examples/part-02/ch09-reading-and-writing/`:
+伴随文件位于 `examples/part-02/ch09-reading-and-writing/`：
 
 - `stage1-static-message/`: Stage 1 driver source and Makefile.
 - `stage2-readwrite/`: Stage 2 driver source and Makefile.
@@ -3715,26 +3715,26 @@ Companion files under `examples/part-02/ch09-reading-and-writing/`:
 - `userland/stress_rw.c`: multi-process stress test for Lab 9.3 and beyond.
 - `README.md`: a short map of the companion tree.
 
-Each stage is independent; you can build, load, and exercise any of them without building the others. The Makefiles are identical except for the driver name (always `myfirst`) and optional tuning flags.
+每个阶段都是独立的；你可以构建、加载和练习它们中的任何一个而不需要构建其他的。Makefile 除了驱动名称（始终为 `myfirst`）和可选的调优标志外完全相同。
 
 
 
 ## 附录 A：深入查看 uiomove 的内部循环
 
-For readers who want to see exactly what `uiomove(9)` does, this appendix walks through the core loop of `uiomove_faultflag` as it appears in `/usr/src/sys/kern/subr_uio.c`. You do not need to read this to write a driver. It is here because one reading of the loop will clarify every later question you have about uio semantics.
+对于想确切了解 `uiomove(9)` 做什么的读者，本附录演练 `uiomove_faultflag` 核心循环在 `/usr/src/sys/kern/subr_uio.c` 中的样子。你不需要阅读这个来编写驱动。它在这里是因为一次循环阅读将澄清你后续关于 uio 语义的每个问题。
 
-### The Setup
+### 设置
 
-At entry, the function has:
+在入口处，函数有：
 
 - A kernel pointer `cp` provided by the caller (your driver).
 - An integer `n` provided by the caller (the max bytes to move).
 - The uio provided by the kernel dispatch.
 - A boolean `nofault` indicating whether page faults during the copy should be handled or fatal.
 
-It sanity-checks a few invariants: the direction is `UIO_READ` or `UIO_WRITE`, the owning thread is the current thread when the segment is user-space, and `uio_resid` is non-negative. Any violation is a `KASSERT` and will panic a kernel with `INVARIANTS` enabled.
+它对几个不变量进行健全性检查：方向是 `UIO_READ` 或 `UIO_WRITE`，当段是用户空间时拥有线程是当前线程，`uio_resid` 是非负的。任何违反都是一个 `KASSERT`，会使启用了 `INVARIANTS` 的内核崩溃。
 
-### The Main Loop
+### 主循环
 
 ```c
 while (n > 0 && uio->uio_resid) {
@@ -3784,57 +3784,57 @@ while (n > 0 && uio->uio_resid) {
 }
 ```
 
-Each iteration does one unit of work: copy up to `cnt` bytes (where `cnt` is `MIN(iov->iov_len, n)`) between the current iovec entry and the kernel buffer. The direction is chosen by the two nested `switch` statements. After a successful copy, all the accounting fields advance in lockstep: the iovec entry shrinks by `cnt`, the uio's resid shrinks by `cnt`, the uio's offset grows by `cnt`, the kernel pointer `cp` advances by `cnt`, and the caller's `n` shrinks by `cnt`.
+每次迭代做一个工作单元：在当前 iovec 条目和内核缓冲区之间复制最多 `cnt` 字节（其中 `cnt` 是 `MIN(iov->iov_len, n)`）。方向由两个嵌套的 `switch` 语句选择。成功复制后，所有记账字段同步推进：iovec 条目缩小 `cnt`，uio 的 resid 缩小 `cnt`，uio 的偏移增长 `cnt`，内核指针 `cp` 推进 `cnt`，调用者的 `n` 缩小 `cnt`。
 
-When an iovec entry is fully drained (`cnt == 0` at loop entry), the function advances to the next entry. When the caller's `n` reaches zero or the uio's resid reaches zero, the loop terminates.
+当 iovec 条目完全排空时（循环入口处 `cnt == 0`），函数推进到下一个条目。当调用者的 `n` 达到零或 uio 的 resid 达到零时，循环终止。
 
-If `copyin` or `copyout` returns non-zero, the function jumps to `out` without updating the fields for that iteration, so the partial-copy accounting is consistent: whatever bytes did copy are reflected in `uio_resid`, whatever did not copy is still pending.
+如果 `copyin` 或 `copyout` 返回非零，函数跳到 `out` 而不更新该迭代的字段，所以部分复制的记账是一致的：已复制的任何字节反映在 `uio_resid` 中，未复制的仍然待处理。
 
-### What You Should Take Away
+### 你应该带走什么
 
-Three invariants fall out of the loop that matter for your driver code.
+循环中产生三个对你的驱动代码重要的不变量。
 
-- **Your call to `uiomove(cp, n, uio)` moves at most `MIN(n, uio->uio_resid)` bytes.** There is no way to ask for more than the uio has room for; the function caps at whichever side is smaller.
-- **On a partial transfer, the state is consistent.** `uio_resid` reflects exactly the bytes that did not move. You can make another call and it will pick up correctly.
-- **The fault handling is inside the loop, not around it.** A fault during a `copyin` / `copyout` returns `EFAULT` for the remainder; the fields are still consistent.
+- **你对 `uiomove(cp, n, uio)` 的调用最多移动 `MIN(n, uio->uio_resid)` 字节。** 没有办法请求超过 uio 有空间的内容；函数以较小的一方为上限。
+- **在部分传输时，状态是一致的。** `uio_resid` 精确反映未移动的字节。你可以再进行一次调用，它会正确地继续。
+- **故障处理在循环内部，而不是周围。** `copyin` / `copyout` 期间的故障为剩余部分返回 `EFAULT`；字段仍然一致。
 
-These three facts are why the three-line spine we keep returning to (`uiomove`, check error, update state) is sufficient. The kernel is doing the complicated work inside the loop; your driver just has to cooperate.
+这三个事实就是为什么我们一直回到的三行骨架（`uiomove`、检查错误、更新状态）是足够的。内核在循环内部做复杂的工作；你的驱动只需配合。
 
 
 
 ## 附录 B：为什么允许 read(fd, buf, 0)
 
-A short note on a question that comes up frequently: why does UNIX allow a `read(fd, buf, 0)` or `write(fd, buf, 0)` call at all?
+一个关于频繁出现的问题的简短说明：为什么 UNIX 允许 `read(fd, buf, 0)` 或 `write(fd, buf, 0)` 调用？
 
-There are two answers, and both are worth knowing.
+有两个答案，两个都值得了解。
 
-**The practical answer**: zero-length I/O is a free test. A user program that wants to check whether a descriptor is in a reasonable state can call `read(fd, NULL, 0)` without committing to a real transfer. If the descriptor is broken, the call returns an error. If it is fine, the call returns zero and costs almost nothing.
+**实际答案**：零长度 I/O 是免费测试。想检查描述符是否处于合理状态的用户程序可以调用 `read(fd, NULL, 0)` 而不提交真正的传输。如果描述符坏了，调用返回错误。如果没问题，调用返回零，几乎不花费任何代价。
 
-**The semantic answer**: the UNIX I/O interface uses byte counts consistently, and special-casing zero is more work than allowing it. A call with `count == 0` is a well-defined no-op: the kernel has to do nothing, and can return zero immediately. The alternative, returning `EINVAL` for zero-count calls, would force every user program that computed a count dynamically to guard against the case. That is the kind of change that breaks decades of code for no benefit.
+**语义答案**：UNIX I/O 接口一致地使用字节计数，特殊处理零比允许它更费事。`count == 0` 的调用是定义良好的无操作：内核不需要做任何事，可以立即返回零。替代方案——对零计数调用返回 `EINVAL`——将迫使每个动态计算计数的用户程序防范这种情况。那是那种为了没有好处而破坏几十年代码的改变。
 
-The driver-side consequence, which we noted earlier: your handler must not panic or error on a zero `uio_resid`. The kernel effectively handles the case for you when you go through `uiomove`, which returns zero immediately if there is nothing to move.
+驱动侧的后果，我们之前已经注意到：你的处理程序不能在零 `uio_resid` 上崩溃或报错。当你通过 `uiomove` 时，内核实际上为你处理了这种情况，如果没有东西要移动，它会立即返回零。
 
-If you ever find yourself writing `if (uio->uio_resid == 0) return (EINVAL);` in a driver, stop. That is the wrong answer. Zero-count I/O is valid; return zero.
+如果你曾经发现自己编写 `if (uio->uio_resid == 0) return (EINVAL);`，停下来。那是错误的答案。零计数 I/O 是有效的；返回零。
 
 
 
 ## 附录 C：/dev/zero 读取路径简短导览
 
-As a closing piece of analysis, it is worth walking through exactly what happens when a user program calls `read(2)` on `/dev/zero`. The driver is `/usr/src/sys/dev/null/null.c` and the handler is `zero_read`. Once you understand this path, you understand everything in Chapter 9.
+作为结束分析，值得演练当用户程序在 `/dev/zero` 上调用 `read(2)` 时到底发生了什么。驱动是 `/usr/src/sys/dev/null/null.c`，处理程序是 `zero_read`。一旦你理解了这个路径，你就理解了第九章的一切。
 
-### From User Space to Kernel Dispatch
+### 从用户空间到内核分派
 
-The user calls:
+用户调用：
 
 ```c
 ssize_t n = read(fd, buf, 1024);
 ```
 
-The C library makes the `read` syscall. The kernel looks up `fd` in the calling process's file table, retrieves the `struct file`, identifies its vnode, dispatches the call into devfs.
+C 库发起 `read` 系统调用。内核在调用进程的文件表中查找 `fd`，检索 `struct file`，识别其 vnode，将调用分派到 devfs。
 
-devfs identifies the cdev associated with the vnode, acquires a reference on it, and calls its `d_read` function pointer (`zero_read`) with the uio the kernel prepared.
+devfs 识别与 vnode 关联的 cdev，获取其上的引用，并使用内核准备的 uio 调用其 `d_read` 函数指针（`zero_read`）。
 
-### Inside `zero_read`
+### `zero_read` 内部
 
 ```c
 static int
@@ -3857,87 +3857,87 @@ zero_read(struct cdev *dev __unused, struct uio *uio, int flags __unused)
 }
 ```
 
-- Assert that the direction is correct. Good practice; a `KASSERT` costs nothing in production kernels.
-- Set `zbuf` to point at `zero_region`, a large pre-allocated zero-filled area.
-- Loop: while the caller wants more bytes, determine the transfer size (min of `uio_resid` and the zero region's size), call `uiomove`, accumulate any error.
-- Return.
+- 断言方向是正确的。好习惯；`KASSERT` 在生产内核中不花费任何代价。
+- 将 `zbuf` 设置为指向 `zero_region`，一个大型预分配的零填充区域。
+- 循环：当调用者需要更多字节时，确定传输大小（`uio_resid` 和零区域大小的最小值），调用 `uiomove`，累积任何错误。
+- 返回。
 
-### Inside `uiomove`
+### `uiomove` 内部
 
-For the first iteration, `uiomove` sees `uio_resid = 1024`, `len = 1024` (since `ZERO_REGION_SIZE` is much larger), `uio_segflg = UIO_USERSPACE`, `uio_rw = UIO_READ`. It selects `copyout(zbuf, buf, 1024)`. The kernel performs the copy, handling any page fault on the user buffer. On success, `uio_resid` drops to zero, `uio_offset` grows by 1024, and the iovec is fully consumed.
+对于第一次迭代，`uiomove` 看到 `uio_resid = 1024`、`len = 1024`（因为 `ZERO_REGION_SIZE` 大得多）、`uio_segflg = UIO_USERSPACE`、`uio_rw = UIO_READ`。它选择 `copyout(zbuf, buf, 1024)`。内核执行复制，处理用户缓冲区上的任何页面故障。成功时，`uio_resid` 降到零，`uio_offset` 增长 1024，iovec 被完全消耗。
 
-### Back Up the Stack
+### 回溯调用栈
 
-`uiomove` returns zero. The loop in `zero_read` sees `uio_resid == 0` and exits. `zero_read` returns zero.
+`uiomove` 返回零。`zero_read` 中的循环看到 `uio_resid == 0` 并退出。`zero_read` 返回零。
 
-devfs releases its reference on the cdev. The kernel computes the byte count as `1024 - 0 = 1024`. `read(2)` returns 1024 to the user.
+devfs 释放其在 cdev 上的引用。内核计算字节计数为 `1024 - 0 = 1024`。`read(2)` 向用户返回 1024。
 
-The user's buffer now holds 1024 zero bytes.
+用户的缓冲区现在持有 1024 个零字节。
 
-### What This Tells You About Your Own Driver
+### 这告诉你关于你自己驱动的什么
 
-Two observations.
+两个观察。
 
-First, every data-path decision in `zero_read` is one you are now making too. How large of a chunk to move per iteration; which buffer to read from; how to handle the error from `uiomove`. Your driver's decisions will differ in the specifics (your buffer is not a pre-allocated zero region, your chunk size is not `ZERO_REGION_SIZE`), but the shape is identical.
+首先，`zero_read` 中的每个数据路径决策都是你现在也在做的决策。每次迭代移动多大的块；从哪个缓冲区读取；如何处理 `uiomove` 的错误。你的驱动的决策在细节上会有所不同（你的缓冲区不是预分配的零区域，你的块大小不是 `ZERO_REGION_SIZE`），但形状是相同的。
 
-Second, everything above `zero_read` is kernel machinery you do not have to write. You implement the handler, and the kernel takes care of the syscall, the file-descriptor lookup, the VFS dispatch, the devfs routing, the reference counting, and the fault handling. That is the power of the abstraction: you add your driver's knowledge, and everything else comes for free.
+其次，`zero_read` 之上的所有东西是你不需要编写的内核机制。你实现处理程序，内核负责系统调用、文件描述符查找、VFS 分派、devfs 路由、引用计数和故障处理。这就是抽象的力量：你添加驱动的知识，其他一切都免费获得。
 
-The flip side is that when you write a driver, you are committing to *cooperating* with that machinery. Every invariant that `uiomove` and devfs rely on is now your responsibility to uphold. The chapter has been walking you through those invariants one at a time, by building three small drivers that each exercise a different subset.
+反面是，当你编写驱动时，你承诺与该机制*合作*。`uiomove` 和 devfs 依赖的每个不变量现在都是你要维护的责任。本章一直在一次一个地引导你了解这些不变量，通过构建三个小驱动，每个驱动锻炼不同的子集。
 
-By now, the pattern should be familiar.
+到目前为止，模式应该已经很熟悉了。
 
 
 
 ## 附录 D：用户侧常见的 read(2)/write(2) 返回值
 
-A short cheat sheet for what a user program sees when it talks to your driver. This is not driver code; it is the view from the other side of the trust boundary. Reading it occasionally is the best inoculation against the subtle bugs that arise when the driver does something other than what a well-behaved UNIX program expects.
+用户程序与你的驱动通信时看到的内容的简短速查表。这不是驱动代码；这是信任边界另一侧的视图。偶尔阅读它是针对驱动做了行为良好的 UNIX 程序期望之外的事情时出现的微妙 bug 的最好预防。
 
 ### `read(2)`
 
-- A positive integer: that many bytes were placed into the caller's buffer. Less than the requested count means a short read; the caller loops.
-- Zero: end of file. No more bytes will ever be produced on this descriptor. The caller stops.
-- `-1` with `errno = EAGAIN`: non-blocking mode, no data available right now. The caller waits (via `select(2)` / `poll(2)` / `kqueue(2)`) and tries again.
-- `-1` with `errno = EINTR`: a signal interrupted the read. The caller usually retries unless the signal handler tells it not to.
-- `-1` with `errno = EFAULT`: the buffer pointer was invalid. The caller has a bug.
-- `-1` with `errno = ENXIO`: the device is gone. The caller should close the descriptor and give up.
-- `-1` with `errno = EIO`: the device reported a hardware error. The caller may retry or report.
+- 正整数：那么多字节被放入调用者的缓冲区。少于请求计数意味着短读取；调用者循环。
+- 零：文件结束。此描述符上不再会产生字节。调用者停止。
+- `-1` 且 `errno = EAGAIN`：非阻塞模式，现在没有可用数据。调用者等待（通过 `select(2)` / `poll(2)` / `kqueue(2)`）并重试。
+- `-1` 且 `errno = EINTR`：信号中断了读取。调用者通常重试，除非信号处理程序告诉它不要。
+- `-1` 且 `errno = EFAULT`：缓冲区指针无效。调用者有 bug。
+- `-1` 且 `errno = ENXIO`：设备已消失。调用者应该关闭描述符并放弃。
+- `-1` 且 `errno = EIO`：设备报告了硬件错误。调用者可以重试或报告。
 
 ### `write(2)`
 
-- A positive integer: that many bytes were accepted. Less than the offered count means a short write; the caller loops with the remainder.
-- Zero: theoretically possible, rarely seen in practice. Usually treated the same as a short write of zero bytes.
-- `-1` with `errno = EAGAIN`: non-blocking mode, no space right now. The caller waits and retries.
-- `-1` with `errno = ENOSPC`: permanently no space. The caller either stops writing or reopens the descriptor.
-- `-1` with `errno = EPIPE`: the reader closed. Relevant for pipe-like devices, not for `myfirst`.
-- `-1` with `errno = EFAULT`: the buffer pointer was invalid.
-- `-1` with `errno = EINTR`: interrupted by a signal. Usually retried.
+- 正整数：那么多字节被接受。少于提供的计数意味着短写入；调用者用剩余部分循环。
+- 零：理论上可能，实践中很少见到。通常被视为零字节的短写入。
+- `-1` 且 `errno = EAGAIN`：非阻塞模式，现在没有空间。调用者等待并重试。
+- `-1` 且 `errno = ENOSPC`：永久没有空间。调用者要么停止写入，要么重新打开描述符。
+- `-1` 且 `errno = EPIPE`：读取者关闭了。与管道类设备相关，与 `myfirst` 无关。
+- `-1` 且 `errno = EFAULT`：缓冲区指针无效。
+- `-1` 且 `errno = EINTR`：被信号中断。通常重试。
 
-### What This Means for Your Driver
+### 这对你的驱动意味着什么
 
-Two takeaways.
+两个要点。
 
-First, `EAGAIN` is how non-blocking callers expect a driver to say "no data / no room right now, come back later". A non-blocking caller that sees `EAGAIN` does not treat it as an error; it waits for a wake-up (usually via `poll(2)`) and retries. Chapter 10 makes this mechanism work for `myfirst`.
+首先，`EAGAIN` 是非阻塞调用者期望驱动说"现在没有数据/没有空间，稍后再来"的方式。看到 `EAGAIN` 的非阻塞调用者不将其视为错误；它等待唤醒（通常通过 `poll(2)`）并重试。第十章使这个机制为 `myfirst` 工作。
 
-Second, `ENOSPC` is how a driver signals a permanent out-of-room condition on a write. It differs from `EAGAIN` in that the caller does not expect retries to succeed soon. For `myfirst` Stage 3 we use `ENOSPC` when the buffer fills and there is no reader actively draining; Chapter 10 will layer `EAGAIN` on top of the same condition for non-blocking readers and writers.
+其次，`ENOSPC` 是驱动在写入时发出永久没有空间信号的方式。它与 `EAGAIN` 的区别在于调用者不期望重试很快成功。对于 `myfirst` 阶段 3，当缓冲区填满且没有读取者主动排空时我们使用 `ENOSPC`；第十章将在非阻塞读取者和写入者的相同条件之上叠加 `EAGAIN`。
 
-A driver that returns the wrong errno here is almost indistinguishable from a driver that is misbehaving. The cost of getting it right is tiny. The cost of getting it wrong shows up in confused user programs months later.
+在这里返回错误 errno 的驱动几乎与行为不当的驱动无法区分。正确的代价很小。错误的代价在几个月后以困惑的用户程序的形式出现。
 
 
 
 ## 附录 E：一页速查表
 
-If you only have five minutes before starting Chapter 10, here is the one-page version of everything above.
+如果你在开始第十章之前只有五分钟，这是上面所有内容的一页版本。
 
-**The signatures:**
+**签名：**
 
 ```c
 static int myfirst_read(struct cdev *dev, struct uio *uio, int ioflag);
 static int myfirst_write(struct cdev *dev, struct uio *uio, int ioflag);
 ```
 
-Return zero on success, a positive errno on failure. Never return a byte count.
+成功时返回零，失败时返回正 errno。永远不返回字节计数。
 
-**The three-line spine for reads:**
+**读取的三行骨架：**
 
 ```c
 error = devfs_get_cdevpriv((void **)&fh);
@@ -3945,7 +3945,7 @@ if (error) return error;
 return uiomove_frombuf(sc->buf, sc->buflen, uio);
 ```
 
-Or, for a dynamic buffer:
+或者，对于动态缓冲区：
 
 ```c
 mtx_lock(&sc->mtx);
@@ -3956,7 +3956,7 @@ mtx_unlock(&sc->mtx);
 return error;
 ```
 
-**The three-line spine for writes:**
+**写入的三行骨架：**
 
 ```c
 mtx_lock(&sc->mtx);
@@ -3969,14 +3969,14 @@ mtx_unlock(&sc->mtx);
 return error;
 ```
 
-**What to remember about uio:**
+**关于 uio 要记住的：**
 
 - `uio_resid`: bytes still pending. `uiomove` decrements this.
 - `uio_offset`: position, if meaningful. `uiomove` increments this.
 - `uio_rw`: direction. Trust `uiomove` to use it.
 - Everything else: do not touch.
 
-**What not to do:**
+**不要做什么：**
 
 - Do not dereference user pointers directly.
 - Do not use `memcpy` / `bcopy` between user and kernel.
@@ -3985,7 +3985,7 @@ return error;
 - Do not forget `M_ZERO` on `malloc(9)`.
 - Do not hold a spin lock across `uiomove`.
 
-**Errno values:**
+**Errno 值：**
 
 - `0`: success.
 - `ENXIO`: device not ready.
@@ -3994,7 +3994,7 @@ return error;
 - `EFAULT`: from `uiomove`, propagate.
 - `EIO`: hardware error.
 
-That is the chapter.
+以上就是本章内容。
 
 
 
