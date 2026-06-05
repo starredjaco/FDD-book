@@ -3082,7 +3082,7 @@ Se você acompanhar `_if_delgroup_locked()` do início ao fim, pode observar as 
 
 Um pouco mais adiante, as chamadas a `free(...)` tratam do armazenamento dinâmico. Os ponteiros passados a `free()` foram criados anteriormente na vida do driver, frequentemente com `malloc()` durante rotinas de inicialização como `if_addgroup()`. Ao contrário das variáveis de stack, essa memória permanece até que o driver deliberadamente a libere. Liberá-la aqui informa ao kernel: *"Terminei com isso; você pode reutilizá-la para outra coisa."*
 
-Esta função não usa variáveis estáticas diretamente, mas no mesmo arquivo (`if.c`), você encontrará exemplos como flags de depuração declaradas com `YSCTL_INT` que vivem enquanto o módulo do kernel estiver carregado. Essas variáveis mantêm seus valores entre chamadas de função e são um local confiável para armazenar configurações ou diagnósticos que precisam persistir.
+Esta função não usa variáveis estáticas diretamente, mas no mesmo arquivo (`if.c`), você encontrará exemplos como flags de depuração declaradas com `SYSCTL_INT` que vivem enquanto o módulo do kernel estiver carregado. Essas variáveis mantêm seus valores entre chamadas de função e são um local confiável para armazenar configurações ou diagnósticos que precisam persistir.
 
 Cada escolha aqui é intencional.
 
