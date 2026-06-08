@@ -3081,7 +3081,7 @@ If you follow `_if_delgroup_locked()` from start to finish, you can watch all th
 
 A little further down, the calls to `free(...)` deal with dynamic storage. The pointers passed to `free()` were created earlier in the driver's life, often with `malloc()` during initialisation routines like `if_addgroup()`. Unlike stack variables, this memory stays around until the driver deliberately lets it go. Freeing it here tells the kernel, *"I'm done with this; you can reuse it for something else."*
 
-This function doesn't use static variables directly, but in the same file (`if.c`), you will find examples like debugging flags declared with `YSCTL_INT` that live for as long as the kernel module is loaded. These variables keep their values across function calls and are a reliable place to store configuration or diagnostics that need to persist.
+This function doesn't use static variables directly, but in the same file (`if.c`), you will find examples like debugging flags declared with `SYSCTL_INT` that live for as long as the kernel module is loaded. These variables keep their values across function calls and are a reliable place to store configuration or diagnostics that need to persist.
 
 Each choice here is intentional.
 
