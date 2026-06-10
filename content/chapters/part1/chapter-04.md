@@ -9881,7 +9881,7 @@ In FreeBSD, clarity and consistency are part of *correctness*.
 ```c
 #include <stdio.h>
 
-int f(int x,int y){int r=0; for(int i=0;i<=y;i++){r=r+x;} if(r>100)printf(big\n);else printf(%d\n,r);return r;}
+int f(int x,int y){int r=0; for(int i=0;i<=y;i++){r=r+x;} if(r>100)printf("big\n");else printf("%d\n",r);return r;}
 ```
 
 **What to do**
@@ -9922,9 +9922,9 @@ accumulate_and_report(int addend, int count)
 		total = total + addend;
 
 	if (total > 100)
-		printf(big\n);
+		printf("big\n");
 	else
-		printf(%d\n, total);
+		printf("%d\n", total);
 
 	return (total);
 }
@@ -9980,14 +9980,14 @@ mydev_configure(device_t dev, int flags)
 
 	sc = device_get_softc(dev);
 	if (sc == NULL) {
-		device_printf(dev, no softc\n);
+		device_printf(dev, "no softc\n");
 		return (ENXIO);
 	}
 
 	/* allocate resources, set up interrupts, register sysctl, etc */
 	err = mydev_alloc_resources(dev);
 	if (err != 0) {
-		device_printf(dev, alloc failed: %d\n, err);
+		device_printf(dev, "alloc failed: %d\n", err);
 		return (err);
 	}
 	if ((flags & 0x1) != 0) {
@@ -10069,7 +10069,7 @@ int err;
 err = bus_setup_intr(dev, sc->irq_res, INTR_TYPE_TTY,
     NULL, mydev_intr, sc, &sc->irq_cookie);
 if (err != 0) {
-	device_printf(dev, interrupt setup failed: %d\n, err);
+	device_printf(dev, "interrupt setup failed: %d\n", err);
 	goto fail_irq;
 }
 ```
@@ -10219,7 +10219,7 @@ mydev_attach(struct softc *sc, int fail_res, int fail_irq, int fail_sys)
 static void
 dev_log(const struct softc *sc, const char *msg, int err)
 {
-	printf([%s] %s (err=%d)\n, sc->name ? sc->name : noname, msg, err);
+	printf("[%s] %s (err=%d)\n", sc->name ? sc->name : "noname", msg, err);
 }
 
 int
@@ -10229,7 +10229,7 @@ main(int argc, char **argv)
 	int fail_res = 0, fail_irq = 0, fail_sys = 0;
 	int rc;
 
-	sc.name = mydev0;
+	sc.name = "mydev0";
 
 	/* Usage: ./a.out [fail_res] [fail_irq] [fail_sys]  (0 or 1) */
 	if (argc >= 2) fail_res = atoi(argv[1]);
@@ -10237,7 +10237,7 @@ main(int argc, char **argv)
 	if (argc >= 4) fail_sys = atoi(argv[3]);
 
 	rc = mydev_attach(&sc, fail_res, fail_irq, fail_sys);
-	printf(attach() returned %d\n, rc);
+	printf("attach() returned %d\n", rc);
 	return rc == E_OK ? 0 : 1;
 }
 ```
@@ -10355,7 +10355,7 @@ release_resources(struct softc *sc)
 static void
 dev_log(const struct softc *sc, const char *msg, int err)
 {
-	printf([%s] %s (err=%d)\n, sc->name ? sc->name : noname, msg, err);
+	printf("[%s] %s (err=%d)\n", sc->name ? sc->name : noname, msg, err);
 }
 
 /*
@@ -10421,7 +10421,7 @@ main(int argc, char **argv)
 		fail_sys = atoi(argv[3]);
 
 	rc = mydev_attach(&sc, fail_res, fail_irq, fail_sys);
-	printf(attach() returned %d\n, rc);
+	printf("attach() returned %d\n", rc);
 	return (rc == E_OK ? 0 : 1);
 }
 ```
@@ -10454,7 +10454,7 @@ static const char driver_name[] = mydev;
 static int
 mydev_print_name(device_t dev)
 {
-	device_printf(dev, %s\n, driver_name);
+	device_printf(dev, "%s\n", driver_name);
 	return (0);
 }
 ```
@@ -10532,8 +10532,8 @@ main(void)
 {
     unsigned char data[] = {1, 2, 3, 4, 5};
 
-    printf(Driver: %s\n, driver_name);
-    printf(Checksum: %d\n, checksum(data, sizeof(data)));
+    printf("Driver: %s\n", driver_name);
+    printf("Checksum: %d\n", checksum(data, sizeof(data)));
 
     return (0);
 }
@@ -10576,8 +10576,8 @@ main(void)
 {
     unsigned char data[] = {1, 2, 3, 4, 5};
 
-    printf(Driver: %s\n, driver_name);
-    printf(Checksum: %d\n, checksum(data, sizeof(data)));
+    printf("Driver: %s\n", driver_name);
+    printf("Checksum: %d\n", checksum(data, sizeof(data)));
 
     return (0);
 }
@@ -10640,7 +10640,7 @@ int i = -1;
 unsigned int u = 1;
 
 if (i < u)   /* false: i promoted to large unsigned */
-	printf(unexpected!\n);
+	printf("unexpected!\n");
 ```
 
 #### Macros with Side Effects
@@ -10689,7 +10689,7 @@ main(void)
 
 	/* Uninitialised variable used */
 	if (count > 0)
-		printf(count is positive\n);
+		printf("count is positive\n");
 
 	/* Buffer overflow and missing terminator */
 	strcpy(name, FreeBSD);
@@ -10700,10 +10700,10 @@ main(void)
 
 	/* Assignment in condition */
 	if (result = 10)
-		printf(result is 10\n);
+		printf("result is 10\n");
 
 	/* Macro with side effects */
-	printf(double of i++ is %d\n, DOUBLE(i++));
+	printf("double of i++ is %d\n", DOUBLE(i++));
 
 	return (0);
 }
@@ -10760,7 +10760,7 @@ main(void)
 
 	/* Safe: count has a defined value before use. */
 	if (count > 0)
-		printf(count is positive\n);
+		printf("count is positive\n");
 
 	/* Safe copy: buffer is large enough for FreeBSD + terminator. */
 	strcpy(name, FreeBSD);
@@ -10774,9 +10774,9 @@ main(void)
 
 	/* Comparison, not assignment. */
 	if (result == 10)
-		printf(result is 10\n);
+		printf("result is 10\n");
 	else
-		printf(result is %d\n, result);
+		printf("result is %d\n", result);
 
 	/*
 	 * Avoid side effects in arguments. Evaluate once, then pass the value.
@@ -10784,7 +10784,7 @@ main(void)
 	 */
 	{
 		int doubled = double_int(i);
-		printf(double of i is %d (i was %d)\n, doubled, i);
+		printf("double of i is %d (i was %d)\n", doubled, i);
 		i++; /* advance i explicitly if needed later */
 	}
 
@@ -10825,14 +10825,14 @@ Whitespace may look unimportant to a beginner, but in a large project like FreeB
 Bad (mixed spaces and tabs, hard to read in diffs):
 
 ```c
-if(error!=0){printf(failed\n);}
+if(error!=0){printf("failed\n");}
 ```
 
 Good (KNF indentation and spacing):
 
 ```c
 if (error != 0) {
-	printf(failed\n);
+	printf("failed\n");
 }
 ```
 
@@ -10844,7 +10844,7 @@ if (error != 0) {
 Bad (brace style inconsistent, all crammed on one line):
 
 ```c
-int main(){printf(hello\n);}
+int main(){printf("hello\n");}
 ```
 
 Good (KNF style, brace on its own line):
@@ -10853,7 +10853,7 @@ Good (KNF style, brace on its own line):
 int
 main(void)
 {
-	printf(hello\n);
+	printf("hello\n");
 }
 ```
 
@@ -10909,7 +10909,7 @@ Take a tiny but messy file and make it KNF-clean. You will practise indentation 
 
 ```c
 #include <stdio.h>
-int main(){int x=0;for(int i=0;i<=10;i++){x=x+i;} if (x= 56){printf(sum is 56\n);}else{printf(sum is %d\n,x);} }
+int main(){int x=0;for(int i=0;i<=10;i++){x=x+i;} if (x= 56){printf("sum is 56\n");}else{printf("sum is %d\n",x);} }
 ```
 
 **Steps**
@@ -11034,16 +11034,16 @@ Train your eye to spot **KNF style** and the small structural habits that make F
        int i, total = 0;
    
        if (arr == NULL) {
-           printf(bad array\n);
+           printf("bad array\n");
            return -1;
        }
        for (i = 0; i <= n; i++) {   /* off-by-one */
            total += arr[i];
        }
        if (total > 1000) {
-           printf(too big!\n);
+           printf("too big!\n");
        } else {
-           printf(ok\n);
+           printf("ok\n");
        }
        return total;
    }
@@ -11082,16 +11082,16 @@ Train your eye to spot **KNF style** and the small structural habits that make F
    
    	err = validate_array(arr, n);
    	if (err != 0) {
-   		printf(invalid input: %d\n, err);
+   		printf("invalid input: %d\n", err);
    		return (err);
    	}
    
    	total = sum_array(arr, n);
    
    	if (total > 1000)
-   		printf(too big!\n);
+   		printf("too big!\n");
    	else
-   		printf(ok\n);
+   		printf("ok\n");
    
    	return (total);
    }
@@ -11161,13 +11161,13 @@ my_attach(struct softc *sc, int enable_extra)
 		if (enable_extra) {
 			/* optional path can fail */
 			if (0) { /* pretend failure sometimes */
-				printf(optional setup failed\n);
+				printf("optional setup failed\n");
 				return -2;
 			}
 		}
 		sc->irq_ok = 1;
 	} else {
-		printf(resource alloc failed\n);
+		printf("resource alloc failed\n");
 		return -1;
 	}
 
@@ -11175,7 +11175,7 @@ my_attach(struct softc *sc, int enable_extra)
 	if (sc->irq_ok) {
 		sc->sysctl_ok = 1;
 	} else {
-		printf(irq setup failed\n);
+		printf("irq setup failed\n");
 		return -3;
 	}
 
@@ -11191,7 +11191,7 @@ main(void)
 	int r;
 
 	r = my_attach(&sc, 1);
-	printf(attach returned %d\n, r);
+	printf("attach returned %d\n", r);
 	return 0;
 }
 ```
@@ -11235,19 +11235,19 @@ You've practised style, naming, indentation, error handling, pitfalls, and refac
 /* this function tries to init device, but its messy */
 int initDev(int D, char *nm){
 int i=0;char buf[5];int ret;
-if(D==0){printf(bad dev\n);return -1;}
+if(D==0){printf("bad dev\n");return -1;}
 strcpy(buf,nm);
 for(i=0;i<=D;i++){ret=DOUB(i);}
 /* check if ret bigger then 10 */
-if(ret=10){printf(ok\n);}
-else{printf(fail\n);}
+if(ret=10){printf("ok\n");}
+else{printf("fail\n");}
 return ret;}
 
 /* main func */
 int main(int argc,char **argv){int dev;char*name;
 dev=atoi(argv[1]);name=argv[2];
 int r=initDev(dev,name);
-printf(r=%d\n,r);}
+printf("r=%d\n",r);}
 ```
 
 #### Tasks
@@ -11507,15 +11507,15 @@ void print_state(uint32_t st);
 void
 print_state(uint32_t st)
 {
-    printf(State: 0x%08x [, st);
+    printf("State: 0x%08x [", st);
     int first = 1;
     if (test_flag(st, DF_ENABLED))  { printf(%sENABLED,  first?:, ); first=0; }
     if (test_flag(st, DF_OPEN))     { printf(%sOPEN,     first?:, ); first=0; }
     if (test_flag(st, DF_ERROR))    { printf(%sERROR,    first?:, ); first=0; }
     if (test_flag(st, DF_TX_BUSY))  { printf(%sTX_BUSY,  first?:, ); first=0; }
     if (test_flag(st, DF_RX_READY)) { printf(%sRX_READY, first?:, ); first=0; }
-    if (first) printf(none); // No flags set
-    printf(]\n);
+    if (first) printf("none"); // No flags set
+    printf("]\n");
 }
 ```
 
@@ -11549,12 +11549,12 @@ main(int argc, char **argv)
     for (int i = 1; i + 1 < argc; i += 2) {
         const char *op = argv[i], *name = argv[i+1];
         uint32_t f = flag_from_name(name);
-        if (f == 0) { printf(Unknown flag '%s'\n, name); return 64; }
+        if (f == 0) { printf("Unknown flag '%s'\n", name); return 64; }
 
         if (!strcmp(op, set))        set_flag(&st, f);
         else if (!strcmp(op, clear)) clear_flag(&st, f);
         else if (!strcmp(op, toggle))toggle_flag(&st, f);
-        else { printf(Unknown op '%s'\n, op); return 64; }
+        else { printf("Unknown op '%s'\n", op); return 64; }
     }
 
     print_state(st);
@@ -11630,7 +11630,7 @@ void
 eb_log(const char *lvl, const char *file, int line, const char *fmt, ...)
 {
     va_list ap;
-    fprintf(stderr, [%s] %s:%d: , lvl, file, line);
+    fprintf(stderr, "[%s] %s:%d: ", lvl, file, line);
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
@@ -11716,7 +11716,7 @@ build_devname(char *dst, size_t dstsz, const char *prefix, int unit)
 {
     if (!dst || !prefix || unit < 0) return DN_EINVAL;
 
-    int n = snprintf(dst, dstsz, %s%d, prefix, unit);
+    int n = snprintf(dst, dstsz, "%s%d", prefix, unit);
 
     /* snprintf returns the number of chars it *wanted* to write.
      * If that does not fit in dst, we report DN_ERANGE.
@@ -11760,11 +11760,11 @@ int main(void) {
 
     for (unsigned i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
         int rc = build_devname(buf, cases[i].cap, cases[i].pref, cases[i].unit);
-        printf(case %u -> rc=%d, buf='%s'\n,
+        printf("case %u -> rc=%d, buf='%s'\n",
                i, rc, (rc==DN_OK)?buf:<invalid>);
     }
 
-    printf(valid? 'ttyu0'=%d, 'u0tty'=%d\n,
+    printf("valid? 'ttyu0'=%d, 'u0tty'=%d\n",
            is_valid_devname(ttyu0), is_valid_devname(u0tty));
     return 0;
 }
@@ -11880,19 +11880,19 @@ static const dev_ops_t *pick(const char *name) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, usage: %s {console|uart}\n, argv[0]);
+        fprintf(stderr, "usage: %s {console|uart}\n", argv[0]);
         return 64;
     }
 
     const dev_ops_t *ops = pick(argv[1]);
-    if (!ops) { fprintf(stderr, unknown ops\n); return 64; }
+    if (!ops) { fprintf(stderr, "unknown ops\n"); return 64; }
 
     /* The call sites do not care which backend we picked. */
-    if (ops->init() != 0) { fprintf(stderr, init failed\n); return 1; }
+    if (ops->init() != 0) { fprintf(stderr, "init failed\n"); return 1; }
     ops->start();
-    printf([%s] status: %s\n, ops->name, ops->status());
+    printf("[%s] status: %s\n", ops->name, ops->status());
     ops->stop();
-    printf([%s] status: %s\n, ops->name, ops->status());
+    printf("[%s] status: %s\n", ops->name, ops->status());
     return 0;
 }
 ```
@@ -12020,22 +12020,22 @@ main(void)
     /* Fill three slots; the fourth remains empty to signal full. */
     for (int i=1;i<=3;i++) {
         int rc = cb_push(&cb, i);
-        printf(push %d -> rc=%d\n, i, rc);
+        printf("push %d -> rc=%d\n", i, rc);
     }
 
-    printf(full? %d (1 means yes)\n, cb_is_full(&cb));
+    printf("full? %d (1 means yes)\n", cb_is_full(&cb));
 
     /* Drain to empty. */
     while (cb_pop(&cb, &v) == 0)
-        printf(pop -> %d\n, v);
+        printf("pop -> %d\n", v);
 
     /* Wrap-around scenario: push, push, pop, then push twice more. */
     cb_push(&cb, 7); cb_push(&cb, 8);
-    cb_pop(&cb, &v); printf(pop -> %d\n, v); // frees one slot
+    cb_pop(&cb, &v); printf("pop -> %d\n", v); // frees one slot
     cb_push(&cb, 9); cb_push(&cb,10);         // should wrap indices
 
     while (cb_pop(&cb, &v) == 0)
-        printf(pop -> %d\n, v);
+        printf("pop -> %d\n", v);
 
     return 0;
 }
