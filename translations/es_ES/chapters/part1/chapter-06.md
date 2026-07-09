@@ -13129,7 +13129,7 @@ Antes de comenzar, asegúrate de tener:
    ```bash
    # If /usr/src is missing, install it:
    % sudo pkg install git
-   % sudo git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git src /usr/src
+   % sudo git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git /usr/src
    ```
    
 3. **Herramientas de build instaladas**:
