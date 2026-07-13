@@ -254,7 +254,7 @@ As we move forward, we'll look at examples from the actual FreeBSD kernel source
 
 To store a complete local copy of the FreeBSD source code, you will need approximately 3.6 GB of free disk space. You can install it using Git by running the following command:
 
-	# sudo git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git /usr/src
+	% sudo git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git /usr/src
 
 This will give you access to all source code, which we'll reference frequently throughout this book.
 
