@@ -790,7 +790,7 @@ A partir de este momento, cada vez que este libro mencione un archivo como `/usr
 Clónalo con Git:
 
 ```console
-% sudo git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git src /usr/src
+% sudo git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git /usr/src
 ```
 
 Esto tardará varios minutos y descargará varios gigabytes. Cuando termine, tendrás disponible el árbol de código fuente completo del kernel.

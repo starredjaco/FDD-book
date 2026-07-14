@@ -254,7 +254,7 @@ A medida que avancemos, veremos ejemplos del código fuente real del kernel de F
 
 Para almacenar una copia local completa del código fuente de FreeBSD, necesitarás aproximadamente 3,6 GB de espacio libre en disco. Puedes instalarlo con Git ejecutando el siguiente comando:
 
-	# git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git src /usr/src
+	% sudo git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git /usr/src
 
 Esto te dará acceso a todo el código fuente, al que haremos referencia con frecuencia a lo largo de este libro.
 

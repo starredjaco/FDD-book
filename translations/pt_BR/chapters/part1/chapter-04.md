@@ -255,7 +255,7 @@ Por enquanto, estamos compilando apenas um arquivo de código-fonte de cada vez.
 
 Para armazenar uma cópia local completa do código-fonte do FreeBSD, você precisará de aproximadamente 3,6 GB de espaço em disco livre. Você pode instalá-lo usando Git executando o seguinte comando:
 
-	# git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git src /usr/src
+	% sudo git clone --branch releng/14.3 --depth 1 https://git.FreeBSD.org/src.git /usr/src
 
 Isso dará a você acesso a todo o código-fonte, que vamos referenciar com frequência ao longo deste livro.
 
